@@ -1,0 +1,19 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ipynb_checkpoints/
+
+# artifacts and data are large / private
+artifacts/models/*
+artifacts/scalers/*
+!artifacts/**/.gitkeep
+!artifacts/config/*.json
+
+data/raw/*
+data/processed/*
+data/replay/*
+!data/**/.gitkeep
+
+.env
+.DS_Store
