@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Component B — Live Stress</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 2rem; }
+    #level { font-size: 3rem; font-weight: 600; }
+    #meta { color: #666; }
+    .band { color: #b45309; }
+  </style>
+</head>
+<body>
+  <h1>Live Stress Inference</h1>
+  <div id="level">--</div>
+  <div id="meta">disconnected</div>
+
+  <script>
+    const ws = new WebSocket(`ws://${location.hostname}:8000/stream`);
+    const levelEl = document.getElementById('level');
+    const metaEl = document.getElementById('meta');
+
+    ws.onopen = () => metaEl.textContent = 'connected';
+    ws.onclose = () => metaEl.textContent = 'disconnected';
+    ws.onmessage = (ev) => {
+      const d = JSON.parse(ev.data);
+      levelEl.textContent = d.label;
+      levelEl.className = d.mode === 'band' ? 'band' : '';
+      metaEl.textContent =
+        `confidence ${d.confidence} | baseline ${d.baseline_maturity}`;
+    };
+  </script>
+</body>
+</html>
