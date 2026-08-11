@@ -17,3 +17,5 @@ data/replay/*
 
 .env
 .DS_Store
+
+.claude/
