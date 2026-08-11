@@ -27,6 +27,12 @@ EWMA_HALFLIVES = {"fast": 60, "medium": 300, "slow": 1800}
 # Donor matching scored 0.475 — worse than the population 0.500.
 POPULATION_RR_MS = 780.0
 
+# Rolling window for the causal short-term variability channels
+# (roll_rmssd_causal / roll_sdnn_causal), and the halflife used by
+# causal_zscore. Both from notebook-newmodel.ipynb cell 2 / cell 3.
+ROLL_WINDOW = 20
+ZSCORE_HALFLIFE = 300
+
 # --- MS-CGCA model inputs ---
 # From notebook-newmodel.ipynb: build_novel_ms_cgca(window=WINDOW, nch=7,
 # ncirc=7, ncls=4). The deep network takes two inputs, not one.
