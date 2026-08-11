@@ -49,6 +49,7 @@ Clients connect to `ws://<laptop-ip>:8000/stream`.
 
 ## Model in production
 
-Ships the **population CNN alone**, not the three-way ensemble.
-The ensemble's advantage was not statistically significant
-(dF1 = 0.023, p = 0.5245) and costs 3x the inference.
+Ships the **two-way ensemble** (XGBoost + population CNN), macro F1 0.682,
+per `docs/ARCHITECTURE.md` — not the three-way ensemble, whose reported
+gain did not reproduce across repeated runs. See `docs/ARCHITECTURE.md`
+for the full sourcing.
