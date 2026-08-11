@@ -76,9 +76,10 @@ async def ingest(ws: WebSocket):
                 continue                      # beats detected, nothing to run
 
             for beat, offset in zip(rr, ts):
-                out = engine.push(beat, batch.temperature,
-                                  ts=batch.timestamp + float(offset))
-                if out is not None:
+                # buffering is per beat; inference only at step boundaries
+                if engine.observe(beat, batch.temperature,
+                                  ts=batch.timestamp + float(offset)):
+                    out = engine.predict()
                     await broadcast(StressPrediction(**out).model_dump())
     except WebSocketDisconnect:
         pass

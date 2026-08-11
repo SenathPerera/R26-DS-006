@@ -86,21 +86,34 @@ class _Const:
 
 
 def stream_windows(rr, temp, ts, **kwargs):
-    """Replay beats one at a time; yield (end_index, engine, output).
+    """Replay beats one at a time; yield (end_index, engine) per boundary.
 
-    `push` always runs a prediction, so the feature-comparison tests
-    still need *a* model. They get constant stubs by default: the
-    features under test are computed before the model is consulted, so
-    the stub cannot mask a divergence.
+    No model is configured: `observe` buffers without inference, so the
+    feature comparisons exercise the real ingestion path with nothing
+    stubbed at all.
     """
-    kwargs.setdefault("model", _Const([0.25, 0.25, 0.25, 0.25]))
-    kwargs.setdefault("xgb_model", _Const([0.25, 0.25, 0.25, 0.25]))
-    kwargs.setdefault("weights", (0.30, 0.35, 0.35))
     si = StreamingInference(**kwargs)
     for i, (beat, t, stamp) in enumerate(zip(rr, temp, ts)):
-        out = si.push(beat, t, ts=stamp)
-        if out is not None:
-            yield i + 1, si, out
+        if si.observe(beat, t, ts=stamp):
+            yield i + 1, si
+
+
+def test_observe_buffers_without_inference():
+    """Beats can be ingested with no model loaded at all.
+
+    This is what the warmup/calibration phase needs: accumulate a
+    buffer while there is deliberately nothing to predict with. It also
+    pins the cadence — buffering is per beat, inference is per step.
+    """
+    rr, temp, ts = load_segment()
+    si = StreamingInference()                    # no model, no weights
+    boundaries = [i + 1 for i, (b, t, s) in enumerate(zip(rr, temp, ts))
+                  if si.observe(b, t, ts=s)]
+
+    assert boundaries == list(range(WINDOW_BEATS, len(rr) + 1, STEP_BEATS))
+    assert si.window_full
+    with pytest.raises(RuntimeError):            # still refuses to guess
+        StreamingInference().predict()
 
 
 def test_streaming_channels_match_batch():
@@ -109,7 +122,7 @@ def test_streaming_channels_match_batch():
     batch, _, _ = batch_channels(rr, temp)
 
     compared = 0
-    for e, si, _ in stream_windows(rr, temp, ts):
+    for e, si in stream_windows(rr, temp, ts):
         got = si.channels.sequence()
         want = batch[e - WINDOW_BEATS:e]
         assert np.allclose(got, want, atol=ATOL), \
@@ -124,7 +137,7 @@ def test_streaming_xgb_vector_matches_batch():
     rr, temp, ts = load_segment()
     _, base, res_med = batch_channels(rr, temp)
 
-    for e, si, _ in stream_windows(rr, temp, ts):
+    for e, si in stream_windows(rr, temp, ts):
         got = si._xgb_vector()
         want = batch_xgb_vector(rr, base, res_med, e - WINDOW_BEATS, e, ts)
         assert got.shape == (XGB_FEATURE_DIM,)
@@ -143,7 +156,7 @@ def test_cold_start_renormalises_to_half_and_half():
     p_cnn = [0.10, 0.20, 0.30, 0.40]
     p_xgb = [0.40, 0.30, 0.20, 0.10]
 
-    for _, si, _ in stream_windows(
+    for _, si in stream_windows(
             rr, temp, ts,
             model=_Const(p_cnn), xgb_model=_Const(p_xgb),
             ft_model=None, scaler=None, weights=(0.30, 0.35, 0.35)):
@@ -162,7 +175,7 @@ def test_personalised_head_uses_the_full_triple():
     p_ft = [0.25, 0.25, 0.25, 0.25]
     w_ft, w_xgb, w_cnn = 0.30, 0.35, 0.35
 
-    for _, si, _ in stream_windows(
+    for _, si in stream_windows(
             rr, temp, ts,
             model=_Const(p_cnn), xgb_model=_Const(p_xgb),
             ft_model=_Const(p_ft), scaler=None,
@@ -206,9 +219,9 @@ def test_streaming_probabilities_match_batch():
     rr, temp, ts = load_segment()
     batch, base, res_med = batch_channels(rr, temp)
 
-    for e, si, _ in stream_windows(rr, temp, ts, model=model, xgb_model=xgb,
-                                   ft_model=None, scaler=scaler,
-                                   weights=weights):
+    for e, si in stream_windows(rr, temp, ts, model=model, xgb_model=xgb,
+                                ft_model=None, scaler=scaler,
+                                weights=weights):
         s = e - WINDOW_BEATS
         mid = min(s + WINDOW_BEATS // 2, len(ts) - 1)
         seq = batch[s:e].astype(np.float32)[None, ...]
@@ -254,7 +267,7 @@ def test_wesad_s02_segment_matches_batch():
     ts = 1754985600.0 + np.cumsum(rr) / 1000.0
 
     batch, _, _ = batch_channels(rr, temp)
-    for e, si, _ in stream_windows(rr, temp, ts):
+    for e, si in stream_windows(rr, temp, ts):
         assert np.allclose(si.channels.sequence(),
                            batch[e - WINDOW_BEATS:e], atol=ATOL), \
             f"channels diverged at beat {e} on real data"

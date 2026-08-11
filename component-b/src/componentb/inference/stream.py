@@ -46,9 +46,18 @@ class StreamingInference:
         self.channels = CausalChannelState(window=window)
         self._since_last = 0
 
-    def push(self, rr_ms, temp_c=None, ts=None):
-        """Feed one beat. Returns a prediction dict, or None if the
-        buffer is not yet full or the step interval has not elapsed."""
+    def observe(self, rr_ms, temp_c=None, ts=None):
+        """Buffer one beat. Runs NO inference and needs no model.
+
+        Beat arrival and inference have different cadences: beats land
+        as the wearable sends them, predictions are due once per
+        STEP_BEATS over a full window. Keeping them separate also lets
+        a caller accumulate a calibration buffer during warmup, when
+        there is deliberately nothing to predict with yet.
+
+        Returns True when this beat completes a step boundary on a full
+        window — i.e. when `predict()` is due.
+        """
         self.rr_buffer.append(float(rr_ms))
         self.temp_buffer.append(float(temp_c) if temp_c is not None else np.nan)
         self.ts_buffer.append(float(ts) if ts is not None else time.time())
@@ -56,13 +65,34 @@ class StreamingInference:
         self.channels.update(rr_ms, temp_c)
         self._since_last += 1
 
-        if len(self.rr_buffer) < self.window:
-            return None
-        if self._since_last < self.step:
-            return None
-
+        if not self.at_step_boundary:
+            return False
         self._since_last = 0
+        return True
+
+    @property
+    def window_full(self):
+        return len(self.rr_buffer) >= self.window
+
+    @property
+    def at_step_boundary(self):
+        return self.window_full and self._since_last >= self.step
+
+    def predict(self):
+        """Run the ensemble on the currently buffered window."""
+        if not self.window_full:
+            raise RuntimeError(
+                f"window not full: {len(self.rr_buffer)}/{self.window} beats"
+            )
         return self._predict()
+
+    def push(self, rr_ms, temp_c=None, ts=None):
+        """Buffer a beat and predict if it completes a step boundary.
+
+        Convenience wrapper over `observe` + `predict` for callers that
+        want one call per beat; the two are separable on purpose.
+        """
+        return self.predict() if self.observe(rr_ms, temp_c, ts) else None
 
     def _window_timestamp(self):
         """Circadian features use the window MIDPOINT, not its edge.
