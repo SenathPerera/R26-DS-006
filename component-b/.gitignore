@@ -19,3 +19,4 @@ data/replay/*
 .DS_Store
 
 .claude/
+CLAUDE.md
