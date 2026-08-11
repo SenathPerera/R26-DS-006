@@ -26,6 +26,9 @@ class LatestPrediction:
     def get(self) -> Optional[dict]:
         return self._value
 
+    def clear(self) -> None:
+        self._value = None
+
     @property
     def is_empty(self) -> bool:
         return self._value is None
