@@ -24,3 +24,5 @@ class StressPrediction(BaseModel):
     confidence: float
     deviation: dict[str, float]
     baseline_maturity: str
+    # bands only: whether the two merged levels are neighbours
+    adjacent: Optional[bool] = None

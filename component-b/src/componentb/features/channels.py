@@ -93,6 +93,9 @@ class CausalChannelState:
 
         self._rn_hist = deque(maxlen=roll)
         self._channels = [deque(maxlen=window) for _ in range(SEQ_CHANNELS)]
+        # kept for the flat XGBoost vector, which uses the residual series
+        # and the current fast/slow levels rather than the z-scored channels
+        self._res_med = deque(maxlen=window)
         self._last_temp = None
         self.n_seen = 0
 
@@ -119,7 +122,9 @@ class CausalChannelState:
         sd = float(np.std(seg)) if len(seg) > 1 else 0.0
 
         hr = 60000.0 / (rr + 1e-8)
-        rrn = self._z_res.update(rr - base["medium"])
+        res_med = rr - base["medium"]
+        self._res_med.append(float(res_med))
+        rrn = self._z_res.update(res_med)
         tn = self._z_temp.update(temp)
         trn = self._z_tres.update(temp - self._temp_ewma.update(temp))
 
@@ -138,3 +143,13 @@ class CausalChannelState:
         return np.stack(
             [np.array(b, dtype=np.float32) for b in self._channels], axis=-1
         )
+
+    def residual_window(self):
+        """The (RR - medium EWMA) window feeding `resid_features`."""
+        if not self.ready:
+            return None
+        return np.array(self._res_med, dtype=float)
+
+    def expected(self):
+        """Current EWMA level at each timescale (`base` in the notebook)."""
+        return {k: e.state for k, e in self._ewma.items()}
