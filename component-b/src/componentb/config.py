@@ -27,6 +27,16 @@ EWMA_HALFLIVES = {"fast": 60, "medium": 300, "slow": 1800}
 # Donor matching scored 0.475 — worse than the population 0.500.
 POPULATION_RR_MS = 780.0
 
+# --- MS-CGCA model inputs ---
+# From notebook-newmodel.ipynb: build_novel_ms_cgca(window=WINDOW, nch=7,
+# ncirc=7, ncls=4). The deep network takes two inputs, not one.
+SEQ_CHANNELS = 7            # rn, rm, sd, hr, rrn, tn, trn — order matters
+CIRCADIAN_DIM = 7           # circ7(ts)
+# XGBoost sees a flat vector, assembled in the same cell as:
+# hrv_features (13) + resid_features (5) + [base_fast, base_slow] (2)
+# + circ_features (5)
+XGB_FEATURE_DIM = 25
+
 # --- output ---
 CLASS_NAMES = ["relaxed", "mild", "moderate", "high"]
 N_CLASSES = 4
