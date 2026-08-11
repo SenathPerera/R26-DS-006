@@ -5,7 +5,10 @@ requires retraining — they are not free parameters at inference time.
 """
 
 # --- windowing ---
-WINDOW_BEATS = 120          # what the shipped model was trained on
+# WINDOW/STEP as trained: notebooks/05_deployment/notebook-newmodel.ipynb
+# cell 2 ("WINDOW = 60", "STEP = 5"). The 120-beat window belongs to the
+# superseded pipeline in notebook-causalretrain.ipynb.
+WINDOW_BEATS = 60           # ~45 s of beats at rest
 STEP_BEATS = 5              # -> a prediction roughly every 4 s
 
 # --- signal ---
