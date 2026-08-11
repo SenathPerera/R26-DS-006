@@ -31,9 +31,14 @@ Across repeated executions under nested outer-subject evaluation:
 - **Macro F1:** 0.6708 – 0.6825 (mean 0.6766)
 - **Quadratic Kappa (κ):** 0.8386 – 0.8497
 - **Overall Accuracy:** 91.69% – 91.93%
-- **Evaluation Windows:** 9,650 post-calibration windows
-  (`artifacts/config/fold_store.json`, 15 folds; matches
-  `total_eval_windows` in `model_config.json`)
+- **Evaluation Windows:** 9,650 post-calibration windows. Cell 3 slices
+  12,026 windows in total across the 15 subjects; `strat_calib` then
+  holds back a ~20% stratified slice of each held-out subject as
+  simulated user calibration, leaving ~80% — 9,650 summed across the
+  outer folds — as `eval_local`. All reported metrics are computed on
+  `eval_local` only, so 9,650 is the correct denominator.
+  (`artifacts/config/fold_store.json`; matches `total_eval_windows` in
+  `model_config.json`.)
 
 ### Empirical Model Comparison (Deployable Causal Pipelines)
 
@@ -68,8 +73,22 @@ unbiased estimate remains the nested **macro F1 = 0.6807**, reproduced
 from the fold store. Each member is load-bearing: alone, XGBoost scores
 0.6519, the population MS-CGCA 0.6028, and the fine-tuned head 0.6631.
 
-When a user has no personalised head yet, the blend renormalises over
-the two population members instead of dropping the `w_ft` mass.
+### Model Lifecycle: Two Static Artifacts, One Runtime Head
+
+`xgb_population.json` and `mscgca_population.keras` ship as static
+artifacts for every user. The fine-tuned head is **not** a shipped file —
+it is per-user calibration state created at runtime:
+
+| Phase | Head | Weights |
+| --- | --- | --- |
+| Cold start (no calibration yet) | none | 2-way, renormalised to `w_xgb = 0.50`, `w_cnn = 0.50` |
+| Post-calibration (~2 min warmup) | `mscgca_finetuned_<user_id>.keras` | 3-way, `w_ft = 0.30`, `w_xgb = 0.35`, `w_cnn = 0.35` |
+
+After the warmup the backend fine-tunes the top dense layers of the
+population network on that user's calibration buffer and saves the
+session model. `(0.35, 0.35)` renormalised over 0.70 is exactly
+0.50/0.50, so cold start needs no separate weight table — both rows are
+asserted in `tests/test_parity.py`.
 
 ### Key Architectural Innovations in the MS-CGCA Deep Network
 
