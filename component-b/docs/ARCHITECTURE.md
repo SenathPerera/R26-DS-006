@@ -31,7 +31,14 @@ Across repeated executions under nested outer-subject evaluation:
 - **Macro F1:** 0.6708 – 0.6825 (mean 0.6766)
 - **Quadratic Kappa (κ):** 0.8386 – 0.8497
 - **Overall Accuracy:** 91.69% – 91.93%
-- **Evaluation Windows:** 12,026 post-calibration windows
+- **Evaluation Windows:** 9,650 post-calibration windows. Cell 3 slices
+  12,026 windows in total across the 15 subjects; `strat_calib` then
+  holds back a ~20% stratified slice of each held-out subject as
+  simulated user calibration, leaving ~80% — 9,650 summed across the
+  outer folds — as `eval_local`. All reported metrics are computed on
+  `eval_local` only, so 9,650 is the correct denominator.
+  (`artifacts/config/fold_store.json`; matches `total_eval_windows` in
+  `model_config.json`.)
 
 ### Empirical Model Comparison (Deployable Causal Pipelines)
 
@@ -43,6 +50,45 @@ Across repeated executions under nested outer-subject evaluation:
 | **Shipped MS-CGCA 3-Way Ensemble** | **60 beats (~45s)** | **Yes (100% Causal)**    | **0.6708 – 0.6825** | **0.8386 – 0.8497** | **91.69% – 91.93%**  | `notebook-newmodel.ipynb` (Cell 7) |
 
 > **Reference Offline Score:** The non-causal 120-beat offline benchmark achieved Macro F1 = 0.6822 and κ = 0.8598 under nested outer-subject evaluation. The deployable 60-beat MS-CGCA causal pipeline (**F1 = 0.6708 – 0.6825, κ = 0.8386 – 0.8497**) completely recovers performance while halving live inference latency and eliminating future lookahead.
+
+### Deployed Blend Weights
+
+Cell 7 selects `w_star` per outer fold, so the notebook yields fifteen
+triples rather than one deployable set. The shipped triple is
+`(w_ft, w_xgb, w_cnn) = (0.30, 0.35, 0.35)`, exported in
+`artifacts/config/model_config.json` and loaded by
+`models/loader.load_ensemble_weights()` — inference refuses to run
+without it rather than falling back to a default.
+
+Two independent justifications, both re-derived from
+`artifacts/config/fold_store.json` (15 folds, 9,650 windows):
+
+| Selection basis | Result |
+| --- | --- |
+| Mode of the outer-fold grid search | `(0.30, 0.35, 0.35)` in **14 of 15** folds |
+| Pooled sweep of the full grid | best macro F1 **0.6875**, κ **0.8614**, accuracy **92.21%**, severe errors **2.04%** — first on every metric |
+
+The pooled figures select and evaluate on the same windows, so the
+unbiased estimate remains the nested **macro F1 = 0.6807**, reproduced
+from the fold store. Each member is load-bearing: alone, XGBoost scores
+0.6519, the population MS-CGCA 0.6028, and the fine-tuned head 0.6631.
+
+### Model Lifecycle: Two Static Artifacts, One Runtime Head
+
+`xgb_population.json` and `mscgca_population.keras` ship as static
+artifacts for every user. The fine-tuned head is **not** a shipped file —
+it is per-user calibration state created at runtime:
+
+| Phase | Head | Weights |
+| --- | --- | --- |
+| Cold start (no calibration yet) | none | 2-way, renormalised to `w_xgb = 0.50`, `w_cnn = 0.50` |
+| Post-calibration (~2 min warmup) | `mscgca_finetuned_<user_id>.keras` | 3-way, `w_ft = 0.30`, `w_xgb = 0.35`, `w_cnn = 0.35` |
+
+After the warmup the backend fine-tunes the top dense layers of the
+population network on that user's calibration buffer and saves the
+session model. `(0.35, 0.35)` renormalised over 0.70 is exactly
+0.50/0.50, so cold start needs no separate weight table — both rows are
+asserted in `tests/test_parity.py`.
 
 ### Key Architectural Innovations in the MS-CGCA Deep Network
 
@@ -95,5 +141,5 @@ When the classification margin falls below the confidence threshold, the backend
 
 ## 6. Resolved & Open Items
 
-- **RESOLVED — Causal Retraining & 60-Beat Windowing:** Fully executed in `notebook-newmodel.ipynb`. Halved live inference latency to 60 beats (~45 seconds) and recovered causal ensemble Macro F1 to **0.6708 – 0.6825** (κ = 0.8386 – 0.8497, Accuracy = 91.69% – 91.93%) across 12,026 post-calibration evaluation windows.
+- **RESOLVED — Causal Retraining & 60-Beat Windowing:** Fully executed in `notebook-newmodel.ipynb`. Halved live inference latency to 60 beats (~45 seconds) and recovered causal ensemble Macro F1 to **0.6708 – 0.6825** (κ = 0.8386 – 0.8497, Accuracy = 91.69% – 91.93%) across 9,650 post-calibration evaluation windows.
 - **OPEN — Zero-Shot Sensor Domain Transfer:** Direct cross-dataset transfer from chest ECG (WESAD) to wrist PPG (Empatica) results in performance collapse (F1 = 0.135, κ = -0.104) due to sensor artifacts and pulse transit variability. Unsupervised Domain Adaptation (MMD / CORAL feature alignment) remains an open boundary for future sensor-agnostic deployment.

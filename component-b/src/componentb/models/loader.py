@@ -73,3 +73,29 @@ def load_config(name="model_config"):
     path = ARTIFACTS / "config" / f"{name}.json"
     with open(path) as f:
         return json.load(f)
+
+
+def load_ensemble_weights(name="model_config"):
+    """Blend weights for (p_ft, p_xgb, p_cnn), summing to 1.
+
+    These are NOT derivable from the notebook as it stands: cell 7 picks
+    `w_star` per outer fold by nested CV, so there are 15 triples, not
+    one. Whichever triple is deployed is a decision that has to be made
+    and recorded — this function refuses to guess.
+    """
+    cfg = load_config(name)
+    try:
+        w = cfg["ensemble_weights"]
+        weights = (float(w["w_ft"]), float(w["w_xgb"]), float(w["w_cnn"]))
+    except (KeyError, TypeError) as exc:
+        raise KeyError(
+            "model_config.json has no usable 'ensemble_weights' "
+            "{w_ft, w_xgb, w_cnn}. Export the chosen triple from "
+            "notebook-newmodel.ipynb cell 7 — do not substitute defaults, "
+            "the blend is what produces the reported F1."
+        ) from exc
+
+    total = sum(weights)
+    if abs(total - 1.0) > 1e-6:
+        raise ValueError(f"ensemble weights must sum to 1, got {total}")
+    return weights

@@ -4,16 +4,14 @@ The ONLY place inference runs. Mobile relays raw PPG; Quest and the
 web dashboard subscribe to predictions.
 """
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
-
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from server.schemas.messages import StressPrediction
+from componentb.signal.ppg import clean_rr, ppg_to_rr
+
+from server.engine import new_stream, unavailable_reason
+from server.schemas.messages import PPGBatch, StressPrediction
 from server.state import latest
 
 app = FastAPI(title="Component B — Stress Inference")
@@ -54,14 +52,35 @@ async def stress_latest():
 
 @app.websocket("/ingest")
 async def ingest(ws: WebSocket):
-    """Mobile app sends raw PPG batches here."""
+    """Mobile app sends raw PPG batches here.
+
+    One inference engine per connection: the causal state (EWMA levels,
+    z-score statistics, rolling buffers) belongs to one wearer's session
+    and must not be shared between them.
+    """
     await ws.accept()
+    engine = new_stream()
+    if engine is None:
+        await ws.send_json({"status": "model_unavailable",
+                            "detail": unavailable_reason()})
+
     try:
         while True:
-            msg = await ws.receive_json()
-            # TODO: ppg_to_rr -> clean_rr -> StreamingInference.push
-            # then broadcast(result)
-            _ = msg
+            batch = PPGBatch(**await ws.receive_json())
+
+            rr, ts, _ = ppg_to_rr(batch.ppg, batch.sample_rate)
+            if rr is None:
+                continue                      # too few beats in this batch
+            rr, ts = clean_rr(rr, ts)
+            if engine is None:
+                continue                      # beats detected, nothing to run
+
+            for beat, offset in zip(rr, ts):
+                # buffering is per beat; inference only at step boundaries
+                if engine.observe(beat, batch.temperature,
+                                  ts=batch.timestamp + float(offset)):
+                    out = engine.predict()
+                    await broadcast(StressPrediction(**out).model_dump())
     except WebSocketDisconnect:
         pass
 
