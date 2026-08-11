@@ -1,6 +1,7 @@
 """Feature extraction.
 
-The exact functions used to train the shipped model. Feature ORDER
+Verbatim from notebooks/01_pipeline/notebook-improvements.ipynb cell 6 —
+the exact functions used to train the shipped model. Feature ORDER
 matters and must not change — the scaler and model depend on it.
 """
 

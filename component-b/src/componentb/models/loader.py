@@ -24,6 +24,20 @@ def load_model(name="cnn_population"):
     return tf.keras.models.load_model(path, compile=False)
 
 
+def load_xgb_model(name="xgb_population"):
+    """Load the shipped XGBoost model."""
+    from xgboost import XGBClassifier
+    path = ARTIFACTS / "models" / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Model not found: {path}\n"
+            "Export it from your training notebook first."
+        )
+    model = XGBClassifier()
+    model.load_model(path)
+    return model
+
+
 def load_scaler(name="feature_scaler"):
     path = ARTIFACTS / "scalers" / f"{name}.pkl"
     if not path.exists():

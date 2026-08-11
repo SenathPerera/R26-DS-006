@@ -17,3 +17,6 @@ data/replay/*
 
 .env
 .DS_Store
+
+.claude/
+CLAUDE.md
