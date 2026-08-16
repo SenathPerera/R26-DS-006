@@ -1,0 +1,28 @@
+# data & models never go in git — they live on Kaggle / external drive / HF Hub
+data/
+models/
+*.npz
+*.pt
+*.pth
+*.wav
+*.mp3
+*.mp4
+*.flac
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+
+# notebooks
+.ipynb_checkpoints/
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+artifacts/models/

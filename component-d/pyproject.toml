@@ -1,0 +1,5 @@
+# Minimal project metadata + test config for Component D.
+# The package lives under src/ (src-layout), imported as `componentd`.
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,436 @@
+"""Component D API server - the single entry point for every client.
+
+The mobile app / VR headset / teammates' components only ever talk to
+these endpoints. All five layers are wired here. Missing model
+checkpoints disable their endpoint with a clean 503 (never a crash),
+so the system runs even before training is complete.
+
+Run (you will do this manually):
+  .venv/bin/uvicorn server.main:app --host 0.0.0.0 --port 8010
+
+Port 8010, not 8000: 8000 is a common clash point with other local dev
+servers, and on macOS a process bound specifically to 127.0.0.1 silently
+wins loopback traffic over a 0.0.0.0 bind - so a clash there fails
+invisibly (a different app answers) instead of a loud "port in use"
+error. This exact thing happened during development of this component.
+"""
+
+import io
+import math
+import numbers
+import os
+import uuid
+from contextlib import asynccontextmanager
+from pathlib import Path
+
+import librosa
+import numpy as np
+import soundfile as sf
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+
+# This file lives at <repo>/server/main.py; put <repo>/src on the path so the
+# `componentd` package imports regardless of the cwd uvicorn is launched from.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from componentd.config import MODELS_DIR, SAMPLE_RATE, STRESS_LEVELS
+from componentd.layer1_quality import check_ambient, check_speech
+from componentd.layer3_compare import compare_scores
+from componentd.layer4_crossmodal import (MockHRVProvider, StoredHRVProvider,
+                                   normalize_level, validate_crossmodal,
+                                   validate_crossmodal_levels)
+from componentd.layer5_anomaly import SessionAnomalyDetector
+from componentd.personal_baseline import PersonalBaseline
+from componentd.companion import HealthCompanion
+
+# Trained checkpoints (produced by the training scripts). The fusion model
+# defaults to fusion_meld_baseline: under valence-primary scoring it gives the
+# best real-voice separation (LOO 92%, Sinhala 91% - see docs/ABLATION_STUDY.md),
+# because it trained on natural (MELD) speech so its valence generalises. Override
+# with FUSION_CKPT=<name> (checkpoint stem in models/) for experiments.
+FUSION_CKPT = MODELS_DIR / f"{os.environ.get('FUSION_CKPT', 'fusion_meld_baseline')}.pt"
+ANOMALY_CKPT = MODELS_DIR / "anomaly_v2.pt"
+
+# Populated at startup if the checkpoints exist.
+scorer = None
+anomaly_detector = None
+
+# HRV pushed by Component B lives here; the mock serves solo demos.
+hrv_store = StoredHRVProvider()
+hrv_mock = MockHRVProvider()
+
+# Per-user stress history for relative ("vs your own normal") reporting.
+personal_baseline = PersonalBaseline()
+
+# The AI voice health companion (LLM dialogue stage). Stress-aware: the app
+# injects Component D's voice stress and Component B's HRV level as a private
+# note (no tool-calling - small local models are unreliable at it).
+companion = HealthCompanion(
+    get_voice=lambda sid, phase: session_scores.get(sid, {}).get(phase),
+    get_body=lambda sid, phase: hrv_store.get_level(sid, phase),
+)
+
+# Per-session Layer 2 results, so /compare and /full-session can look back.
+# In-memory for now; a database replaces this in production.
+session_scores: dict[str, dict] = {}
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Load whatever trained models exist, once, at server start."""
+    global scorer, anomaly_detector
+    if FUSION_CKPT.exists():
+        from componentd.layer2_inference import StressScorer
+        scorer = StressScorer(str(FUSION_CKPT))
+        print(f"loaded fusion model: {FUSION_CKPT}")
+    else:
+        print(f"fusion checkpoint missing ({FUSION_CKPT}) - /infer disabled")
+    if ANOMALY_CKPT.exists():
+        anomaly_detector = SessionAnomalyDetector(str(ANOMALY_CKPT))
+        print(f"loaded anomaly model: {ANOMALY_CKPT}")
+    else:
+        print(f"anomaly checkpoint missing ({ANOMALY_CKPT}) - "
+              f"/anomaly-check disabled")
+    yield
+
+
+app = FastAPI(title="CogniVoice Component D", version="2.0",
+              lifespan=lifespan)
+
+# The frontend (Vite dev server) and this API run on different ports,
+# which browsers treat as different origins - without this, every fetch
+# from the UI fails silently with a CORS error, even though curl/Postman
+# work fine (they don't enforce CORS). Wide open here because this is a
+# research demo on localhost; a real deployment should replace "*" with
+# the mobile app's / hosted demo site's exact origin(s).
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+async def read_audio(file: UploadFile) -> np.ndarray:
+    """Decode any uploaded audio to 16 kHz mono float32.
+
+    Two-stage decode: soundfile is fast but only handles WAV/FLAC/OGG,
+    so compressed uploads (MP3, M4A, WebM/Opus - which the UI offers and
+    which browser MediaRecorder often produces) fall back to librosa,
+    which decodes them via ffmpeg. Without this fallback every non-WAV
+    upload failed with 'could not decode audio file'.
+    """
+    raw = await file.read()
+    # fast path: soundfile straight from memory (WAV/FLAC/OGG)
+    try:
+        audio, sr = sf.read(io.BytesIO(raw), dtype="float32")
+        if audio.ndim > 1:
+            audio = audio.mean(axis=1)      # stereo -> mono
+        if sr != SAMPLE_RATE:
+            audio = librosa.resample(audio, orig_sr=sr, target_sr=SAMPLE_RATE)
+        return audio
+    except Exception:
+        pass  # not a soundfile-supported format; try the ffmpeg path
+
+    # fallback: librosa via ffmpeg, from a temp file (handles mp3/m4a/webm)
+    import tempfile
+    suffix = Path(file.filename or "audio").suffix or ".bin"
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+            tmp.write(raw)
+            tmp.flush()
+            audio, _ = librosa.load(tmp.name, sr=SAMPLE_RATE, mono=True)
+        return audio.astype(np.float32)
+    except Exception as e:
+        raise HTTPException(
+            400, f"could not decode audio file ({file.filename}): {e}")
+
+
+MIN_AUDIO_SAMPLES = int(SAMPLE_RATE * 0.15)   # ~150 ms; shorter = empty/failed capture
+
+
+def _require_nonempty(audio) -> None:
+    """A failed/empty recording decodes to ~0 samples, whose metrics come out
+    NaN (mean of nothing) and then crash JSON serialisation with a 500 the
+    browser only sees as 'Failed to fetch'. Reject it cleanly instead."""
+    if audio is None or getattr(audio, "size", 0) < MIN_AUDIO_SAMPLES:
+        raise HTTPException(400, detail={"error": "no_audio",
+            "reasons": ["No audio was captured — please record again, a little closer to the mic."]})
+
+
+def _json_safe(obj):
+    """Recursively replace non-finite floats (NaN/inf) with 0.0 so a degenerate
+    metric can never 500 the endpoint. Also coerces numpy scalars to native."""
+    if isinstance(obj, bool):
+        return obj
+    if isinstance(obj, numbers.Integral):
+        return int(obj)
+    if isinstance(obj, numbers.Real):
+        f = float(obj)
+        return f if math.isfinite(f) else 0.0
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+# ------------------------------------------------------------ health
+@app.get("/health")
+def health():
+    return {
+        "status": "ok",
+        "layers": {
+            "layer1_quality": True,
+            "layer2_fusion": scorer is not None,
+            "layer3_compare": True,
+            "layer4_crossmodal": True,
+            "layer5_anomaly": anomaly_detector is not None,
+        },
+    }
+
+
+# ----------------------------------------------------------- layer 1
+@app.post("/ambient-check")
+async def ambient_check(file: UploadFile = File(...)):
+    """The 'stay silent' step: room must be quiet AND free of speech
+    (checked via VAD, not the loudness-comparison heuristic /infer uses -
+    see src/layer1_quality.py for why these must be different checks)."""
+    audio = await read_audio(file)
+    _require_nonempty(audio)
+    return _json_safe(check_ambient(audio))
+
+
+# ----------------------------------------------------------- layer 2
+@app.post("/infer")
+async def infer(file: UploadFile = File(...),
+                session_id: str | None = None, phase: str = "pre"):
+    """Audio -> stress score. Layer 1 gates the input first."""
+    if scorer is None:
+        raise HTTPException(503, "fusion model not trained yet")
+    audio = await read_audio(file)
+    _require_nonempty(audio)
+
+    quality = check_speech(audio)
+    if not quality["ok"]:
+        # 422 tells the app: recording unusable, ask the user to retry.
+        raise HTTPException(422, detail={"error": "audio rejected by layer 1",
+                                         "reasons": quality["reasons"]})
+
+    result = scorer.score_array(audio)
+    result["quality"] = quality["metrics"]
+    result = _json_safe(result)          # sanitise BEFORE storing so downstream layers stay finite
+
+    # Remember this score so /compare and /full-session can use it.
+    sid = session_id or str(uuid.uuid4())
+    session_scores.setdefault(sid, {})[phase] = result
+    result["session_id"] = sid
+    return result
+
+
+# ----------------------------------------------------------- layer 3
+class CompareRequest(BaseModel):
+    session_id: str
+
+
+@app.post("/compare")
+def compare(req: CompareRequest):
+    stored = session_scores.get(req.session_id, {})
+    if "pre" not in stored or "post" not in stored:
+        raise HTTPException(404, "need both pre and post /infer results "
+                                 "for this session")
+    return compare_scores(stored["pre"], stored["post"])
+
+
+# ----------------------------------------------------------- layer 4
+class SessionUpdate(BaseModel):
+    """The contract with Component B: they POST this after each phase.
+
+    Preferred: B sends its OWN prediction from the WESAD model, mirroring its
+    `format_output`:
+      - a POINT level in `stress_level` (its classes are relaxed/mild/moderate/
+        high; "relaxed" is normalised to Component D's "no"), or
+      - when uncertain (top-2 classes close), a two-element `band`, e.g.
+        ["mild","moderate"] - D takes the higher level (conservative for a
+        wellness app) and marks confidence LOW so Layer 4 defers rather than
+        asserting a mismatch.
+    `confidence` (0-1) is B's own certainty. Raw `rmssd` is also accepted (demo,
+    or when only HRV is available)."""
+    session_id: str
+    phase: str                          # "pre" | "post"
+    stress_level: str | None = None     # relaxed/no/mild/moderate/high
+    band: list[str] | None = None       # uncertain: [low_level, high_level]
+    confidence: float | None = None     # B's own confidence 0-1
+    rmssd: float | None = None          # milliseconds (optional)
+
+
+@app.post("/session-update")
+def session_update(update: SessionUpdate):
+    if update.phase not in ("pre", "post"):
+        raise HTTPException(400, "phase must be 'pre' or 'post'")
+
+    if update.band is not None:
+        # Uncertain reading: take the HIGHER level (don't under-call stress in a
+        # wellness context) and force LOW confidence so Layer 4 does not assert a
+        # mismatch on it. Empty/oversized bands are rejected.
+        levels = [normalize_level(x) for x in update.band]
+        if not levels or any(lv not in STRESS_LEVELS for lv in levels):
+            raise HTTPException(400, f"band levels must be within {STRESS_LEVELS}")
+        higher = max(levels, key=STRESS_LEVELS.index)
+        conf = update.confidence if update.confidence is not None else 0.2
+        hrv_store.push_level(update.session_id, update.phase, higher, conf)
+    elif update.stress_level is not None:
+        level = normalize_level(update.stress_level)
+        if level not in STRESS_LEVELS:
+            raise HTTPException(400, f"stress_level must map to one of {STRESS_LEVELS}")
+        hrv_store.push_level(update.session_id, update.phase, level, update.confidence)
+    elif update.rmssd is not None:
+        hrv_store.push(update.session_id, update.phase, update.rmssd)
+    else:
+        raise HTTPException(400, "provide stress_level/band (preferred) or rmssd")
+    return {"stored": True}
+
+
+def _run_crossmodal(session_id: str, voice_pre: float, voice_post: float,
+                    use_mock: bool):
+    """Prefer Component B's ordinal stress level; fall back to raw RMSSD
+    (stored or mock). Returns the crossmodal dict, or None if no body data.
+
+    Threads BOTH sides' confidence into Layer 4: Component D's per-phase
+    confidence (|valence|, from the stored /infer result) and Component B's
+    per-phase confidence (if it sent one). Layer 4 uses these to defer to HRV
+    when the voice is uncertain instead of asserting a false mismatch."""
+    stored = session_scores.get(session_id, {})
+    voice_conf = (float(stored.get("pre", {}).get("confidence", 1.0)),
+                  float(stored.get("post", {}).get("confidence", 1.0)))
+
+    if not use_mock:
+        lvl_pre = hrv_store.get_level(session_id, "pre")
+        lvl_post = hrv_store.get_level(session_id, "post")
+        if lvl_pre and lvl_post:
+            bcp = hrv_store.get_level_confidence(session_id, "pre")
+            bcpo = hrv_store.get_level_confidence(session_id, "post")
+            body_conf = (bcp if bcp is not None else 1.0,
+                         bcpo if bcpo is not None else 1.0)
+            return validate_crossmodal_levels(voice_pre, voice_post,
+                                              lvl_pre, lvl_post,
+                                              voice_conf, body_conf)
+    provider = hrv_mock if use_mock else hrv_store
+    r_pre = provider.get_rmssd(session_id, "pre")
+    r_post = provider.get_rmssd(session_id, "post")
+    if r_pre is None or r_post is None:
+        return None
+    return validate_crossmodal(voice_pre, voice_post, r_pre, r_post, voice_conf)
+
+
+class CrossValidateRequest(BaseModel):
+    session_id: str
+    use_mock_hrv: bool = False   # demos without Component B connected
+
+
+@app.post("/cross-validate")
+def cross_validate(req: CrossValidateRequest):
+    stored = session_scores.get(req.session_id, {})
+    if "pre" not in stored or "post" not in stored:
+        raise HTTPException(404, "need both pre and post /infer results "
+                                 "for this session")
+
+    result = _run_crossmodal(req.session_id, stored["pre"]["stress_score"],
+                             stored["post"]["stress_score"], req.use_mock_hrv)
+    if result is None:
+        raise HTTPException(404, "no stress/HRV from Component B for this session; "
+                                 "B must call /session-update, or set use_mock_hrv")
+    return result
+
+
+# ----------------------------------------------------------- layer 5
+class AnomalyRequest(BaseModel):
+    user_id: str
+    features: list[float]   # ANOMALY_FEATURES order - see config.py
+
+
+@app.post("/anomaly-check")
+def anomaly_check(req: AnomalyRequest):
+    if anomaly_detector is None:
+        raise HTTPException(503, "anomaly model not trained yet")
+    return anomaly_detector.check(req.user_id, np.asarray(req.features))
+
+
+# ---------------------------------------------- health companion (voice AI)
+class CompanionMessage(BaseModel):
+    session_id: str
+    text: str          # the student's utterance (from STT / typed for the demo)
+
+
+@app.post("/companion/message")
+def companion_message(req: CompanionMessage, phase: str = "pre"):
+    """One turn of the pre/post check-in. The companion is stress-aware - the
+    app injects this session's voice + HRV stress so it tunes its warmth. Reply
+    text is sent to TTS by the client. Uses a local Ollama model by default -
+    run `ollama serve` (and `ollama pull qwen2.5`)."""
+    try:
+        return {"reply": companion.reply(req.session_id, req.text, phase)}
+    except Exception as e:
+        raise HTTPException(503, f"companion unavailable "
+                                 f"(is Ollama running? `ollama serve`): {e}")
+
+
+# ------------------------------------- full session (for Component C)
+class FullSessionRequest(BaseModel):
+    session_id: str
+    user_id: str = "default"
+    use_mock_hrv: bool = False
+
+
+@app.post("/full-session")
+def full_session(req: FullSessionRequest):
+    """The one call the app makes after the post-session recording:
+    comparison + cross-modal + anomaly, combined into the payload
+    Component C (Unity) consumes."""
+    stored = session_scores.get(req.session_id, {})
+    if "pre" not in stored or "post" not in stored:
+        raise HTTPException(404, "need both pre and post /infer results "
+                                 "for this session")
+
+    comparison = compare_scores(stored["pre"], stored["post"])
+
+    crossmodal = _run_crossmodal(req.session_id, stored["pre"]["stress_score"],
+                                 stored["post"]["stress_score"], req.use_mock_hrv)
+
+    anomaly = None
+    if anomaly_detector is not None:
+        # Session summary in ANOMALY_FEATURES order. Three values marked
+        # "from app later" use defaults until the app supplies them.
+        features = [
+            stored["pre"]["stress_score"], stored["post"]["stress_score"],
+            comparison["delta"],
+            stored["pre"]["confidence"], stored["post"]["confidence"],
+            15.0,                                          # session_duration
+            crossmodal["agreement"] if crossmodal else 0.75,
+            abs(stored["pre"].get("arousal", 0)
+                - stored["post"].get("arousal", 0)),       # acoustic_variance
+            stored["pre"].get("quality", {}).get("rms", 0.02),
+            float(len(session_scores)),                    # session_number
+            12.0,                                          # time_of_day
+            1.0,                                           # days_since_last
+        ]
+        anomaly = anomaly_detector.check(req.user_id, np.asarray(features))
+
+    # How the user's ARRIVAL (pre-session) stress compares to their own normal.
+    # A relative reading that stays meaningful even when the absolute range is
+    # compressed on real phone voices. Compute vs history, THEN record it.
+    pre_stress = stored["pre"]["stress_score"]
+    baseline = personal_baseline.relative(req.user_id, pre_stress)
+    personal_baseline.observe(req.user_id, pre_stress)
+
+    return _json_safe({
+        "stress_level": stored["post"]["stress_score"],
+        "confidence": stored["post"]["confidence"],
+        "comparison": comparison,
+        "crossmodal": crossmodal,
+        "anomaly": anomaly,
+        "personal_baseline": baseline,
+    })
