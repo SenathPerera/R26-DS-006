@@ -2,7 +2,7 @@
 // against the live API. Screens in steps.jsx; visuals in ui.jsx.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getHealth, ambientCheck, infer, fullSession, API_BASE } from "./api.js";
+import { getHealth, ambientCheck, infer, fullSession, API_BASE, POLL_B } from "./api.js";
 import { TopBar, Rail } from "./ui.jsx";
 import { Welcome, RoomCheck, CheckIn, CalmMoment, Report, History, Research } from "./steps.jsx";
 
@@ -75,10 +75,10 @@ export default function App() {
     setBusy(true);
     const setter = phase === "pre" ? setPre : setPost;
     try {
-      const result = await infer(file, sessionId, phase);
-      // In this solo web demo the heart-rate signal comes from Component B's
-      // simulated provider (independent of the voice), so Layer 4 is a real
-      // cross-check rather than the voice agreeing with itself.
+      // POLL_B on: D pulls the REAL Component B reading at this phase moment.
+      // Off (default): the heart-rate signal comes from Component B's simulated
+      // provider, so Layer 4 is still a real cross-check (not voice vs itself).
+      const result = await infer(file, sessionId, phase, POLL_B);
       setter({ result, transcript });
     } catch (e) { setter({ error: e.message }); }
     finally { setBusy(false); }
@@ -88,7 +88,9 @@ export default function App() {
   useEffect(() => {
     if (step === "report" && pre?.result && post?.result && !full && !fullLoading && !fullError) {
       setFullLoading(true);
-      fullSession(sessionId, userId, true)   // independent simulated HRV (Component B)
+      // Real B poll happened at /infer -> use stored readings (mock off); else
+      // fall back to the simulated HRV provider for a solo demo.
+      fullSession(sessionId, userId, !POLL_B)
         .then((f) => {
           setFull(f);
           if (savedFor.current !== sessionId) {
@@ -166,7 +168,7 @@ export default function App() {
           ))}
           <button className="ghost-btn" style={{ marginLeft: "auto" }} onClick={newSession}>↺ New session</button>
         </div>
-        <p className="note">CogniVoice · Component D — live demo. Session {sessionId.slice(0, 8)}{participant ? ` · ${participant}` : ""} · calm &amp; dark themes.</p>
+        <p className="note">CogniVoice · Component&nbsp;D — voice-based adaptive stress detection · SLIIT dissertation R26-DS-006. Research prototype; on-device inference, not a medical device.</p>
       </div>
     </div>
   );
