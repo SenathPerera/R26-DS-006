@@ -4,6 +4,7 @@ Every module imports settings from here. Change a threshold or a model
 in ONE place and the whole system follows.
 """
 
+import os
 from pathlib import Path
 
 # ---------------------------------------------------------------- paths
@@ -171,6 +172,22 @@ def confidence_from_va(valence: float, arousal: float) -> float:
 # Product-facing ordinal stress levels. Shared with Component B (HRV), whose
 # WESAD model emits the SAME four levels - so Layer 4 compares like with like.
 STRESS_LEVELS = ["no", "mild", "moderate", "high"]
+
+
+# --------------------------------------------- Component B integration
+# B streams HRV stress continuously and exposes its latest reading at
+# GET {COMPONENT_B_URL}/stress/latest. Component D POLLS that endpoint at each
+# episodic check-in (the ~30s pre and post speech moments) and feeds the result
+# into Layer 4. B defaults to :8000 (D is :8010); override for a remote host.
+COMPONENT_B_URL = os.environ.get("COMPONENT_B_URL", "http://127.0.0.1:8000")
+
+# How long to wait on B before giving up and falling back to voice-only (seconds).
+COMPONENT_B_TIMEOUT = float(os.environ.get("COMPONENT_B_TIMEOUT", "2.0"))
+
+# B's StressPrediction carries an INTEGER level; these are its ordinal class names
+# (componentb/config.CLASS_NAMES), index-aligned so B_CLASS_NAMES[level] names it.
+# "relaxed" is later normalised to D's "no" - the two vocabularies otherwise match.
+B_CLASS_NAMES = ["relaxed", "mild", "moderate", "high"]
 
 
 # Binary stressed/not boundary on the 0-10 scale, LOO-calibrated on the real-voice

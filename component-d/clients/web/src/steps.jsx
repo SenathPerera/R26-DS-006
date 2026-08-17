@@ -1,7 +1,7 @@
 // The screens of the session flow. App.jsx owns state + passes data/callbacks.
 
 import { useEffect, useState } from "react";
-import { AudioInput, StressCard, QualityBar, Circumplex, BigMetric, InsightCard, TechnicalDetails } from "./ui.jsx";
+import { AudioInput, StressCard, QualityBar, Circumplex, BigMetric, InsightCard, TechnicalDetails, stressTypeLabel } from "./ui.jsx";
 
 const PROMPTS = {
   pre: { title: "How are you arriving today?", sub: "Speak for about 30 seconds — tell me about your day. Any deadlines, pressure, or things on your mind? There are no right answers; just talk naturally." },
@@ -226,8 +226,8 @@ export function Report({ full, pre, post, saved, loading, error, onNewSession, o
               { valence: post.result.valence, arousal: post.result.arousal, label: "after", color: "var(--s-none)" },
             ]} />
             <div className="legend">
-              <div className="leg" style={{ color: "var(--s-high)" }}><span className="swatch" style={{ background: "var(--s-high)" }} /><div><div className="lt">Before — {pre.result.stress_type || "neutral"}</div><div className="ld">valence {pre.result.valence.toFixed(2)}, arousal {pre.result.arousal.toFixed(2)}, confidence {pre.result.confidence.toFixed(2)}.</div></div></div>
-              <div className="leg" style={{ color: "var(--s-none)" }}><span className="swatch" style={{ background: "var(--s-none)" }} /><div><div className="lt">After — {post.result.stress_type || "settling"}</div><div className="ld">valence {post.result.valence.toFixed(2)}, arousal {post.result.arousal.toFixed(2)}, confidence {post.result.confidence.toFixed(2)}.</div></div></div>
+              <div className="leg" style={{ color: "var(--s-high)" }}><span className="swatch" style={{ background: "var(--s-high)" }} /><div><div className="lt">Before — {stressTypeLabel(pre.result.stress_type) || "neutral"}</div><div className="ld">valence {pre.result.valence.toFixed(2)}, arousal {pre.result.arousal.toFixed(2)}, confidence {pre.result.confidence.toFixed(2)}.</div></div></div>
+              <div className="leg" style={{ color: "var(--s-none)" }}><span className="swatch" style={{ background: "var(--s-none)" }} /><div><div className="lt">After — {stressTypeLabel(post.result.stress_type) || "settling"}</div><div className="ld">valence {post.result.valence.toFixed(2)}, arousal {post.result.arousal.toFixed(2)}, confidence {post.result.confidence.toFixed(2)}.</div></div></div>
             </div>
           </div>
         </div>
@@ -305,67 +305,119 @@ export function History({ sessions, onOpen, onClear, onBack }) {
   );
 }
 
-/* ================= The research (PP1 → PP2, current) ================= */
+/* ================= The research (PP1 → PP2, full progression) ================= */
 export function Research() {
   return (
     <section className="panel">
       <div className="card">
-        <div className="eyebrow warm">The research · PP1 → PP2</div>
-        <h3 className="h-lead">What I found, why it broke on real voices, and how I fixed it.</h3>
-        <p className="lead-sub">PP1 asked me to prove voice&nbsp;→&nbsp;emotion with ML <em>deeply</em> — not just report a number. So I ran a controlled six-model ablation, tested every model on <b>real</b> voices (English + zero-shot Sinhala), found <em>why</em> it breaks, and fixed it with the evidence.</p>
+        <div className="eyebrow warm">The research · PP1 → PP2 (current)</div>
+        <h3 className="h-lead">From a six-experiment encoder search to an honest, multimodal-by-design stress model.</h3>
+        <p className="lead-sub">PP1 asked me to prove voice&nbsp;→&nbsp;emotion with ML <em>deeply</em> — not just report a number. So I ran a controlled ablation, kept the encoder the evidence chose, replaced the hand-written stress mapping with a learned one, then tested it on <b>real</b> voices (English + zero-shot Sinhala) and diagnosed exactly where and why it breaks. Every figure below is measured; negative results are kept in.</p>
 
-        <div className="sub-h"><span className="tick">01</span> The finding — the best acted model is the worst on real voices</div>
-        <p className="muted">I scored all six checkpoints on 24 real clips and put each model's polished <b>in-domain</b> score next to its <b>real-voice</b> accuracy. The relationship is <b>inverted</b> — chasing acted metrics actively hurts.</p>
+        <div className="sub-h"><span className="tick">01</span> PP1 — the encoder search (acted English, speaker-independent)</div>
+        <p className="muted">Six experiments on acted corpora (RAVDESS + CREMA-D + TESS). The encoder choice dominated everything else.</p>
         <div className="rtable-wrap">
           <table className="rt">
-            <thead><tr><th>Model</th><th>In-domain (acted CCC)</th><th>Real voices</th><th></th></tr></thead>
+            <thead><tr><th>Experiment</th><th>Encoder</th><th>Result</th><th></th></tr></thead>
             <tbody>
-              <tr><td className="m">Acted</td><td>0.81 — best</td><td>38% — worst</td><td><span className="pill2 flop">flop</span></td></tr>
-              <tr><td className="m">v2 (was active)</td><td>0.79</td><td>75% · fails Sinhala (64%)</td><td><span className="pill2 part">partial</span></td></tr>
-              <tr><td className="m">Combined</td><td>0.77</td><td>63%</td><td><span className="pill2 part">partial</span></td></tr>
-              <tr><td className="m">IEMOCAP</td><td>0.65</td><td>58%</td><td><span className="pill2 part">partial</span></td></tr>
-              <tr className="ship"><td className="m"><b>MELD-baseline</b></td><td><b>0.35 — worst</b></td><td><b>92% — best</b></td><td><span className="pill2 good">active</span></td></tr>
+              <tr><td className="m">wav2vec2 + MLP</td><td>wav2vec2-base</td><td>60.9% val acc</td><td><span className="pill2 flop">weak</span></td></tr>
+              <tr><td className="m">hand-feature MLP</td><td>DSP features</td><td>70.8% val acc</td><td><span className="pill2 part">baseline</span></td></tr>
+              <tr><td className="m"><b>emotion2vec + MLP</b></td><td>emotion2vec-base</td><td><b>84.7% acc · macro-F1 83.9%</b></td><td><span className="pill2 good">winner</span></td></tr>
+              <tr><td className="m">V/A regression <span style={{ color: "var(--ink-faint)" }}>(shipped PP1)</span></td><td>emotion2vec-base</td><td>80.4% binary · R² 0.57</td><td><span className="pill2 part">shipped</span></td></tr>
+              <tr><td className="m">+ calm augmentation</td><td>emotion2vec-base</td><td>R² 0.53 · MAE 0.094</td><td><span className="pill2 part">marginal</span></td></tr>
+              <tr><td className="m">+ LibriSpeech</td><td>emotion2vec-base</td><td>R² 0.55 · MAE 0.091</td><td><span className="pill2 part">marginal</span></td></tr>
             </tbody>
           </table>
         </div>
-        <p className="muted" style={{ fontSize: 13 }}>The high-CCC models overfit the "loud acted = aroused" studio style. <b>MELD-baseline</b> trained on natural speech, so its <b>valence</b> generalises to real voices — which is what actually matters.</p>
+        <p className="muted" style={{ fontSize: 13 }}>emotion2vec beat wav2vec2 by <b>+24 points</b> for the same task → kept for PP2. Extra data/augmentation barely moved R² (0.53→0.55): the bottleneck was data <em>nature</em> (acted vs natural), not quantity. The shipped PP1 model used a <b>hand-written</b> emotion→stress table — the exact thing the panel flagged.</p>
 
-        <div className="sub-h"><span className="tick">02</span> Two axes, one reliable — valence works, arousal collapses</div>
-        <p className="muted">Across all six models and <b>both languages</b>: valence (pleasant ↔ unpleasant) is right ~<b>100%</b> of the time on stressed voices. But arousal <b>collapses</b> — quiet, internalised "freeze" stress reads as low-energy, so any score that leans on arousal dies.</p>
+        <div className="sub-h"><span className="tick">02</span> PP2 — the enhancement the panel asked for</div>
+        <p className="muted">Frozen <b>emotion2vec_plus_large</b> (1024-d, 42,500 h) + a trainable <b>prosody branch</b> (F0, jitter, shimmer, rate) + <b>gated fusion</b> + a <b>learned</b> valence/arousal head — replacing the hand-written lookup. In-domain it trains to near-ceiling:</p>
+        <div className="kpi-row">
+          <div className="kpi2"><div className="v" style={{ color: "var(--s-none)" }}>0.864</div><div className="k">CCC valence (held-out acted)</div></div>
+          <div className="kpi2"><div className="v" style={{ color: "var(--s-none)" }}>0.810</div><div className="k">CCC arousal (held-out acted)</div></div>
+          <div className="kpi2"><div className="v" style={{ color: "var(--s-none)" }}>0.92</div><div className="k">binary stress F1 (in-domain)</div></div>
+          <div className="kpi2"><div className="v" style={{ color: "var(--teal)" }}>~1–2M</div><div className="k">trainable params · encoder frozen</div></div>
+        </div>
+
+        <div className="sub-h"><span className="tick">03</span> The acid test — in-domain metrics INVERT on real voices</div>
+        <p className="muted">All checkpoints scored on 24 genuine/TTS clips outside every training set (17 stressed, 7 calm; 11 Sinhala, zero-shot). Each model's polished <b>in-domain arousal CCC</b> next to its <b>real-voice</b> accuracy — the relationship is <b>inverted</b>:</p>
+        <div className="rtable-wrap">
+          <table className="rt">
+            <thead><tr><th>Checkpoint</th><th>In-domain CCC-arousal</th><th>Real voices</th><th></th></tr></thead>
+            <tbody>
+              <tr><td className="m">fusion_acted</td><td>0.81 — best</td><td>38% — worst</td><td><span className="pill2 flop">flop</span></td></tr>
+              <tr><td className="m">fusion_v2 <span style={{ color: "var(--ink-faint)" }}>(was active)</span></td><td>0.79</td><td>75% · Sinhala 64%</td><td><span className="pill2 part">partial</span></td></tr>
+              <tr><td className="m">fusion_combined</td><td>0.77</td><td>63%</td><td><span className="pill2 part">partial</span></td></tr>
+              <tr><td className="m">fusion_iemocap</td><td>0.65</td><td>58%</td><td><span className="pill2 part">partial</span></td></tr>
+              <tr className="ship"><td className="m"><b>fusion_meld_baseline</b></td><td><b>0.35 — worst</b></td><td><b>92% — best</b></td><td><span className="pill2 good">active</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>Selecting a model on acted metrics is <b>actively harmful</b>. The high-CCC models overfit the "loud acted = aroused" studio style; <b>fusion_meld_baseline</b> trained on natural speech, so its <b>valence</b> generalises.</p>
+
+        <div className="sub-h"><span className="tick">04</span> Two axes, one reliable — valence transfers, arousal collapses</div>
+        <p className="muted">Held across all checkpoints and <b>both languages</b>: stressed voices read as negative valence <b>94–100%</b> of the time, but arousal is positive on only <b>12–53%</b> of them — quiet "freeze" stress reads as low-energy, so any score leaning on arousal dies.</p>
         <div className="ba">
           <div className="b bad"><div className="lbl">Before — neutral reads as stress</div><code>stress = (1 − valence)/2 · (…arousal)</code><p className="r" style={{ color: "var(--s-high)" }}>calm voice → ~4 / 10 ✕ (thin separation)</p></div>
           <div className="b good"><div className="lbl">After — valence-primary</div><code>stress = max(0, − valence)</code><p className="r" style={{ color: "var(--s-none)" }}>calm → 0 · stressed → high ✓</p></div>
         </div>
-        <p className="muted">Arousal no longer drives the score — it names the <b>type</b> ("activated" vs the "shutdown" freeze response) and becomes the axis that cross-checks against the heart. Fight, flight, <b>or freeze.</b></p>
-
-        <div className="sub-h"><span className="tick">03</span> The multimodal answer — voice for valence, heart for arousal</div>
-        <ul className="li-tight">
-          <li><b>Confidence tracks |valence|</b> — the reliable axis. Near-neutral voices read as low-confidence, exactly when they should.</li>
-          <li><b>Layer 4 is confidence-gated</b> — a voice/heart disagreement is only called a <b>cognitive–physiological mismatch</b> when both signals are confident; an uncertain voice <b>defers to the heart</b> instead of raising a false flag.</li>
-          <li>So the arousal my voice can't resolve is supplied by <b>Component B (HRV)</b> — the failure <em>is</em> the reason the system is multimodal.</li>
-        </ul>
+        <p className="muted">Threshold-free separation (d′) rose on <b>every</b> checkpoint under valence-primary scoring — the active model from <b>1.86 → 3.62</b>. Arousal no longer drives magnitude; it names the <b>type</b> — activated (fight-or-flight) vs withdrawn (freeze) — and becomes the axis that cross-checks against the heart.</p>
       </div>
 
       <div className="card">
-        <div className="eyebrow">The recovery · leave-one-out on real English + Sinhala</div>
+        <div className="eyebrow">Phase 1 — the fix · leave-one-out on real English + Sinhala</div>
+        <p className="muted">Valence-primary scoring + an LOO-calibrated 2.0 boundary (fit on N−1, tested on the held-out clip). <b>No retraining</b> — purely selecting on real-voice evidence and scoring on the reliable axis.</p>
         <div className="kpi-row">
-          <div className="kpi2"><div className="v"><span style={{ color: "var(--ink-soft)" }}>75%</span> <span className="arrowto">→</span> <span style={{ color: "var(--s-none)" }}>92%</span></div><div className="k">overall real-voice accuracy (LOO)</div></div>
+          <div className="kpi2"><div className="v"><span style={{ color: "var(--ink-soft)" }}>75%</span> <span className="arrowto">→</span> <span style={{ color: "var(--s-none)" }}>91.7%</span></div><div className="k">overall real-voice accuracy (LOO)</div></div>
           <div className="kpi2"><div className="v"><span style={{ color: "var(--s-high)" }}>64%</span> <span className="arrowto">→</span> <span style={{ color: "var(--s-none)" }}>91%</span></div><div className="k">Sinhala · zero-shot · was failing the KPI</div></div>
-          <div className="kpi2"><div className="v" style={{ color: "var(--s-none)" }}>16 / 17</div><div className="k">stressed clips caught · 6/7 calm</div></div>
-          <div className="kpi2"><div className="v" style={{ color: "var(--teal)" }}>✓ 75%</div><div className="k">KPI target · passed in both languages</div></div>
+          <div className="kpi2"><div className="v" style={{ color: "var(--s-none)" }}>16 / 17</div><div className="k">stressed clips caught · 6 / 7 calm</div></div>
+          <div className="kpi2"><div className="v" style={{ color: "var(--teal)" }}>✓ 75% KPI</div><div className="k">passed in both languages</div></div>
         </div>
-        <p className="muted">No retraining — purely by <b>selecting the model on real-voice evidence</b> and fixing the scoring. Sinhala works zero-shot because valence is carried by a language-independent signal; the prosody branch (pitch, tremor, rate) is the same physiology in any language.</p>
+        <p className="muted">Sinhala works zero-shot because valence rides a language-independent signal and the prosody branch (pitch, tremor, rate) is the same physiology in any language.</p>
       </div>
 
       <div className="card">
-        <div className="eyebrow">Honest limitations, and the contribution</div>
+        <div className="eyebrow">Phase 2 — does adding Sinhala training data help? (negative result)</div>
+        <p className="muted">The honest test of the known weak spot. I collected <b>26 clips from 7 new speakers</b>, mixed them into training (speaker-independent — eval speakers untouched), retrained the head. Evaluated on the 11 held-out Sinhala clips:</p>
+        <div className="rtable-wrap">
+          <table className="rt">
+            <thead><tr><th>Model</th><th>Accuracy</th><th>Stressed recall</th><th>Calm specificity</th></tr></thead>
+            <tbody>
+              <tr className="ship"><td className="m"><b>meld_baseline</b> <span style={{ color: "var(--ink-faint)" }}>(MELD only, shipped)</span></td><td><b>90.9%</b></td><td>87.5%</td><td>100%</td></tr>
+              <tr><td className="m">+ 26 Sinhala · graded labels</td><td>81.8%</td><td>75.0%</td><td>100%</td></tr>
+              <tr><td className="m">+ 26 Sinhala · binary labels</td><td>81.8%</td><td>87.5%</td><td>66.7%</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>The data <b>slightly hurt</b> held-out Sinhala. A controlled label ablation (identical seed) lands <b>both</b> variants at 81.8% — so the label scheme only <em>relocates</em> the error; it doesn't change the verdict. <b>The graded-label hypothesis is rejected.</b> A handful of clips cannot teach a <em>frozen</em> encoder that is out-of-distribution for Sinhala — a legitimate finding, not a fixable bug.</p>
+      </div>
+
+      <div className="card">
+        <div className="eyebrow">Phase 3 — a confident single-speaker misread (English OOD, live)</div>
+        <p className="muted">Live-testing my own Sri-Lankan-accented English — two stressed clips and one genuinely calm/relieved clip. The model pinned <em>all three</em> at valence ≈ −0.9 with <b>high</b> confidence:</p>
+        <div className="rtable-wrap">
+          <table className="rt">
+            <thead><tr><th>Clip</th><th>True state</th><th>Valence</th><th>Confidence</th><th>Stress /10</th></tr></thead>
+            <tbody>
+              <tr><td className="m">before</td><td>stressed</td><td>−0.855</td><td>0.86</td><td>8.55</td></tr>
+              <tr><td className="m"><b>after</b></td><td><b>calm / relieved</b></td><td><b>−0.913</b></td><td><b>0.91</b></td><td><b>9.13</b></td></tr>
+              <tr><td className="m">before</td><td>stressed</td><td>−0.934</td><td>0.93</td><td>9.34</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="muted" style={{ fontSize: 13 }}>Same root cause as Sinhala — the frozen encoder is OOD for this individual voice, so it locks onto speaker identity and collapses within-speaker <em>variation</em>. It is <b>worse</b> than the Sinhala case: Sinhala failed with <em>low</em> confidence so Layer 4 deferred to HRV, but this misread is <em>confident</em> (0.91 &gt; CONF_MIN 0.4) so the defer gate doesn't fire. n = 3, one speaker — anecdotal, does not overturn the 92% population result, but recorded openly. Fix (speaker-relative baseline / OOD term in confidence) is stated as future work.</p>
+      </div>
+
+      <div className="card">
+        <div className="eyebrow">The multimodal answer, limitations, and the contribution</div>
         <ul className="li-tight">
-          <li><b>n = 24</b> real clips (Sinhala 11, ~3 speakers). Leave-one-out removes fit-to-test bias but not small-sample variance — directional, not tight. More Sinhala data is the next step.</li>
-          <li><b>Binary stressed/calm is validated</b>; the mild/moderate/high severity bands are provisional until graded labels or paired HRV exist.</li>
-          <li><b>Layer 5 anomaly</b> runs on simulated sessions until real longitudinal data exists.</li>
+          <li><b>Confidence = |valence|</b> — the reliable axis. Near-neutral voices read low-confidence, exactly when they should, so <b>Layer 4 defers to Component B's HRV</b> rather than raising a false flag. The failure <em>is</em> the reason the system is multimodal.</li>
+          <li><b>n = 24</b> real clips (Sinhala 11, ~3 speakers): LOO removes fit-to-test bias but not small-sample variance — directional, not tight.</li>
+          <li><b>Binary stressed/calm is validated</b>; mild/moderate/high severity bands are provisional until graded labels or paired HRV arrive. Arousal is offloaded to Component B by design. <b>Layer 5</b> runs on simulated sessions until real longitudinal data exists.</li>
         </ul>
         <p className="callout">The contribution isn't only a model — it's the <b>diagnosis</b>: I proved with numbers that voice reliably encodes <b>valence</b> but not <b>arousal</b> for internalised stress, that acted metrics invert on real voices, and that the honest fix is complementary multimodal sensing (voice → valence, HRV → arousal) with per-signal confidence. Encoder frozen; scoring + fusion designed and validated by me; evaluated on real, unseen, multilingual voices — failures stated openly.</p>
-        <div className="rmeta"><span>Six-model ablation</span><span>94 automated tests</span><span>English + Sinhala real-voice, zero-shot</span></div>
+        <div className="rmeta"><span>PP1 six-experiment ablation</span><span>PP2 five-checkpoint real-voice test</span><span>English + Sinhala, zero-shot</span><span>94 automated tests</span></div>
       </div>
     </section>
   );

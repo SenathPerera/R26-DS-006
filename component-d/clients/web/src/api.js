@@ -5,6 +5,12 @@
 //   VITE_API_BASE=http://localhost:9001 npm run dev
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8010";
 
+// Demo switch: when true, D polls the REAL Component B (GET /stress/latest) at
+// each /infer and the mock HRV is turned off. Off by default -> simulated HRV,
+// so the UI runs with no B connected. Enable with VITE_POLL_B=true npm run dev
+// (point D at B via COMPONENT_B_URL on the server side).
+export const POLL_B = String(import.meta.env.VITE_POLL_B).toLowerCase() === "true";
+
 function netError() {
   const e = new Error(`Can't reach the server on ${API_BASE} — make sure it's running, then try again.`);
   e.isNetwork = true;
@@ -65,8 +71,8 @@ export const ambientCheck = (file) => postForm("/ambient-check", {}, { file });
 
 // Layer 2 — voice stress. -> {stress_score, stress_level, stress_type,
 //   confidence, valence, arousal, quality, session_id}
-export const infer = (file, sessionId, phase) =>
-  postForm(`/infer?session_id=${encodeURIComponent(sessionId)}&phase=${phase}`, {}, { file });
+export const infer = (file, sessionId, phase, pollB = false) =>
+  postForm(`/infer?session_id=${encodeURIComponent(sessionId)}&phase=${phase}&poll_b=${pollB}`, {}, { file });
 
 // LLM companion turn. -> {reply}
 export const companionMessage = (sessionId, text, phase) =>

@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import { useRecorder, useSpeechRecognition, blobToFile } from "./media.js";
+import { POLL_B } from "./api.js";
 
 /* ---------------- icons ---------------- */
 export const IconMic = (p) => (
@@ -31,7 +32,7 @@ export function TopBar({ health, theme, onToggleTheme }) {
       </div>
       <div className="chips">
         <span className="chip"><span className={`dot ${voice.cls}`} />Voice model <span className="k">{voice.k}</span></span>
-        <span className="chip"><span className="dot warn" />Heart rate <span className="k">simulated</span></span>
+        <span className="chip"><span className={`dot ${POLL_B ? "live" : "warn"}`} />Heart rate <span className="k">{POLL_B ? "Component B" : "simulated"}</span></span>
         <button className="iconbtn" onClick={onToggleTheme} aria-label="Toggle theme">{theme === "dark" ? <IconSun /> : <IconMoon />}</button>
       </div>
     </header>
@@ -127,6 +128,21 @@ export function AudioInput({ withTranscript, duration = 30, busy, onSubmit, ctaL
   );
 }
 
+/* ---------------- stress-type vocabulary ---------------- */
+// The backend names the stress TYPE from the arousal axis: "activated" (keyed-up,
+// fight-or-flight) vs "shutdown" (the low-energy freeze response). Those raw words
+// are clinical jargon, so the UI shows plain-language equivalents everywhere.
+export function stressTypeLabel(t) {
+  if (t === "activated") return "Activated · fight-or-flight";
+  if (t === "shutdown") return "Withdrawn · freeze";
+  return null;
+}
+export function stressTypeShort(t) {
+  if (t === "activated") return "activated";
+  if (t === "shutdown") return "withdrawn";
+  return null;
+}
+
 /* ---------------- stress result (ALL scores) ---------------- */
 const LEVEL_FILL = { no: "var(--s-none)", mild: "var(--s-mild)", moderate: "var(--s-mod)", high: "var(--s-high)" };
 // Mirror the backend's Layer-4 gate (config.CONF_MIN): below this |valence|-based
@@ -138,8 +154,8 @@ function classifyReasons(r) {
   const out = [];
   out.push(`Valence ${r.valence >= 0 ? "+" : ""}${r.valence.toFixed(2)} — the tone reads as ${r.valence < -0.15 ? "unpleasant" : r.valence > 0.15 ? "pleasant" : "neutral"}.`);
   out.push(`Arousal ${r.arousal >= 0 ? "+" : ""}${r.arousal.toFixed(2)} — energy is ${r.arousal >= 0.15 ? "activated / keyed-up" : r.arousal <= -0.15 ? "subdued / low" : "level"}.`);
-  if (r.stress_type === "shutdown") out.push('Negative tone with LOW energy → the withdrawn "freeze" form of stress (captured, not collapsed).');
-  else if (r.stress_type === "activated") out.push('Negative tone with HIGH energy → the agitated "fight-or-flight" form of stress.');
+  if (r.stress_type === "shutdown") out.push('Negative tone with LOW energy → "withdrawn (freeze)" stress — quiet, internalised tension (captured, not collapsed).');
+  else if (r.stress_type === "activated") out.push('Negative tone with HIGH energy → "activated (fight-or-flight)" stress — agitated, keyed-up.');
   out.push(`Confidence ${r.confidence.toFixed(2)} — ${r.confidence >= 0.7 ? "a clear, well-separated reading" : r.confidence >= 0.4 ? "a moderate reading" : "a faint reading near neutral, treat with care"}.`);
   return out;
 }
@@ -155,7 +171,7 @@ export function StressCard({ result, showReasons = true }) {
       <div className="score-top">
         <span className="score-num" style={{ color: lowConf ? "var(--ink-faint)" : LEVEL_FILL[stress_level] }}>{stress_score.toFixed(2)}</span>
         <span className="score-den">/ 10</span>
-        <span className={`lvl ${lowConf ? "uncertain" : stress_level}`}>{lowConf ? "uncertain" : stress_level}{stress_type && !lowConf ? ` · ${stress_type}` : ""}</span>
+        <span className={`lvl ${lowConf ? "uncertain" : stress_level}`}>{lowConf ? "uncertain" : stress_level}{stress_type && !lowConf ? ` · ${stressTypeShort(stress_type)}` : ""}</span>
       </div>
       <div className="meter"><i style={{ width: `${pct}%`, background: lowConf ? "var(--ink-faint)" : LEVEL_FILL[stress_level] }} /></div>
       {lowConf && (
@@ -168,7 +184,7 @@ export function StressCard({ result, showReasons = true }) {
         <div className="mcell"><div className="mk">Arousal</div><div className="mv">{arousal >= 0 ? "+" : ""}{arousal.toFixed(3)}</div></div>
         <div className="mcell"><div className="mk">Confidence</div><div className="mv">{confidence.toFixed(3)}</div></div>
         <div className="mcell"><div className="mk">Level</div><div className="mv" style={{ fontSize: 14, textTransform: "capitalize" }}>{stress_level}</div></div>
-        <div className="mcell"><div className="mk">Type</div><div className="mv" style={{ fontSize: 14, textTransform: "capitalize" }}>{stress_type || "—"}</div></div>
+        <div className="mcell"><div className="mk">Type</div><div className="mv" style={{ fontSize: 13 }}>{stressTypeLabel(stress_type) || "—"}</div></div>
         {q.duration_sec != null && <div className="mcell"><div className="mk">Duration</div><div className="mv">{q.duration_sec.toFixed(1)}s</div></div>}
         {q.speech_fraction != null && <div className="mcell"><div className="mk">Speech</div><div className="mv">{Math.round(q.speech_fraction * 100)}%</div></div>}
         {q.rms != null && <div className="mcell"><div className="mk">Loudness</div><div className="mv">{q.rms.toFixed(3)}</div></div>}
@@ -246,27 +262,43 @@ export function TechnicalDetails({ panels }) {
 }
 
 /* ---------------- valence/arousal circumplex ---------------- */
+// Reads left-to-right as the stress axis (valence): the LEFT half (unpleasant) is
+// the stress side and is shaded. Vertical is arousal (energy), which only names
+// the TYPE of stress — top-left = activated/fight-or-flight, bottom-left =
+// withdrawn/freeze. Right half = pleasant (calm/positive).
 export function Circumplex({ points = [] }) {
-  const S = 80, C = 110;
+  const C = 150, S = 108, B0 = 30, B1 = 270;   // centre, scale, box bounds
   const px = (v) => C + Math.max(-1, Math.min(1, v)) * S;
   const py = (a) => C - Math.max(-1, Math.min(1, a)) * S;
   const two = points.length >= 2 ? points : null;
   return (
-    <svg viewBox="0 0 220 220" width="100%" style={{ maxWidth: 320, margin: "0 auto" }} role="img" aria-label="Valence and arousal plot">
-      <defs><marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--clay)" /></marker></defs>
-      <rect x="20" y="20" width="180" height="180" rx="14" fill="var(--inset)" stroke="var(--line)" />
-      <line x1="110" y1="24" x2="110" y2="196" stroke="var(--line)" strokeWidth="1" />
-      <line x1="24" y1="110" x2="196" y2="110" stroke="var(--line)" strokeWidth="1" />
-      <text x="110" y="15" textAnchor="middle" fontSize="8.5" fill="var(--ink-faint)">activated</text>
-      <text x="110" y="211" textAnchor="middle" fontSize="8.5" fill="var(--ink-faint)">calm</text>
-      <text x="30" y="113" fontSize="8.5" fill="var(--ink-faint)">unpleasant</text>
-      <text x="190" y="113" textAnchor="end" fontSize="8.5" fill="var(--ink-faint)">pleasant</text>
-      {two && <line x1={px(two[0].valence)} y1={py(two[0].arousal)} x2={px(two[1].valence)} y2={py(two[1].arousal)} stroke="var(--clay)" strokeWidth="1.6" strokeDasharray="3 3" markerEnd="url(#ah)" opacity="0.8" />}
+    <svg viewBox="0 0 300 300" width="100%" style={{ maxWidth: 420, margin: "0 auto", display: "block" }} role="img" aria-label="Valence and arousal plot">
+      <defs>
+        <marker id="ah" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="var(--clay)" /></marker>
+      </defs>
+      {/* board + shaded stress (negative-valence) half */}
+      <rect x={B0} y={B0} width={B1 - B0} height={B1 - B0} rx="16" fill="var(--inset)" stroke="var(--line)" />
+      <rect x={B0} y={B0} width={C - B0} height={B1 - B0} rx="0" fill="var(--s-high)" opacity="0.06" />
+      {/* axes */}
+      <line x1={C} y1={B0 + 4} x2={C} y2={B1 - 4} stroke="var(--line)" strokeWidth="1" />
+      <line x1={B0 + 4} y1={C} x2={B1 - 4} y2={C} stroke="var(--line)" strokeWidth="1" />
+      {/* quadrant labels (plain language) */}
+      <text x={B0 + 12} y={B0 + 20} fontSize="9" fontWeight="700" fill="var(--s-high)">▲ fight-or-flight</text>
+      <text x={B0 + 12} y={B1 - 12} fontSize="9" fontWeight="700" fill="var(--s-mod)">▼ freeze / withdrawn</text>
+      <text x={B1 - 12} y={B0 + 20} fontSize="9" textAnchor="end" fill="var(--ink-faint)">excited</text>
+      <text x={B1 - 12} y={B1 - 12} fontSize="9" textAnchor="end" fill="var(--s-none)">relaxed</text>
+      {/* axis captions */}
+      <text x={C} y={B0 - 8} textAnchor="middle" fontSize="9" fill="var(--ink-faint)">high energy (arousal)</text>
+      <text x={C} y={B1 + 18} textAnchor="middle" fontSize="9" fill="var(--ink-faint)">low energy</text>
+      <text x={B0 - 6} y={C - 6} fontSize="9" fill="var(--ink-faint)" transform={`rotate(-90 ${B0 - 6} ${C - 6})`} textAnchor="middle">unpleasant · stress →</text>
+      <text x={B1 + 16} y={C} textAnchor="middle" fontSize="9" fill="var(--ink-faint)" transform={`rotate(90 ${B1 + 16} ${C})`}>← pleasant</text>
+      {/* before → after path */}
+      {two && <line x1={px(two[0].valence)} y1={py(two[0].arousal)} x2={px(two[1].valence)} y2={py(two[1].arousal)} stroke="var(--clay)" strokeWidth="1.8" strokeDasharray="4 3" markerEnd="url(#ah)" opacity="0.85" />}
       {points.map((p, i) => (
         <g key={i}>
-          <circle cx={px(p.valence)} cy={py(p.arousal)} r="8" fill={p.color} />
-          {i === 0 && <circle cx={px(p.valence)} cy={py(p.arousal)} r="13" fill="none" stroke={p.color} strokeWidth="1.4" opacity="0.4" />}
-          <text x={px(p.valence)} y={py(p.arousal) - 13} textAnchor="middle" fontSize="8.5" fontWeight="700" fill={p.color}>{p.label}</text>
+          <circle cx={px(p.valence)} cy={py(p.arousal)} r="9" fill={p.color} />
+          {i === 0 && <circle cx={px(p.valence)} cy={py(p.arousal)} r="15" fill="none" stroke={p.color} strokeWidth="1.5" opacity="0.4" />}
+          <text x={px(p.valence)} y={py(p.arousal) - 15} textAnchor="middle" fontSize="10" fontWeight="700" fill={p.color}>{p.label}</text>
         </g>
       ))}
     </svg>

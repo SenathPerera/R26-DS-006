@@ -41,6 +41,7 @@ from componentd.layer3_compare import compare_scores
 from componentd.layer4_crossmodal import (MockHRVProvider, StoredHRVProvider,
                                    normalize_level, validate_crossmodal,
                                    validate_crossmodal_levels)
+from componentd.component_b_client import poll_into_store
 from componentd.layer5_anomaly import SessionAnomalyDetector
 from componentd.personal_baseline import PersonalBaseline
 from componentd.companion import HealthCompanion
@@ -207,8 +208,16 @@ async def ambient_check(file: UploadFile = File(...)):
 # ----------------------------------------------------------- layer 2
 @app.post("/infer")
 async def infer(file: UploadFile = File(...),
-                session_id: str | None = None, phase: str = "pre"):
-    """Audio -> stress score. Layer 1 gates the input first."""
+                session_id: str | None = None, phase: str = "pre",
+                poll_b: bool = False):
+    """Audio -> stress score. Layer 1 gates the input first.
+
+    poll_b: pull Component B's live HRV reading (GET /stress/latest) AT THIS
+    moment and store it for `phase`. Polling here - not at /full-session - keeps
+    the body reading time-aligned with the voice: the pre body signal is captured
+    when the user speaks pre, the post signal when they speak post. If B is not
+    ready (503) or unreachable the poll returns nothing and Layer 4 later falls
+    back to voice-only. The captured level is echoed as `body` for visibility."""
     if scorer is None:
         raise HTTPException(503, "fusion model not trained yet")
     audio = await read_audio(file)
@@ -228,6 +237,12 @@ async def infer(file: UploadFile = File(...),
     sid = session_id or str(uuid.uuid4())
     session_scores.setdefault(sid, {})[phase] = result
     result["session_id"] = sid
+
+    if poll_b:
+        reading = poll_into_store(hrv_store, sid, phase)
+        result["body"] = None if reading is None else {
+            "level": reading.level, "confidence": reading.confidence,
+            "source": "component_b"}
     return result
 
 
@@ -298,6 +313,10 @@ def _run_crossmodal(session_id: str, voice_pre: float, voice_post: float,
                     use_mock: bool):
     """Prefer Component B's ordinal stress level; fall back to raw RMSSD
     (stored or mock). Returns the crossmodal dict, or None if no body data.
+
+    Body readings are captured EARLIER, per phase: either B pushed them via
+    /session-update, or D polled B at each /infer (poll_b) - both land in
+    hrv_store keyed by phase. This function only compares what is already stored.
 
     Threads BOTH sides' confidence into Layer 4: Component D's per-phase
     confidence (|valence|, from the stored /infer result) and Component B's
