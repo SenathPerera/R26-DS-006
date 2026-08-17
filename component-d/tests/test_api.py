@@ -118,6 +118,67 @@ def test_cross_validate_without_hrv_404():
     assert r.status_code == 404
 
 
+class _FakeScorer:
+    """Stand-in for the trained fusion model so /infer runs without the ~1.8 GB
+    encoder. Returns a fixed, finite score/valence result."""
+    def __init__(self, stress, valence, arousal):
+        self._r = {"stress_score": stress, "confidence": abs(valence),
+                   "valence": valence, "arousal": arousal, "stress_type": None}
+
+    def score_array(self, audio):
+        return dict(self._r)
+
+
+def _infer(sid, phase, poll_b, monkeypatch, stress=7.0):
+    """Drive /infer with a fake scorer + passing Layer-1 gate."""
+    monkeypatch.setattr(api_server, "scorer", _FakeScorer(stress, -0.7, 0.4))
+    import componentd.layer1_quality as l1
+    monkeypatch.setattr(l1, "speech_segments",
+                        lambda audio, sr: [{"start": 0, "end": len(audio)}])
+    return client.post(
+        f"/infer?session_id={sid}&phase={phase}&poll_b={str(poll_b).lower()}",
+        files={"file": ("clip.wav", wav_bytes(speech_like()), "audio/wav")})
+
+
+def test_infer_poll_b_captures_body_at_phase(monkeypatch):
+    """poll_b at /infer pulls B's live reading AT THAT phase and stores it, so
+    the body signal is time-aligned with the voice (pre polled at pre time).
+    The poll is monkeypatched so no live B is needed."""
+    from componentd.component_b_client import BodyReading
+
+    def fake_poll(store, session_id, phase, **kw):
+        r = BodyReading("high" if phase == "pre" else "no", 0.85, "point")
+        store.push_level(session_id, phase, r.level, r.confidence)
+        return r
+    monkeypatch.setattr(api_server, "poll_into_store", fake_poll)
+
+    r = _infer("s-pollinfer", "pre", True, monkeypatch)
+    assert r.status_code == 200
+    assert r.json()["body"] == {"level": "high", "confidence": 0.85,
+                                "source": "component_b"}
+    assert api_server.hrv_store.get_level("s-pollinfer", "pre") == "high"
+
+
+def test_infer_poll_b_503_leaves_body_null_voice_only(monkeypatch):
+    """B not ready -> poll returns None -> `body` is null and nothing is stored,
+    so Layer 4 later falls back to voice-only (never a faked value)."""
+    monkeypatch.setattr(api_server, "poll_into_store", lambda *a, **k: None)
+    r = _infer("s-pollinfer-503", "pre", True, monkeypatch)
+    assert r.status_code == 200 and r.json()["body"] is None
+    assert api_server.hrv_store.get_level("s-pollinfer-503", "pre") is None
+
+
+def test_infer_without_poll_b_does_not_touch_b(monkeypatch):
+    """Default poll_b=false: no body key, B never contacted (existing behaviour)."""
+    called = {"n": 0}
+    def spy(*a, **k):
+        called["n"] += 1
+    monkeypatch.setattr(api_server, "poll_into_store", spy)
+    r = _infer("s-nopoll", "pre", False, monkeypatch)
+    assert r.status_code == 200 and "body" not in r.json()
+    assert called["n"] == 0
+
+
 def test_full_session_payload():
     seed_session("s-full", pre=7.0, post=3.0)
     r = client.post("/full-session", json={
