@@ -4,13 +4,18 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
-# artifacts and data are large / private.
-# The whole artifacts/ tree is ignored — models, scalers, config AND the
-# exported parity fixture. A file is identified by the SHA-256 fingerprints
-# in docs/ARCHITECTURE.md §3, not by being committed.
-artifacts/**
-!artifacts/**/
-!artifacts/**/.gitkeep
+# artifacts/ IS committed, deliberately. The network is not reproducible:
+# re-running the export with the same seed and data yields different weights
+# (GPU nondeterminism), which moves the blend weight and the reported metrics.
+# So the files are the model rather than a build output of it, and losing them
+# would make every figure in docs/ARCHITECTURE.md §3 unverifiable forever.
+# ~7 MB total. Commit only the export you ship — never experimental runs,
+# since binaries stay in history permanently.
+#
+# loso_folds.npz is the Stage A resume cache: genuinely regenerable, useless
+# to anyone else, and nothing in src/ or server/ reads it.
+artifacts/**/loso_folds.npz
+loso_folds.npz
 
 data/raw/*
 data/processed/*
