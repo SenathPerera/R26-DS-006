@@ -1,0 +1,11 @@
+# Artifacts must survive a round trip byte-for-byte.
+#
+# core.autocrlf=true is normal on Windows, and without this git would store
+# model_config.json and xgb_population.json with LF and check them out with
+# CRLF. The bytes on disk would then differ from the bytes committed, and the
+# SHA-256 fingerprints in docs/ARCHITECTURE.md §3 would fail on a fresh clone
+# — for a reason that looks nothing like line endings.
+#
+# The .keras/.npz/.pkl files are detected as binary anyway; the JSON ones are
+# the trap. Marking the whole tree is simpler than remembering which is which.
+artifacts/** -text
