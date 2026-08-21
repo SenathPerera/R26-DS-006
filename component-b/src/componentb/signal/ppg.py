@@ -29,7 +29,15 @@ def ppg_to_rr(ppg, fs=PPG_SAMPLE_RATE):
 
 
 def clean_rr(rr, ts=None):
-    """Remove physiologically impossible values and artefact jumps."""
+    """Remove physiologically impossible values and artefact jumps.
+
+    Returns `(rr, ts, ok)`. `ok` is a boolean mask, True for beats that
+    survived filtering unchanged and False for beats that were rejected
+    and interpolated back in. It is the raw material for the
+    `signalQuality` field on the wire — the fraction of the window that
+    arrived usable — so it is returned rather than recomputed downstream
+    from values that have already been repaired.
+    """
     rr = np.asarray(rr, dtype=float).copy()
     rr[(rr <= RR_MIN_MS) | (rr >= RR_MAX_MS)] = np.nan
     for i in range(1, len(rr)):
@@ -37,6 +45,7 @@ def clean_rr(rr, ts=None):
             if abs(rr[i] - rr[i - 1]) / rr[i - 1] > RR_JUMP_THRESHOLD:
                 rr[i] = np.nan
     m = np.isnan(rr)
-    if m.any() and (~m).sum() >= 2:
-        rr[m] = np.interp(np.where(m)[0], np.where(~m)[0], rr[~m])
-    return rr, ts
+    ok = ~m
+    if m.any() and ok.sum() >= 2:
+        rr[m] = np.interp(np.where(m)[0], np.where(ok)[0], rr[ok])
+    return rr, ts, ok

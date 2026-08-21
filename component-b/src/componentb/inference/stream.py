@@ -23,30 +23,36 @@ from componentb.features.hrv import hrv_features, resid_features
 class StreamingInference:
     """Live counterpart of the notebook's windowing loop.
 
-    `model` is the population MS-CGCA network, `xgb_model` the gradient
-    booster, `ft_model` the optional personalised head. `weights` is the
-    (w_ft, w_xgb, w_cnn) triple from `loader.load_ensemble_weights` —
-    there is no default, because the notebook does not ship one.
+    `model` is the population MS-CGCA network and `xgb_model` the gradient
+    booster — the two members of the shipped ensemble. `weights` is the
+    `(w_xgb, w_cnn)` pair from `loader.load_ensemble_weights`; there is no
+    default, because shipping a different blend than the one measured
+    would change the output with no error.
+
+    There is no third, personalised member. It was evaluated and rejected:
+    +0.0066 macro-F1 at Wilcoxon p = 0.625, indistinguishable from seed
+    noise, in exchange for per-user calibration state and a third artifact
+    (docs/ARCHITECTURE.md §3).
     """
 
     def __init__(self, model=None, scaler=None, xgb_model=None,
-                 ft_model=None, weights=None,
+                 weights=None,
                  window=WINDOW_BEATS, step=STEP_BEATS):
         self.model = model
         self.scaler = scaler
         self.xgb_model = xgb_model
-        self.ft_model = ft_model
         self.weights = weights
         self.window = window
         self.step = step
         self.rr_buffer = deque(maxlen=window)
         self.temp_buffer = deque(maxlen=window)
         self.ts_buffer = deque(maxlen=window)
+        self.ok_buffer = deque(maxlen=window)
         self.baseline = BaselineEngine()
         self.channels = CausalChannelState(window=window)
         self._since_last = 0
 
-    def observe(self, rr_ms, temp_c=None, ts=None):
+    def observe(self, rr_ms, temp_c=None, ts=None, ok=True):
         """Buffer one beat. Runs NO inference and needs no model.
 
         Beat arrival and inference have different cadences: beats land
@@ -55,12 +61,18 @@ class StreamingInference:
         a caller accumulate a calibration buffer during warmup, when
         there is deliberately nothing to predict with yet.
 
+        `ok` is this beat's entry from `clean_rr`'s mask: True if it
+        arrived usable, False if it was rejected as an artefact and
+        interpolated. It feeds `signal_quality` and nothing else — the
+        model sees the repaired value either way.
+
         Returns True when this beat completes a step boundary on a full
         window — i.e. when `predict()` is due.
         """
         self.rr_buffer.append(float(rr_ms))
         self.temp_buffer.append(float(temp_c) if temp_c is not None else np.nan)
         self.ts_buffer.append(float(ts) if ts is not None else time.time())
+        self.ok_buffer.append(bool(ok))
         self.baseline.update(rr_ms)
         self.channels.update(rr_ms, temp_c)
         self._since_last += 1
@@ -73,6 +85,20 @@ class StreamingInference:
     @property
     def window_full(self):
         return len(self.rr_buffer) >= self.window
+
+    @property
+    def signal_quality(self):
+        """Fraction of the window's beats that arrived usable.
+
+        Quality of the incoming heartbeat/RR stream from the wearable —
+        NOT BLE link strength, network signal or battery. 1.0 means
+        `clean_rr` rejected nothing in this window; 0.92 means 8% of the
+        beats were artefacts that had to be interpolated over, so the
+        prediction rests partly on reconstructed data.
+        """
+        if not self.ok_buffer:
+            return 0.0
+        return round(sum(self.ok_buffer) / len(self.ok_buffer), 2)
 
     @property
     def at_step_boundary(self):
@@ -95,12 +121,22 @@ class StreamingInference:
         return self.predict() if self.observe(rr_ms, temp_c, ts) else None
 
     def _window_timestamp(self):
-        """Circadian features use the window MIDPOINT, not its edge.
+        """Circadian features are read at the window's LAST beat.
 
-        notebook-newmodel.ipynb cell 3: `mid = s + WINDOW//2`, and the
-        circadian vectors are built from `tsk[bi]` at that index.
+        notebook-train-export-2way.ipynb cell 3 (`build_endpoint`):
+
+            li = e - 1                       # endpoint label
+            bi = min(li, len(ts)-1)
+            ... circ_features(ts[bi]) ... circ7(ts[bi])
+
+        The time-of-day index follows the label, and the label sits at the
+        window's end. The superseded 3-way pipeline read the midpoint
+        (`notebook-newmodel.ipynb`); that scheme was measured to inflate
+        macro-F1 by +0.071 to +0.084 across every configuration tested
+        (`notebook-deployment-decision.ipynb`) and predicts a moment 30
+        beats of its own input postdate. Do not restore it.
         """
-        return self.ts_buffer[self.window // 2]
+        return self.ts_buffer[-1]
 
     def _xgb_vector(self):
         """The flat 25-dim vector, assembled in the notebook's order:
@@ -123,11 +159,12 @@ class StreamingInference:
         return vec
 
     def _probabilities(self):
-        """Blended class probabilities from the 3-way ensemble."""
+        """Blended class probabilities from the 2-way ensemble."""
         if self.model is None or self.xgb_model is None:
             raise RuntimeError(
                 "no models loaded — export them from "
-                "notebooks/05_deployment/notebook-newmodel.ipynb first"
+                "notebooks/05_deployment/notebook-train-export-2way.ipynb "
+                "first"
             )
         if self.weights is None:
             raise RuntimeError(
@@ -146,38 +183,69 @@ class StreamingInference:
         p_cnn = np.asarray(self.model.predict([seq, circ], verbose=0))[0]
         p_xgb = np.asarray(self.xgb_model.predict_proba(flat))[0]
 
-        w_ft, w_xgb, w_cnn = self.weights
-        if self.ft_model is None:
-            # no personalised head yet (new user): renormalise over the
-            # two population members rather than dropping mass
-            scale = w_xgb + w_cnn
-            return (w_xgb * p_xgb + w_cnn * p_cnn) / scale
-
-        p_ft = np.asarray(self.ft_model.predict([seq, circ], verbose=0))[0]
-        return w_xgb * p_xgb + w_cnn * p_cnn + w_ft * p_ft
+        w_xgb, w_cnn = self.weights
+        return w_xgb * p_xgb + w_cnn * p_cnn
 
     def _predict(self):
-        probs = self._probabilities()
-        out = self.format_output(probs)
-        out["timestamp"] = self.ts_buffer[-1]
-        out["deviation"] = {
-            k: float(v) for k, v in
-            self.baseline.residuals(self.rr_buffer).items()
+        return self.format_output(self._probabilities())
+
+    def format_output(self, probs, tau=CONFIDENCE_TAU):
+        """Assemble the full wire payload for the current window.
+
+        Alongside the gated stress decision the payload carries the raw
+        physiology a consumer would otherwise have to re-derive — heart
+        rate, RMSSD and SDNN in their natural units, plus the window's
+        span and how clean its input was.
+
+        `timestamp` equals `windowEnd`: labeling is endpoint, so the
+        prediction describes the window's last beat, not its middle.
+        """
+        # UNSCALED hrv_features: the scaler's output is what the model
+        # consumes and is meaningless as physiology on the wire.
+        # [mean_RR, SDNN, RMSSD, ...] — see config.XGB_FEATURE_ORDER.
+        hrv = hrv_features(np.array(self.rr_buffer))
+        mean_rr, sdnn, rmssd = float(hrv[0]), float(hrv[1]), float(hrv[2])
+
+        return {
+            "timestamp": self.ts_buffer[-1],
+            "heartRate": round(60000.0 / (mean_rr + 1e-8), 1),
+            "rmssd": round(rmssd, 1),
+            "sdnn": round(sdnn, 1),
+            "stress": self.stress_block(probs, tau),
+            "signalQuality": self.signal_quality,
+            "windowStart": self.ts_buffer[0],
+            "windowEnd": self.ts_buffer[-1],
         }
-        out["baseline_maturity"] = self.baseline.maturity
-        return out
 
     @staticmethod
-    def format_output(probs, tau=CONFIDENCE_TAU):
+    def stress_block(probs, tau=CONFIDENCE_TAU):
         """Point estimate when confident, merged band when not.
 
-        Justified by measurement: among low-confidence windows, 84.2%
-        had the top two classes adjacent, matching the finding that
-        neighbouring levels overlap physiologically.
+        The blended distribution travels with the decision as
+        `probabilities`, but `mode`, `level`/`level_low`/`level_high` and
+        `label` are authoritative. A consumer that takes the argmax of
+        `probabilities` bypasses the confidence gate and reintroduces the
+        false precision the band exists to prevent. `continuous_score` is
+        likewise derived, not predicted.
+
+        **[UNVERIFIED]** The supporting figure — 84.2% of low-confidence
+        errors falling between adjacent classes — is midpoint-derived and
+        uncited (docs/ARCHITECTURE.md §6). Re-measure before quoting it.
         """
         probs = np.asarray(probs, dtype=float)
         order = np.argsort(probs)
         margin = float(probs[order[-1]] - probs[order[-2]])
+
+        common = {
+            "confidence": round(margin, 3),
+            "probabilities": {
+                name: round(float(p), 3)
+                for name, p in zip(CLASS_NAMES, probs)
+            },
+            # expected level under the distribution, sum(i * p_i)
+            "continuous_score": round(
+                float(np.dot(np.arange(len(probs)), probs)), 2),
+        }
 
         if margin >= tau:
             k = int(order[-1])
@@ -185,7 +253,8 @@ class StreamingInference:
                 "mode": "point",
                 "level": k,
                 "label": CLASS_NAMES[k],
-                "confidence": round(margin, 3),
+                "adjacent": False,
+                **common,
             }
 
         lo, hi = int(min(order[-2:])), int(max(order[-2:]))
@@ -194,6 +263,6 @@ class StreamingInference:
             "level_low": lo,
             "level_high": hi,
             "label": f"{CLASS_NAMES[lo]}-to-{CLASS_NAMES[hi]}",
-            "confidence": round(margin, 3),
             "adjacent": bool(hi - lo == 1),
+            **common,
         }

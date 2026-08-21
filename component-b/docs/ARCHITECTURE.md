@@ -84,42 +84,78 @@ comparison larger than seed variance.
 ### Shipped artifact (`notebook-train-export-2way.ipynb`, single seed)
 
 Blend weight selected by pooled grid search over 17 points (0.10–0.90, step 0.05);
-performance recorded from nested per-fold selection.
+performance recorded from nested per-fold selection. Every figure below comes from
+one export and is reproduced from that run's `loso_folds.npz` — do not mix rows
+from different exports.
 
 | Metric | Value |
 | --- | --- |
-| Blend weight | `w_xgb = 0.20`, `w_cnn = 0.80` |
-| Macro F1 (nested) | 0.5970 |
-| Quadratic κ (nested) | 0.7811 |
-| Accuracy | 0.8354 |
-| Severe errors (\|e\| ≥ 2) | 0.0535 |
-| Within-1 accuracy | 0.9465 |
+| Blend weight | `w_xgb = 0.15`, `w_cnn = 0.85` |
+| Macro F1 (nested) | 0.5923 |
+| Quadratic κ (nested) | 0.7525 |
+| Accuracy | 0.8241 |
+| Severe errors (\|e\| ≥ 2) | 0.0634 |
+| Within-1 accuracy | 0.9366 |
 | Evaluation windows | 12,026 |
 
-Falls within 0.35 SD of the 5-seed estimate above — no pipeline drift.
+F1 falls 0.02 SD from the 5-seed estimate above; κ sits 1.3 SD below it. κ has
+been the more volatile of the two across every run measured, so the gap is noted
+rather than treated as drift.
 
-Selection bias (pooled − nested) measured at +0.0000. **[UNVERIFIED]** — the
-per-fold weight distribution has not been printed; confirm all 15 folds select
-(0.20, 0.80) before treating the zero as measured rather than coincidental.
+**The blend weight is selected per export, not a fixed constant.** An earlier
+export of this same notebook shipped `(0.20, 0.80)` at F1 0.5970 / κ 0.7811. The
+grid's optimum is a broad plateau rather than a sharp peak — both pairs put ~80–85%
+of the vote on the network, and 0.0047 F1 separates them, well inside the ±0.0129
+seed SD. Neither pair is more canonical than the other. Read the weight from
+`model_config.json`; `models/loader.py` refuses to run without it rather than
+defaulting to a remembered value. Do not re-export in search of a particular pair —
+selecting the run that scores best is the same bias that produced the withdrawn
+0.715.
+
+Selection bias (pooled − nested) measured at **+0.0100** (pooled F1 0.6023). The
+per-fold weight distribution, previously unrecorded, is `w_xgb = 0.15` in 10 folds,
+`0.30` in 4, `0.25` in 1 — the folds do *not* agree on one weight, which is why the
+nested figure is the one quoted.
+
+### Export reload verification
+
+The saved artifacts reproduce the in-memory predictions they were exported from,
+over the 200 windows in `artifacts/fixtures/parity_fixture.npz`:
+
+| Artifact | max \|p_saved − p_memory\| | argmax agreement |
+| --- | --- | --- |
+| `mscgca_population.keras` | 5.36e-07 | 100.00% |
+| `xgb_population.json` | 3.64e-12 | 100.00% |
+| blended (0.15/0.85) | 4.77e-07 | 100.00% |
+
+Float32 round-trip noise only. Asserted continuously by `tests/test_parity.py`.
 
 ### Artifact fingerprints (SHA-256, first 16 hex)
 
 ```
-models/mscgca_population.keras    1c6d84fd0af0c1d5
+models/mscgca_population.keras    404f04d8d13f49bc
 models/xgb_population.json        2a801f18dd6a4b47
 scalers/feature_scaler.pkl        95dcfe74685280f9
-config/model_config.json          f396b0407edaaa9e
+config/model_config.json          b1775c4c6a7cf1cf
 ```
 
 If a file on disk does not match, it is not the artifact these numbers describe.
 
+The booster and scaler are bit-identical to the earlier export — same data, same
+seed, deterministic fits. Only the network differs, which is ordinary GPU training
+nondeterminism, and that is what moved the blend optimum and the metrics.
+
+The scaler was pickled under **scikit-learn 1.6.1**; loading it under a different
+minor version warns (`InconsistentVersionWarning`) and is not guaranteed. This is
+what `requirements.txt` pins against.
+
 ### Reference: offline, non-causal
 
 The non-causal 120-beat offline model reaches macro F1 = 0.682, κ = 0.855
-(`Notebook_Improvements.ipynb` cell 14; nested estimate 0.6807 from
-`fold_store.json`). The deployable pipeline reaches ≈0.597.
+(`notebooks/01_pipeline/notebook-improvements.ipynb` cell 14). The deployable
+pipeline reaches 0.5923.
 
-**The causal pipeline does not recover offline performance.** The ~0.085 F1 gap
+**The causal pipeline does not recover offline performance.** The ~0.090 F1 gap
 is the measured cost of past-only features plus endpoint labeling, and is
 reported as such.
 
@@ -163,25 +199,71 @@ measured under midpoint labeling. Re-measure before quoting.
 When the classification margin falls below `CONFIDENCE_TAU`, the backend emits a
 **merged band** rather than forcing a single label.
 
-The wire format carries the full probability distribution alongside the decision:
+### Wire format
+
+`/stream` pushes and `/stress/latest` returns the same object. The stress
+decision is nested under `stress`; the surrounding fields are the raw physiology
+and provenance a consumer would otherwise have to re-derive from the beat stream.
 
 ```json
 {
-  "mode": "band",
-  "level_low": 1,
-  "level_high": 2,
-  "label": "mild-to-moderate",
-  "confidence": 0.54,
-  "adjacent": true,
-  "probabilities": {"relaxed": 0.08, "mild": 0.36, "moderate": 0.54, "high": 0.02},
-  "timestamp": "2026-08-19T10:32:18Z"
+  "timestamp": 1787282898.4,
+  "heartRate": 78.4,
+  "rmssd": 34.1,
+  "sdnn": 42.0,
+  "stress": {
+    "mode": "band",
+    "level_low": 1,
+    "level_high": 2,
+    "label": "mild-to-moderate",
+    "confidence": 0.10,
+    "adjacent": true,
+    "probabilities": {"relaxed": 0.08, "mild": 0.40, "moderate": 0.50, "high": 0.02},
+    "continuous_score": 1.46
+  },
+  "signalQuality": 0.92,
+  "windowStart": 1787282838.4,
+  "windowEnd": 1787282898.4
 }
 ```
 
-`mode`, `level`/`level_low`/`level_high` and `label` are the authoritative
-decision. `probabilities` is supplementary. **Consumers must not re-derive a
-label by taking argmax of `probabilities`** — doing so bypasses the confidence
-gate and reintroduces the false precision the band exists to prevent.
+In **point** mode, `stress.level` carries a single level and `level_low`/
+`level_high` are absent; `adjacent` is `false`.
+
+### Field definitions
+
+| Field | Meaning |
+| --- | --- |
+| `timestamp` | POSIX seconds, float. Always equals `windowEnd`: labeling is endpoint, so the prediction describes the window's **last** beat (§2). |
+| `heartRate` | `60000 / mean RR` of the window, bpm, one decimal. |
+| `rmssd`, `sdnn` | Milliseconds, one decimal, from `hrv_features` indices 2 and 1. **Unscaled** — the post-`StandardScaler` vector is what the model consumes and is meaningless as physiology. |
+| `stress.confidence` | The **margin** between the top two class probabilities, not the top probability. A band is emitted exactly when this falls below `CONFIDENCE_TAU` (0.15). |
+| `stress.probabilities` | The blended 4-vector before argmax, keyed by class name, 3 decimals. Rounding means it may sum to 1 ± 0.002. |
+| `stress.continuous_score` | Expected level under that distribution, `sum(i * p_i)` for `i` in 0..3, two decimals. In the example: `0(0.08) + 1(0.40) + 2(0.50) + 3(0.02) = 1.46`. **Derived convenience value, not a model output.** |
+| `signalQuality` | Fraction of the window's beats that arrived usable, two decimals. |
+| `windowStart` | `ts_buffer[0]`, POSIX float — the window's first beat. |
+| `windowEnd` | `ts_buffer[-1]`, POSIX float. Equals `timestamp`. |
+
+**`signalQuality` is heartbeat-data quality, not radio signal strength.** It
+describes how clean and usable the continuous heartbeat/RR stream arriving from
+the IoT watch was for this inference window. It is **not** Bluetooth/BLE link
+strength, network signal, or battery level.
+
+It is computed, never estimated: `clean_rr` already rejects beats outside
+300–2000 ms and beats differing from their predecessor by more than 20%, then
+interpolates over them. Its boolean mask is threaded through `/ingest` into
+`StreamingInference.observe(..., ok=)` and averaged over the window buffer. So
+92 usable beats out of 100 gives `0.92`. `1.0` means no artefacts were detected;
+lower values mean a greater share of the window rests on reconstructed data, and
+a consumer may reasonably discount the prediction accordingly.
+
+### Authority
+
+`stress.mode`, `stress.level`/`level_low`/`level_high` and `stress.label` are the
+authoritative decision. `probabilities` and `continuous_score` are supplementary.
+**Consumers must not re-derive a label by taking the argmax of `probabilities`,
+or by rounding `continuous_score`** — either bypasses the confidence gate and
+reintroduces the false precision the band exists to prevent.
 
 **[UNVERIFIED]** The 80%-coverage tradeoff (F1 +0.053, severe errors −0.036) and
 the 84.2% adjacent-error figure are midpoint-derived and uncited. Re-measure
@@ -189,11 +271,16 @@ before quoting.
 
 ## 7. Open Items
 
-- **Export verification output not recorded.** `max |p_saved − p_memory|` and
-  argmax agreement from the export notebook's reload check have not been captured
-  in this document. Record them.
-- **`model_config.json` contents not recorded here.** Paste the exported file.
-- **Per-fold blend weight distribution** — see §3.
+- **RESOLVED — Export verification output.** Recorded in §3: max
+  `|p_saved − p_memory|` = 5.36e-07 (network), 3.64e-12 (booster), argmax
+  agreement 100% on all 200 fixture windows.
+- **RESOLVED — Per-fold blend weight distribution.** Recorded in §3: 10 folds
+  select `w_xgb = 0.15`, 4 select `0.30`, 1 selects `0.25`. Selection bias is
+  +0.0100, not the +0.0000 previously assumed.
+- **`model_config.json` contents not recorded here.** The metrics, weights and
+  feature order it carries are reproduced in §3 and asserted against
+  `src/componentb/config.py` by `loader.check_config()`; the remaining fields are
+  narrative. Paste the file if a fuller record is wanted.
 - **Zero-shot sensor transfer** — WESAD (chest ECG) → Empatica (wrist PPG)
   collapses to F1 = 0.135, κ = −0.104. **[UNVERIFIED]**, and unrelated to the
   cross-dataset *mechanism* replication in the research paper, which succeeded.

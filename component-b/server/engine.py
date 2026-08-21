@@ -10,7 +10,7 @@ import logging
 
 from componentb.inference.stream import StreamingInference
 from componentb.models.loader import (
-    load_ensemble_weights, load_ft_model, load_model, load_scaler,
+    check_config, load_ensemble_weights, load_model, load_scaler,
     load_xgb_model,
 )
 
@@ -27,15 +27,17 @@ def _load_once():
         return _artifacts
 
     try:
+        # before anything is loaded: refuse if the export was trained
+        # against different windowing/feature order than src/ assembles
+        check_config()
         _artifacts = {
             "model": load_model(),
             "xgb_model": load_xgb_model(),
-            "ft_model": load_ft_model(),      # optional, may be None
             "scaler": load_scaler(),
             "weights": load_ensemble_weights(),
         }
-        log.info("models loaded; ft head: %s",
-                 "yes" if _artifacts["ft_model"] is not None else "no")
+        w_xgb, w_cnn = _artifacts["weights"]
+        log.info("models loaded; blend w_xgb=%.2f w_cnn=%.2f", w_xgb, w_cnn)
     except (FileNotFoundError, KeyError, ValueError, OSError) as exc:
         _reason = str(exc)
         log.warning("running without a model: %s", _reason)

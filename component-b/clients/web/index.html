@@ -24,10 +24,13 @@
     ws.onclose = () => metaEl.textContent = 'disconnected';
     ws.onmessage = (ev) => {
       const d = JSON.parse(ev.data);
-      levelEl.textContent = d.label;
-      levelEl.className = d.mode === 'band' ? 'band' : '';
+      // d.stress.label is authoritative — never argmax d.stress.probabilities
+      levelEl.textContent = d.stress.label;
+      levelEl.className = d.stress.mode === 'band' ? 'band' : '';
       metaEl.textContent =
-        `confidence ${d.confidence} | baseline ${d.baseline_maturity}`;
+        `confidence ${d.stress.confidence} | ` +
+        `${d.heartRate} bpm | RMSSD ${d.rmssd} ms | ` +
+        `signal quality ${d.signalQuality}`;
     };
   </script>
 </body>

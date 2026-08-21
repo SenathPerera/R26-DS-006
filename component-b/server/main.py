@@ -38,8 +38,9 @@ async def stress_latest():
 
     Returns 503 until the first window is complete — at STEP_BEATS=5 and
     WINDOW_BEATS=60 that is roughly the first 45 s of a session. Callers
-    must handle BOTH `mode` values: "point" carries `level`, "band"
-    carries `level_low`/`level_high` (docs/ARCHITECTURE.md §5).
+    must handle BOTH `stress.mode` values: "point" carries `stress.level`,
+    "band" carries `stress.level_low`/`level_high`
+    (docs/ARCHITECTURE.md §6).
     """
     if latest.is_empty:
         return JSONResponse(
@@ -71,14 +72,17 @@ async def ingest(ws: WebSocket):
             rr, ts, _ = ppg_to_rr(batch.ppg, batch.sample_rate)
             if rr is None:
                 continue                      # too few beats in this batch
-            rr, ts = clean_rr(rr, ts)
+            # `ok` marks which beats survived filtering; it becomes
+            # signalQuality on the wire, so it travels with the beats
+            rr, ts, ok = clean_rr(rr, ts)
             if engine is None:
                 continue                      # beats detected, nothing to run
 
-            for beat, offset in zip(rr, ts):
+            for beat, offset, usable in zip(rr, ts, ok):
                 # buffering is per beat; inference only at step boundaries
                 if engine.observe(beat, batch.temperature,
-                                  ts=batch.timestamp + float(offset)):
+                                  ts=batch.timestamp + float(offset),
+                                  ok=bool(usable)):
                     out = engine.predict()
                     await broadcast(StressPrediction(**out).model_dump())
     except WebSocketDisconnect:

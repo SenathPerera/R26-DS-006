@@ -15,8 +15,10 @@ ARTIFACTS = Path(__file__).resolve().parents[3] / "artifacts"
 def load_model(name="mscgca_population"):
     """Load the population MS-CGCA network (`p_cnn` in the blend).
 
-    Name kept as `load_model` for the existing callers; the artifact it
-    loads is the MS-CGCA network, not the superseded CNN-LSTM.
+    Loaded with `compile=False`: the network was trained under
+    `SparseFocalLoss`, whose `__init__` does not accept the `name` and
+    `reduction` kwargs Keras passes when deserializing, so restoring the
+    loss raises. Inference does not need it.
     """
     import tensorflow as tf
     path = ARTIFACTS / "models" / f"{name}.keras"
@@ -42,22 +44,6 @@ def load_xgb_model(name="xgb_population"):
     return model
 
 
-def load_ft_model(name="mscgca_finetuned"):
-    """Load the personalised fine-tuned MS-CGCA head.
-
-    Third member of the shipped ensemble (docs/ARCHITECTURE.md §2,
-    blended as `p_ft` in notebook-newmodel.ipynb cell 7). Unlike the
-    other two this one is per-subject, so it is optional: a brand new
-    user has no fine-tuned head yet and the blend falls back to the
-    population pair.
-    """
-    import tensorflow as tf
-    path = ARTIFACTS / "models" / f"{name}.keras"
-    if not path.exists():
-        return None
-    return tf.keras.models.load_model(path, compile=False)
-
-
 def load_scaler(name="feature_scaler"):
     path = ARTIFACTS / "scalers" / f"{name}.pkl"
     if not path.exists():
@@ -75,24 +61,74 @@ def load_config(name="model_config"):
         return json.load(f)
 
 
-def load_ensemble_weights(name="model_config"):
-    """Blend weights for (p_ft, p_xgb, p_cnn), summing to 1.
+def check_config(name="model_config"):
+    """Assert the exported config still describes the pipeline in config.py.
 
-    These are NOT derivable from the notebook as it stands: cell 7 picks
-    `w_star` per outer fold by nested CV, so there are 15 triples, not
-    one. Whichever triple is deployed is a decision that has to be made
-    and recorded — this function refuses to guess.
+    Feature order and channel order are load-bearing — the scaler and the
+    booster were fit against exact positions, so a mismatch produces
+    plausible-looking numbers rather than an exception. The export notebook
+    writes what it actually trained on; this refuses to run if that has
+    drifted from what `src/` assembles.
+
+    Returns the config dict so callers can reuse it.
+    """
+    from componentb import config as cfg
+    exported = load_config(name)
+
+    expected = {
+        "window_beats": cfg.WINDOW_BEATS,
+        "step_beats": cfg.STEP_BEATS,
+        "labeling": cfg.LABELING,
+        "ewma_halflives": cfg.EWMA_HALFLIVES,
+        "zscore_halflife": cfg.ZSCORE_HALFLIFE,
+        "population_rr_ms": cfg.POPULATION_RR_MS,
+        "roll_window": cfg.ROLL_WINDOW,
+        "xgb_feature_dim": cfg.XGB_FEATURE_DIM,
+        "xgb_feature_order": cfg.XGB_FEATURE_ORDER,
+        "cnn_sequence_channels": cfg.CNN_SEQUENCE_CHANNELS,
+        "cnn_circadian_dim": cfg.CIRCADIAN_DIM,
+        "class_names": cfg.CLASS_NAMES,
+        "n_classes": cfg.N_CLASSES,
+    }
+
+    mismatches = [
+        f"  {key}: exported {exported[key]!r} != config.py {want!r}"
+        for key, want in expected.items()
+        if key in exported and exported[key] != want
+    ]
+    if mismatches:
+        raise ValueError(
+            "model_config.json disagrees with src/componentb/config.py:\n"
+            + "\n".join(mismatches)
+            + "\nThe artifacts were trained against different settings than "
+              "this code assembles. Re-export or fix config.py — do not "
+              "run inference across this gap."
+        )
+    return exported
+
+
+def load_ensemble_weights(name="model_config"):
+    """Blend weights `(w_xgb, w_cnn)` for the 2-way ensemble, summing to 1.
+
+    The schema is the one `notebook-train-export-2way.ipynb` cell 8 writes:
+
+        "ensemble_weights": {"xgb": float(wx), "cnn": float(wc)}
+
+    The shipped pair is (0.20, 0.80), selected by pooled grid search over
+    17 points. It is not hardcoded here: the weights are what produce the
+    reported F1, so a missing or malformed value must fail loudly rather
+    than fall back to a default and silently ship a different model.
     """
     cfg = load_config(name)
     try:
         w = cfg["ensemble_weights"]
-        weights = (float(w["w_ft"]), float(w["w_xgb"]), float(w["w_cnn"]))
+        weights = (float(w["xgb"]), float(w["cnn"]))
     except (KeyError, TypeError) as exc:
         raise KeyError(
             "model_config.json has no usable 'ensemble_weights' "
-            "{w_ft, w_xgb, w_cnn}. Export the chosen triple from "
-            "notebook-newmodel.ipynb cell 7 — do not substitute defaults, "
-            "the blend is what produces the reported F1."
+            "{xgb, cnn}. Export them from notebook-train-export-2way.ipynb "
+            "cell 8 — do not substitute defaults, the blend is what "
+            "produces the reported F1."
         ) from exc
 
     total = sum(weights)
