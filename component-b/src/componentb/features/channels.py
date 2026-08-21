@@ -8,7 +8,7 @@ ones the model was trained on — training-serving skew that raises no
 error and silently degrades predictions.
 
 This module keeps that state per beat instead. Channel order, from
-notebook-newmodel.ipynb cell 3:
+notebook-train-export-2way.ipynb cell 1 (CNN_SEQUENCE_CHANNELS):
 
     [rn, rm, sd, hr, rrn, tn, trn]
 

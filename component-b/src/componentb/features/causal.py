@@ -1,6 +1,7 @@
 """Causal replacements for whole-session transforms.
 
-Verbatim from notebooks/05_deployment/notebook-newmodel.ipynb cell 3
+Verbatim from notebooks/05_deployment/notebook-train-export-2way.ipynb
+cell 2
 ("Causal Replacements for Live Deployment") — these produced the
 reported results, so they are not to be rewritten or "optimised".
 

@@ -1,11 +1,12 @@
 """Circadian / time-of-day features.
 
-Verbatim from notebooks/05_deployment/notebook-newmodel.ipynb cell 3.
+Verbatim from notebooks/05_deployment/notebook-train-export-2way.ipynb
+cell 2.
 
 Two different vectors, both load-bearing and NOT interchangeable:
 
 - `circ7`  -> 7 dims, the MS-CGCA network's second input, projected into
-              the cross-attention Query (docs/ARCHITECTURE.md §2).
+              the cross-attention Query (docs/ARCHITECTURE.md §3).
 - `circ_features` -> 5 dims, the tail of the flat XGBoost vector.
 
 `ts` is a POSIX timestamp in seconds; only time-of-day is used.
