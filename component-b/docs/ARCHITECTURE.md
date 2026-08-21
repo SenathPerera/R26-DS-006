@@ -1,10 +1,18 @@
 # Architecture Decisions
 
-Each decision below is traceable to a measured result across executed notebook pipelines. Where a number could not be traced to a specific notebook cell, it has been removed or explicitly flagged.
+Every number below traces to an executed notebook cell. Numbers that could not be
+traced are marked **[UNVERIFIED]** and must not be reused until re-measured.
+
+**Revision note.** All figures predating `notebook-deployment-decision.ipynb` were
+measured under midpoint labeling and were inflated by roughly 0.07–0.08 macro-F1.
+They have been replaced. Do not restore them from git history.
 
 ## 1. Inference Runs on the Backend, Not the Headset or Phone
 
-Quest 2 shares its GPU between VR rendering and compute; dropped frames cause motion sickness. Running inference on the phone would still require a relay to reach the Quest and website, so it adds no architectural simplification while duplicating the validated Python signal processing pipeline in another language.
+Quest 2 shares its GPU between VR rendering and compute; dropped frames cause
+motion sickness. Running inference on the phone would still need a relay to reach
+the Quest and website, so it adds no simplification while duplicating the
+validated Python pipeline in another language.
 
 ```text
 Wearable (PPG + TMP117)
@@ -20,113 +28,142 @@ Wearable (PPG + TMP117)
  Quest  Website
 ```
 
-## 2. Model Architecture: 60-Beat Causal MS-CGCA 3-Way Ensemble
+## 2. Labeling: Endpoint, Not Midpoint
 
-The deployed system runs a **Nested 3-Way Ensemble** combining XGBoost, a novel **Population Multi-Scale Circadian-Guided Cross-Attention (MS-CGCA)** deep network, and a **Personalised Fine-Tuned MS-CGCA Head**.
+Each window is labeled at its **last beat** (`y = labels[e-1]`), and the
+time-of-day feature index follows the label.
 
-All models operate on **60-beat ultra-short windows** (~45-second latency) and **past-only causal EWMA features** to ensure 100% zero future-data leakage during live streaming.
+The pipeline previously labeled at the window centre (`labels[mid]`). A model
+trained that way predicts a moment that 30 beats of its own input postdate — it
+cannot run live, because those beats have not happened yet.
 
-Across repeated executions under nested outer-subject evaluation:
+Measured cost of the correction, 5 seeds per configuration
+(`notebook-deployment-decision.ipynb`, 40 runs):
 
-- **Macro F1:** 0.6708 – 0.6825 (mean 0.6766)
-- **Quadratic Kappa (κ):** 0.8386 – 0.8497
-- **Overall Accuracy:** 91.69% – 91.93%
-- **Evaluation Windows:** 9,650 post-calibration windows. Cell 3 slices
-  12,026 windows in total across the 15 subjects; `strat_calib` then
-  holds back a ~20% stratified slice of each held-out subject as
-  simulated user calibration, leaving ~80% — 9,650 summed across the
-  outer folds — as `eval_local`. All reported metrics are computed on
-  `eval_local` only, so 9,650 is the correct denominator.
-  (`artifacts/config/fold_store.json`; matches `total_eval_windows` in
-  `model_config.json`.)
-
-### Empirical Model Comparison (Deployable Causal Pipelines)
-
-| **Pipeline / Model**               | **Window Size**      | **Causal / Deployable?** | **Macro F1**        | **Quadratic κ**     | **Overall Accuracy** | **Source**                         |
-| ---------------------------------- | -------------------- | ------------------------ | ------------------- | ------------------- | -------------------- | ---------------------------------- |
-| Naive Causal XGBoost alone         | 120 beats (~90s)     | Yes (Past EWMA)          | 0.5810              | 0.7740              | 82.30%               | `notebook-causalretrain.ipynb`     |
-| Naive Causal CNN-LSTM alone        | 120 beats (~90s)     | Yes (Past EWMA)          | 0.5140              | 0.6600              | 78.10%               | `notebook-causalretrain.ipynb`     |
-| Naive Causal 2-Way Ensemble        | 120 beats (~90s)     | Yes (Past EWMA)          | 0.5790              | 0.7510              | 82.60%               | `notebook-causalretrain.ipynb`     |
-| **Shipped MS-CGCA 3-Way Ensemble** | **60 beats (~45s)** | **Yes (100% Causal)**    | **0.6708 – 0.6825** | **0.8386 – 0.8497** | **91.69% – 91.93%**  | `notebook-newmodel.ipynb` (Cell 7) |
-
-> **Reference Offline Score:** The non-causal 120-beat offline benchmark achieved Macro F1 = 0.6822 and κ = 0.8598 under nested outer-subject evaluation. The deployable 60-beat MS-CGCA causal pipeline (**F1 = 0.6708 – 0.6825, κ = 0.8386 – 0.8497**) completely recovers performance while halving live inference latency and eliminating future lookahead.
-
-### Deployed Blend Weights
-
-Cell 7 selects `w_star` per outer fold, so the notebook yields fifteen
-triples rather than one deployable set. The shipped triple is
-`(w_ft, w_xgb, w_cnn) = (0.30, 0.35, 0.35)`, exported in
-`artifacts/config/model_config.json` and loaded by
-`models/loader.load_ensemble_weights()` — inference refuses to run
-without it rather than falling back to a default.
-
-Two independent justifications, both re-derived from
-`artifacts/config/fold_store.json` (15 folds, 9,650 windows):
-
-| Selection basis | Result |
-| --- | --- |
-| Mode of the outer-fold grid search | `(0.30, 0.35, 0.35)` in **14 of 15** folds |
-| Pooled sweep of the full grid | best macro F1 **0.6875**, κ **0.8614**, accuracy **92.21%**, severe errors **2.04%** — first on every metric |
-
-The pooled figures select and evaluate on the same windows, so the
-unbiased estimate remains the nested **macro F1 = 0.6807**, reproduced
-from the fold store. Each member is load-bearing: alone, XGBoost scores
-0.6519, the population MS-CGCA 0.6028, and the fine-tuned head 0.6631.
-
-### Model Lifecycle: Two Static Artifacts, One Runtime Head
-
-`xgb_population.json` and `mscgca_population.keras` ship as static
-artifacts for every user. The fine-tuned head is **not** a shipped file —
-it is per-user calibration state created at runtime:
-
-| Phase | Head | Weights |
+| Configuration | midpoint − endpoint F1 | midpoint − endpoint κ |
 | --- | --- | --- |
-| Cold start (no calibration yet) | none | 2-way, renormalised to `w_xgb = 0.50`, `w_cnn = 0.50` |
-| Post-calibration (~2 min warmup) | `mscgca_finetuned_<user_id>.keras` | 3-way, `w_ft = 0.30`, `w_xgb = 0.35`, `w_cnn = 0.35` |
+| XGBoost alone | +0.084 | +0.075 |
+| MS-CGCA 2-way | +0.071 | +0.034 |
+| BiLSTM 2-way | +0.076 | +0.034 |
+| MS-CGCA 3-way | +0.079 | +0.042 |
 
-After the warmup the backend fine-tunes the top dense layers of the
-population network on that user's calibration buffer and saves the
-session model. `(0.35, 0.35)` renormalised over 0.70 is exactly
-0.50/0.50, so cold start needs no separate weight table — both rows are
-asserted in `tests/test_parity.py`.
+The inflation is consistent across architectures, so it is a property of the
+labeling scheme rather than of any model.
 
-### Key Architectural Innovations in the MS-CGCA Deep Network
+## 3. Model: 60-Beat Causal MS-CGCA 2-Way Ensemble
 
-1. **Multi-Scale Causal Convolutions:** Replaces single-kernel convolutions with three parallel 1D convolution branches using dilation rates of 1, 2, and 4. This extracts beat-to-beat variability, short recovery trends, and window-level shifts simultaneously without looking into future timesteps.
-2. **Circadian-Guided Cross-Attention:** Instead of passively concatenating time-of-day variables at the output layer, the 7-dimensional circadian/baseline vector is projected into an attention Query, searching over the sequence Keys/Values generated by the unidirectional LSTM. The network actively uses physiological baseline context to search the heartbeat sequence for stress anomalies.
-3. **Strict Causal Padding & Unidirectional Flow:** Replaces `padding='same'` with `padding='causal'` and uses unidirectional `LSTM(128)` layers, guaranteeing zero future-sample lookahead during live array streaming.
+XGBoost over 25 engineered features, blended with a population Multi-Scale
+Circadian-Guided Cross-Attention network over the raw beat sequence. 60-beat
+windows (~45 s latency), past-only causal EWMA baselines.
 
-## 3. Causal EWMA Baseline Engine (Zero Whole-Session Fitting)
+### Configuration comparison (endpoint labeling, 5 seeds, identical eval windows)
 
-Whole-session Cosinor fitting requires future data points and cannot run on a live stream. The deployed engine replaces whole-session Cosinor fits with past-only multi-timescale Exponentially Weighted Moving Averages (EWMA):
+| Configuration | Macro F1 | Quadratic κ |
+| --- | --- | --- |
+| BiLSTM 2-way | 0.5993 ± 0.0120 | 0.7897 ± 0.0232 |
+| MS-CGCA 3-way | 0.5991 ± 0.0109 | 0.7773 ± 0.0225 |
+| **MS-CGCA 2-way (shipped)** | **0.5925 ± 0.0129** | **0.7755 ± 0.0174** |
+| XGBoost alone | 0.5703 ± 0.0040 | 0.7229 ± 0.0036 |
 
-- **Fast EWMA (τ = 60 beats):** Captures rapid autonomic shifts.
-- **Medium EWMA (τ = 300 beats):** Primary expected within-session baseline reference.
-- **Slow EWMA (τ = 1800 beats):** Tracks long-term baseline drift.
+**Why 2-way over 3-way.** The personalised third member adds +0.0066 F1,
+Wilcoxon p = 0.625 — indistinguishable from seed noise. It costs per-user
+calibration buffering, runtime fine-tuning, and a third artifact, and the 2-way
+path must be implemented regardless for cold start. Under the old midpoint
+labeling it appeared to add +0.031; that gain was an artifact.
 
-All tensor normalisations (`causal_zscore`), rolling short-term variability (`roll_rmssd_causal`), and residual calculations are evaluated strictly on past-only buffers.
+**Why MS-CGCA over BiLSTM.** BiLSTM scores 0.0068 F1 higher (p = 0.625, not a
+real difference) and leads on κ by 0.014, also inside one SD. MS-CGCA is selected
+on causality grounds: it is causal by construction, whereas BiLSTM is admissible
+only *because* the label sits at the window's end and would silently leak future
+data again if the windowing changed.
 
-## 4. Cold-Start Seeding from the Population Mean
+**Why not XGBoost alone.** It trails the sequence models by 0.022–0.030 F1 and
+~0.05 κ at p = 0.0625 — the floor for n = 5 paired seeds, and the only gap in the
+comparison larger than seed variance.
 
-| **Cold-Start Strategy**            | **Macro F1** | **Scientific Impact**                                            | **Source**                            |
-| ---------------------------------- | ------------ | ---------------------------------------------------------------- | ------------------------------------- |
-| No baseline (Raw HRV)              | 0.470        | Performance floor                                                | `Component_B_Research_Explained.docx` |
-| Donor-cluster ("Borrowed")         | 0.475        | **Rejected:** Worse than population mean (p = 0.0026, d = -1.01) | `Component_B_Research_Explained.docx` |
-| **Population Mean Seed**           | **0.500**    | **Shipped:** Stable initial seed (`POPULATION_RR_MS = 780.0 ms`) | `notebook-causalretrain.ipynb`        |
-| Target subject's own full baseline | 0.569        | Ceiling reference                                                | `Component_B_Research_Explained.docx` |
+### Shipped artifact (`notebook-train-export-2way.ipynb`, single seed)
 
-**Rule:** Do not cluster new users into donor groups. A new user's causal EWMA baseline seeds directly from the population mean (780.0 ms) and updates dynamically as live heartbeats arrive.
+Blend weight selected by pooled grid search over 17 points (0.10–0.90, step 0.05);
+performance recorded from nested per-fold selection.
 
-## 5. Confidence Gating & Merged Band Output
+| Metric | Value |
+| --- | --- |
+| Blend weight | `w_xgb = 0.20`, `w_cnn = 0.80` |
+| Macro F1 (nested) | 0.5970 |
+| Quadratic κ (nested) | 0.7811 |
+| Accuracy | 0.8354 |
+| Severe errors (\|e\| ≥ 2) | 0.0535 |
+| Within-1 accuracy | 0.9465 |
+| Evaluation windows | 12,026 |
 
-Among low-confidence predictions, **84.2% of errors occur between adjacent stress classes**. This matches the measured physiological overlap between adjacent stress intensity tiers (ε² = 0.03 for levels 2 vs. 3).
+Falls within 0.35 SD of the 5-seed estimate above — no pipeline drift.
 
-At an **80% coverage operating threshold**:
+Selection bias (pooled − nested) measured at +0.0000. **[UNVERIFIED]** — the
+per-fold weight distribution has not been printed; confirm all 15 folds select
+(0.20, 0.80) before treating the zero as measured rather than coincidental.
 
-- **Macro F1:** +0.053 improvement on answered windows.
-- **Severe Errors (|e| ≥ 2):** -0.036 absolute reduction.
+### Artifact fingerprints (SHA-256, first 16 hex)
 
-When the classification margin falls below the confidence threshold, the backend emits a **merged band** (e.g., `"mild-to-moderate"`) to Component C (VR Adaptation Engine) rather than forcing an overconfident single label.
+```
+models/mscgca_population.keras    1c6d84fd0af0c1d5
+models/xgb_population.json        2a801f18dd6a4b47
+scalers/feature_scaler.pkl        95dcfe74685280f9
+config/model_config.json          f396b0407edaaa9e
+```
+
+If a file on disk does not match, it is not the artifact these numbers describe.
+
+### Reference: offline, non-causal
+
+The non-causal 120-beat offline model reaches macro F1 = 0.682, κ = 0.855
+(`Notebook_Improvements.ipynb` cell 14; nested estimate 0.6807 from
+`fold_store.json`). The deployable pipeline reaches ≈0.597.
+
+**The causal pipeline does not recover offline performance.** The ~0.085 F1 gap
+is the measured cost of past-only features plus endpoint labeling, and is
+reported as such.
+
+### MS-CGCA network
+
+1. **Multi-scale causal convolutions** — three parallel `Conv1D(32, 3)` branches
+   at dilation 1, 2, 4, `padding='causal'`. Beat-to-beat, short-trend and
+   window-level structure without lookahead.
+2. **Unidirectional `LSTM(128)`** — produces keys and values. Not bidirectional.
+3. **Circadian-guided cross-attention** — the 7-dim circadian/baseline vector is
+   projected to `Dense(128)`, repeated, and used as the attention *query* over the
+   LSTM sequence. Not concatenated at the output.
+4. Global average pooling, concatenated with `Dense(32)` of the circadian vector,
+   then `Dense(64)` → `Dense(4, softmax)`.
+
+## 4. Causal EWMA Baseline Engine
+
+Whole-session Cosinor fitting needs future samples and cannot run on a live
+stream. Replaced with past-only multi-timescale EWMA:
+
+- **Fast (τ = 60 beats)** — rapid autonomic shifts
+- **Medium (τ = 300 beats)** — primary within-session reference
+- **Slow (τ = 1800 beats)** — long-term drift
+
+`causal_zscore`, `roll_rmssd_causal` and residual calculations all evaluate on
+past-only buffers. Verified in `tests/test_causality.py` by corrupting future
+samples and asserting past output is unchanged.
+
+## 5. Cold-Start Seeding from the Population Mean
+
+A new user's EWMA baseline seeds from `POPULATION_RR_MS = 780.0` ms and updates
+as beats arrive. Do not cluster new users into donor groups.
+
+**[UNVERIFIED]** The supporting figures (no-baseline 0.470, donor-cluster 0.475,
+population mean 0.500, own-baseline ceiling 0.569) cite
+`Component_B_Research_Explained.docx`, which is not in this repo, and were
+measured under midpoint labeling. Re-measure before quoting.
+
+## 6. Confidence Gating & Merged Band Output
+
+When the classification margin falls below `CONFIDENCE_TAU`, the backend emits a
+**merged band** rather than forcing a single label.
+
+The wire format carries the full probability distribution alongside the decision:
 
 ```json
 {
@@ -135,11 +172,28 @@ When the classification margin falls below the confidence threshold, the backend
   "level_high": 2,
   "label": "mild-to-moderate",
   "confidence": 0.54,
-  "adjacent": true
+  "adjacent": true,
+  "probabilities": {"relaxed": 0.08, "mild": 0.36, "moderate": 0.54, "high": 0.02},
+  "timestamp": "2026-08-19T10:32:18Z"
 }
 ```
 
-## 6. Resolved & Open Items
+`mode`, `level`/`level_low`/`level_high` and `label` are the authoritative
+decision. `probabilities` is supplementary. **Consumers must not re-derive a
+label by taking argmax of `probabilities`** — doing so bypasses the confidence
+gate and reintroduces the false precision the band exists to prevent.
 
-- **RESOLVED — Causal Retraining & 60-Beat Windowing:** Fully executed in `notebook-newmodel.ipynb`. Halved live inference latency to 60 beats (~45 seconds) and recovered causal ensemble Macro F1 to **0.6708 – 0.6825** (κ = 0.8386 – 0.8497, Accuracy = 91.69% – 91.93%) across 9,650 post-calibration evaluation windows.
-- **OPEN — Zero-Shot Sensor Domain Transfer:** Direct cross-dataset transfer from chest ECG (WESAD) to wrist PPG (Empatica) results in performance collapse (F1 = 0.135, κ = -0.104) due to sensor artifacts and pulse transit variability. Unsupervised Domain Adaptation (MMD / CORAL feature alignment) remains an open boundary for future sensor-agnostic deployment.
+**[UNVERIFIED]** The 80%-coverage tradeoff (F1 +0.053, severe errors −0.036) and
+the 84.2% adjacent-error figure are midpoint-derived and uncited. Re-measure
+before quoting.
+
+## 7. Open Items
+
+- **Export verification output not recorded.** `max |p_saved − p_memory|` and
+  argmax agreement from the export notebook's reload check have not been captured
+  in this document. Record them.
+- **`model_config.json` contents not recorded here.** Paste the exported file.
+- **Per-fold blend weight distribution** — see §3.
+- **Zero-shot sensor transfer** — WESAD (chest ECG) → Empatica (wrist PPG)
+  collapses to F1 = 0.135, κ = −0.104. **[UNVERIFIED]**, and unrelated to the
+  cross-dataset *mechanism* replication in the research paper, which succeeded.
