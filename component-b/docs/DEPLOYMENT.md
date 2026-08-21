@@ -31,17 +31,52 @@ Point clients at `ws://<that-ip>:8000/stream`.
 | `/docs` | `GET` | auto-generated schema for the other components |
 
 `/stress/latest` returns `503` until the first full window (~45 s at
-`WINDOW_BEATS = 60`). Consumers must handle both `mode` values —
-`"point"` carries `level`, `"band"` carries `level_low`/`level_high`.
+`WINDOW_BEATS = 60`). Consumers must handle both `stress.mode` values —
+`"point"` carries `stress.level`, `"band"` carries
+`stress.level_low`/`level_high`.
 
 ```bash
 curl http://<that-ip>:8000/stress/latest
 ```
 
-Every prediction also carries `probabilities`, the blended 4-vector keyed
-by class name, and `timestamp` as POSIX seconds (a float). `probabilities`
-is supplementary: **do not re-derive a label from its argmax**, which
-bypasses the confidence gate. See `ARCHITECTURE.md` §6.
+```json
+{
+  "timestamp": 1787282898.4,
+  "heartRate": 78.4,
+  "rmssd": 34.1,
+  "sdnn": 42.0,
+  "stress": {
+    "mode": "band",
+    "level_low": 1,
+    "level_high": 2,
+    "label": "mild-to-moderate",
+    "confidence": 0.10,
+    "adjacent": true,
+    "probabilities": {"relaxed": 0.08, "mild": 0.40, "moderate": 0.50, "high": 0.02},
+    "continuous_score": 1.46
+  },
+  "signalQuality": 0.92,
+  "windowStart": 1787282838.4,
+  "windowEnd": 1787282898.4
+}
+```
+
+`/stream` pushes the identical object. Points to watch:
+
+- `timestamp` is POSIX seconds (float) and always equals `windowEnd` — labeling
+  is endpoint, so the prediction describes the window's last beat.
+- `heartRate` (bpm), `rmssd` and `sdnn` (ms) are raw physical values, not the
+  scaled vector the model consumes.
+- `confidence` is the **margin** between the top two classes, not the top
+  probability.
+- **`signalQuality` is heartbeat-data quality, not BLE/network signal strength
+  or battery.** It is the fraction of the window's RR intervals that passed
+  `clean_rr` without being rejected and interpolated — `0.92` means 92 of 100
+  arrived usable, and `1.0` means no artefacts were found.
+- `probabilities` and `continuous_score` are supplementary: **do not re-derive a
+  label from either**, which bypasses the confidence gate.
+
+Full field definitions in `ARCHITECTURE.md` §6.
 
 ## Required artifacts
 

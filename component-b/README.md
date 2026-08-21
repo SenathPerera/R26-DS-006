@@ -79,22 +79,42 @@ were compared, and which older numbers were withdrawn.
 
 ## Output format
 
-Each prediction carries the full probability distribution alongside the decision:
+Each prediction carries the stress decision plus the raw physiology behind it:
 
 ```json
 {
-  "mode": "point",
-  "level": 2,
-  "label": "moderate",
-  "confidence": 0.81,
-  "probabilities": {"relaxed": 0.04, "mild": 0.11, "moderate": 0.81, "high": 0.04},
-  "timestamp": 1787282898.4
+  "timestamp": 1787282898.4,
+  "heartRate": 78.4,
+  "rmssd": 34.1,
+  "sdnn": 42.0,
+  "stress": {
+    "mode": "band",
+    "level_low": 1,
+    "level_high": 2,
+    "label": "mild-to-moderate",
+    "confidence": 0.10,
+    "adjacent": true,
+    "probabilities": {"relaxed": 0.08, "mild": 0.40, "moderate": 0.50, "high": 0.02},
+    "continuous_score": 1.46
+  },
+  "signalQuality": 0.92,
+  "windowStart": 1787282838.4,
+  "windowEnd": 1787282898.4
 }
 ```
 
-When the model is not confident enough to separate two adjacent levels, `mode`
-is `"band"` and the payload carries `level_low`/`level_high` instead of `level`.
+When the model *is* confident enough to separate two adjacent levels, `stress.mode`
+is `"point"` and `stress.level` replaces `level_low`/`level_high`.
 
-`mode`, `level` and `label` are authoritative. `probabilities` is supplementary —
-**do not re-derive a label from its argmax**, as that bypasses the confidence
-gate.
+- `rmssd`/`sdnn` are milliseconds and `heartRate` is bpm — real units, not the
+  scaled values the model consumes.
+- `confidence` is the **margin** between the top two classes, not the top
+  probability. Below `CONFIDENCE_TAU` you get a band.
+- `signalQuality` is the fraction of the window's heartbeats that arrived usable
+  from the watch — **heartbeat-data quality, not BLE or network signal strength**.
+- `continuous_score` is `sum(i * p_i)`, a derived convenience value.
+
+`stress.mode`, `stress.level` and `stress.label` are authoritative.
+`probabilities` and `continuous_score` are supplementary — **do not re-derive a
+label from either**, as that bypasses the confidence gate. Full field definitions
+in `docs/ARCHITECTURE.md` §6.

@@ -199,28 +199,71 @@ measured under midpoint labeling. Re-measure before quoting.
 When the classification margin falls below `CONFIDENCE_TAU`, the backend emits a
 **merged band** rather than forcing a single label.
 
-The wire format carries the full probability distribution alongside the decision:
+### Wire format
+
+`/stream` pushes and `/stress/latest` returns the same object. The stress
+decision is nested under `stress`; the surrounding fields are the raw physiology
+and provenance a consumer would otherwise have to re-derive from the beat stream.
 
 ```json
 {
-  "mode": "band",
-  "level_low": 1,
-  "level_high": 2,
-  "label": "mild-to-moderate",
-  "confidence": 0.54,
-  "adjacent": true,
-  "probabilities": {"relaxed": 0.08, "mild": 0.36, "moderate": 0.54, "high": 0.02},
-  "timestamp": 1787282898.4
+  "timestamp": 1787282898.4,
+  "heartRate": 78.4,
+  "rmssd": 34.1,
+  "sdnn": 42.0,
+  "stress": {
+    "mode": "band",
+    "level_low": 1,
+    "level_high": 2,
+    "label": "mild-to-moderate",
+    "confidence": 0.10,
+    "adjacent": true,
+    "probabilities": {"relaxed": 0.08, "mild": 0.40, "moderate": 0.50, "high": 0.02},
+    "continuous_score": 1.46
+  },
+  "signalQuality": 0.92,
+  "windowStart": 1787282838.4,
+  "windowEnd": 1787282898.4
 }
 ```
 
-`mode`, `level`/`level_low`/`level_high` and `label` are the authoritative
-decision. `probabilities` is supplementary. **Consumers must not re-derive a
-label by taking argmax of `probabilities`** — doing so bypasses the confidence
-gate and reintroduces the false precision the band exists to prevent.
+In **point** mode, `stress.level` carries a single level and `level_low`/
+`level_high` are absent; `adjacent` is `false`.
 
-`timestamp` is POSIX seconds as a float, matching `StressPrediction.timestamp`.
-It is the time of the window's **last** beat — the moment being predicted (§2).
+### Field definitions
+
+| Field | Meaning |
+| --- | --- |
+| `timestamp` | POSIX seconds, float. Always equals `windowEnd`: labeling is endpoint, so the prediction describes the window's **last** beat (§2). |
+| `heartRate` | `60000 / mean RR` of the window, bpm, one decimal. |
+| `rmssd`, `sdnn` | Milliseconds, one decimal, from `hrv_features` indices 2 and 1. **Unscaled** — the post-`StandardScaler` vector is what the model consumes and is meaningless as physiology. |
+| `stress.confidence` | The **margin** between the top two class probabilities, not the top probability. A band is emitted exactly when this falls below `CONFIDENCE_TAU` (0.15). |
+| `stress.probabilities` | The blended 4-vector before argmax, keyed by class name, 3 decimals. Rounding means it may sum to 1 ± 0.002. |
+| `stress.continuous_score` | Expected level under that distribution, `sum(i * p_i)` for `i` in 0..3, two decimals. In the example: `0(0.08) + 1(0.40) + 2(0.50) + 3(0.02) = 1.46`. **Derived convenience value, not a model output.** |
+| `signalQuality` | Fraction of the window's beats that arrived usable, two decimals. |
+| `windowStart` | `ts_buffer[0]`, POSIX float — the window's first beat. |
+| `windowEnd` | `ts_buffer[-1]`, POSIX float. Equals `timestamp`. |
+
+**`signalQuality` is heartbeat-data quality, not radio signal strength.** It
+describes how clean and usable the continuous heartbeat/RR stream arriving from
+the IoT watch was for this inference window. It is **not** Bluetooth/BLE link
+strength, network signal, or battery level.
+
+It is computed, never estimated: `clean_rr` already rejects beats outside
+300–2000 ms and beats differing from their predecessor by more than 20%, then
+interpolates over them. Its boolean mask is threaded through `/ingest` into
+`StreamingInference.observe(..., ok=)` and averaged over the window buffer. So
+92 usable beats out of 100 gives `0.92`. `1.0` means no artefacts were detected;
+lower values mean a greater share of the window rests on reconstructed data, and
+a consumer may reasonably discount the prediction accordingly.
+
+### Authority
+
+`stress.mode`, `stress.level`/`level_low`/`level_high` and `stress.label` are the
+authoritative decision. `probabilities` and `continuous_score` are supplementary.
+**Consumers must not re-derive a label by taking the argmax of `probabilities`,
+or by rounding `continuous_score`** — either bypasses the confidence gate and
+reintroduces the false precision the band exists to prevent.
 
 **[UNVERIFIED]** The 80%-coverage tradeoff (F1 +0.053, severe errors −0.036) and
 the 84.2% adjacent-error figure are midpoint-derived and uncited. Re-measure
