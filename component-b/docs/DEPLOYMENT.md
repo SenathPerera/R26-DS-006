@@ -64,8 +64,10 @@ The scaler must be the exact object fitted during training; one fitted on
 different statistics normalises without error and silently moves every
 prediction.
 
-The shipped ensemble has **two** members, blended at `w_xgb = 0.20`,
-`w_cnn = 0.80` read from `model_config.json`. There is no personalised
+The shipped ensemble has **two** members, blended at the weights read from
+`model_config.json` — currently `w_xgb = 0.15`, `w_cnn = 0.85`. That pair is
+re-selected on every export, so treat the file as authoritative rather than
+this line. There is no personalised
 third head: it was evaluated and rejected (+0.0066 macro-F1, Wilcoxon
 p = 0.625 — see `ARCHITECTURE.md` §3). If you find a
 `mscgca_finetuned*.keras` anywhere, it is from the superseded pipeline and

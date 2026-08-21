@@ -84,42 +84,78 @@ comparison larger than seed variance.
 ### Shipped artifact (`notebook-train-export-2way.ipynb`, single seed)
 
 Blend weight selected by pooled grid search over 17 points (0.10–0.90, step 0.05);
-performance recorded from nested per-fold selection.
+performance recorded from nested per-fold selection. Every figure below comes from
+one export and is reproduced from that run's `loso_folds.npz` — do not mix rows
+from different exports.
 
 | Metric | Value |
 | --- | --- |
-| Blend weight | `w_xgb = 0.20`, `w_cnn = 0.80` |
-| Macro F1 (nested) | 0.5970 |
-| Quadratic κ (nested) | 0.7811 |
-| Accuracy | 0.8354 |
-| Severe errors (\|e\| ≥ 2) | 0.0535 |
-| Within-1 accuracy | 0.9465 |
+| Blend weight | `w_xgb = 0.15`, `w_cnn = 0.85` |
+| Macro F1 (nested) | 0.5923 |
+| Quadratic κ (nested) | 0.7525 |
+| Accuracy | 0.8241 |
+| Severe errors (\|e\| ≥ 2) | 0.0634 |
+| Within-1 accuracy | 0.9366 |
 | Evaluation windows | 12,026 |
 
-Falls within 0.35 SD of the 5-seed estimate above — no pipeline drift.
+F1 falls 0.02 SD from the 5-seed estimate above; κ sits 1.3 SD below it. κ has
+been the more volatile of the two across every run measured, so the gap is noted
+rather than treated as drift.
 
-Selection bias (pooled − nested) measured at +0.0000. **[UNVERIFIED]** — the
-per-fold weight distribution has not been printed; confirm all 15 folds select
-(0.20, 0.80) before treating the zero as measured rather than coincidental.
+**The blend weight is selected per export, not a fixed constant.** An earlier
+export of this same notebook shipped `(0.20, 0.80)` at F1 0.5970 / κ 0.7811. The
+grid's optimum is a broad plateau rather than a sharp peak — both pairs put ~80–85%
+of the vote on the network, and 0.0047 F1 separates them, well inside the ±0.0129
+seed SD. Neither pair is more canonical than the other. Read the weight from
+`model_config.json`; `models/loader.py` refuses to run without it rather than
+defaulting to a remembered value. Do not re-export in search of a particular pair —
+selecting the run that scores best is the same bias that produced the withdrawn
+0.715.
+
+Selection bias (pooled − nested) measured at **+0.0100** (pooled F1 0.6023). The
+per-fold weight distribution, previously unrecorded, is `w_xgb = 0.15` in 10 folds,
+`0.30` in 4, `0.25` in 1 — the folds do *not* agree on one weight, which is why the
+nested figure is the one quoted.
+
+### Export reload verification
+
+The saved artifacts reproduce the in-memory predictions they were exported from,
+over the 200 windows in `artifacts/fixtures/parity_fixture.npz`:
+
+| Artifact | max \|p_saved − p_memory\| | argmax agreement |
+| --- | --- | --- |
+| `mscgca_population.keras` | 5.36e-07 | 100.00% |
+| `xgb_population.json` | 3.64e-12 | 100.00% |
+| blended (0.15/0.85) | 4.77e-07 | 100.00% |
+
+Float32 round-trip noise only. Asserted continuously by `tests/test_parity.py`.
 
 ### Artifact fingerprints (SHA-256, first 16 hex)
 
 ```
-models/mscgca_population.keras    1c6d84fd0af0c1d5
+models/mscgca_population.keras    404f04d8d13f49bc
 models/xgb_population.json        2a801f18dd6a4b47
 scalers/feature_scaler.pkl        95dcfe74685280f9
-config/model_config.json          f396b0407edaaa9e
+config/model_config.json          b1775c4c6a7cf1cf
 ```
 
 If a file on disk does not match, it is not the artifact these numbers describe.
+
+The booster and scaler are bit-identical to the earlier export — same data, same
+seed, deterministic fits. Only the network differs, which is ordinary GPU training
+nondeterminism, and that is what moved the blend optimum and the metrics.
+
+The scaler was pickled under **scikit-learn 1.6.1**; loading it under a different
+minor version warns (`InconsistentVersionWarning`) and is not guaranteed. This is
+what `requirements.txt` pins against.
 
 ### Reference: offline, non-causal
 
 The non-causal 120-beat offline model reaches macro F1 = 0.682, κ = 0.855
 (`notebooks/01_pipeline/notebook-improvements.ipynb` cell 14). The deployable
-pipeline reaches ≈0.597.
+pipeline reaches 0.5923.
 
-**The causal pipeline does not recover offline performance.** The ~0.085 F1 gap
+**The causal pipeline does not recover offline performance.** The ~0.090 F1 gap
 is the measured cost of past-only features plus endpoint labeling, and is
 reported as such.
 
@@ -192,11 +228,16 @@ before quoting.
 
 ## 7. Open Items
 
-- **Export verification output not recorded.** `max |p_saved − p_memory|` and
-  argmax agreement from the export notebook's reload check have not been captured
-  in this document. Record them.
-- **`model_config.json` contents not recorded here.** Paste the exported file.
-- **Per-fold blend weight distribution** — see §3.
+- **RESOLVED — Export verification output.** Recorded in §3: max
+  `|p_saved − p_memory|` = 5.36e-07 (network), 3.64e-12 (booster), argmax
+  agreement 100% on all 200 fixture windows.
+- **RESOLVED — Per-fold blend weight distribution.** Recorded in §3: 10 folds
+  select `w_xgb = 0.15`, 4 select `0.30`, 1 selects `0.25`. Selection bias is
+  +0.0100, not the +0.0000 previously assumed.
+- **`model_config.json` contents not recorded here.** The metrics, weights and
+  feature order it carries are reproduced in §3 and asserted against
+  `src/componentb/config.py` by `loader.check_config()`; the remaining fields are
+  narrative. Paste the file if a fuller record is wanted.
 - **Zero-shot sensor transfer** — WESAD (chest ECG) → Empatica (wrist PPG)
   collapses to F1 = 0.135, κ = −0.104. **[UNVERIFIED]**, and unrelated to the
   cross-dataset *mechanism* replication in the research paper, which succeeded.

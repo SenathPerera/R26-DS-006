@@ -51,7 +51,7 @@ Clients connect to `ws://<laptop-ip>:8000/stream`.
 
 Ships the **60-beat causal MS-CGCA 2-way ensemble**: XGBoost over 25 engineered
 features blended with a population Multi-Scale Circadian-Guided Cross-Attention
-network, at `w_xgb = 0.20`, `w_cnn = 0.80`.
+network, at `w_xgb = 0.15`, `w_cnn = 0.85`.
 
 Windows are ~45 s (60 beats), baselines are past-only causal EWMA, and each
 window is labeled at its **last beat** — the model predicts the present from the
@@ -59,13 +59,18 @@ past only, with no future lookahead.
 
 | Metric | Value |
 | --- | --- |
-| Macro F1 | 0.5970 (5-seed estimate 0.5925 ± 0.0129) |
-| Quadratic κ | 0.7811 (5-seed estimate 0.7755 ± 0.0174) |
-| Accuracy | 0.8354 |
-| Within-1 accuracy | 0.9465 |
-| Severe errors (\|e\| ≥ 2) | 0.0535 |
+| Macro F1 | 0.5923 (5-seed estimate 0.5925 ± 0.0129) |
+| Quadratic κ | 0.7525 (5-seed estimate 0.7755 ± 0.0174) |
+| Accuracy | 0.8241 |
+| Within-1 accuracy | 0.9366 |
+| Severe errors (\|e\| ≥ 2) | 0.0634 |
 
-The equivalent non-causal offline model reaches F1 ≈ 0.682. **The ~0.085 gap is
+The blend weight is chosen per export rather than fixed — an earlier export of the
+same notebook shipped `0.20/0.80` at F1 0.5970. The grid optimum is a broad
+plateau, so the pair moves between runs without meaningfully changing performance.
+Read it from `model_config.json`, never from memory. See `docs/ARCHITECTURE.md` §3.
+
+The equivalent non-causal offline model reaches F1 ≈ 0.682. **The ~0.090 gap is
 the measured cost of causal, deployable inference** — the live pipeline does not
 recover offline performance, and does not claim to.
 
