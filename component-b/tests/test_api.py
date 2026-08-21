@@ -18,6 +18,8 @@ POINT = {
     "level": 2,
     "label": "moderate",
     "confidence": 0.81,
+    "probabilities": {"relaxed": 0.04, "mild": 0.11, "moderate": 0.81,
+                      "high": 0.04},
     "deviation": {"rmssd": -1.42, "sdnn": -0.87, "hr": 1.31},
     "baseline_maturity": "personal",
 }
@@ -29,6 +31,8 @@ BAND = {
     "level_high": 2,
     "label": "mild-to-moderate",
     "confidence": 0.54,
+    "probabilities": {"relaxed": 0.08, "mild": 0.36, "moderate": 0.54,
+                      "high": 0.02},
     "deviation": {"rmssd": -0.31, "sdnn": -0.22, "hr": 0.44},
     "baseline_maturity": "converging",
 }
@@ -78,3 +82,21 @@ def test_latest_reflects_the_most_recent_only(client):
     latest.set(POINT)
     latest.set(BAND)
     assert client.get("/stress/latest").json()["mode"] == "band"
+
+
+def test_probabilities_survive_the_round_trip(client):
+    """Documented in README and ARCHITECTURE §6, so it is part of the
+    contract: the full distribution ships alongside the decision.
+
+    Consumers are told not to argmax it — which is only enforceable if
+    the field is actually there.
+    """
+    latest.set(BAND)
+    body = client.get("/stress/latest").json()
+
+    assert set(body["probabilities"]) == {"relaxed", "mild", "moderate",
+                                          "high"}
+    assert abs(sum(body["probabilities"].values()) - 1.0) < 1e-6
+    # the gate emitted a band, so `level` stays absent even though the
+    # distribution has a clear argmax — that is the point of the gate
+    assert body["mode"] == "band" and body["level"] is None

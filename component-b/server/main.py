@@ -39,7 +39,7 @@ async def stress_latest():
     Returns 503 until the first window is complete — at STEP_BEATS=5 and
     WINDOW_BEATS=60 that is roughly the first 45 s of a session. Callers
     must handle BOTH `mode` values: "point" carries `level`, "band"
-    carries `level_low`/`level_high` (docs/ARCHITECTURE.md §5).
+    carries `level_low`/`level_high` (docs/ARCHITECTURE.md §6).
     """
     if latest.is_empty:
         return JSONResponse(
