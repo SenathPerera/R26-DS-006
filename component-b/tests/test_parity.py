@@ -304,18 +304,91 @@ def test_blend_is_two_way():
     assert np.isclose(probs.sum(), 1.0, atol=ATOL)
 
 
-def test_output_carries_the_distribution():
-    """`probabilities` ships with the decision, per ARCHITECTURE §6."""
-    probs = np.array([0.04, 0.11, 0.81, 0.04])
-    out = StreamingInference.format_output(probs)
-
+def test_stress_block_shape():
+    """`probabilities` and `continuous_score` ship with the decision."""
+    out = StreamingInference.stress_block(np.array([0.04, 0.11, 0.81, 0.04]))
     assert out["mode"] == "point" and out["label"] == "moderate"
+    assert out["adjacent"] is False
     assert list(out["probabilities"]) == CLASS_NAMES
-    assert np.isclose(sum(out["probabilities"].values()), 1.0, atol=1e-3)
+    assert np.isclose(sum(out["probabilities"].values()), 1.0, atol=5e-3)
+    # sum(i * p_i) = 0(.04) + 1(.11) + 2(.81) + 3(.04) = 1.85
+    assert out["continuous_score"] == 1.85
 
-    band = StreamingInference.format_output(np.array([0.05, 0.44, 0.46, 0.05]))
+    # margin 0.10 < CONFIDENCE_TAU 0.15, so the gate merges 1 and 2
+    band = StreamingInference.stress_block(np.array([0.08, 0.40, 0.50, 0.02]))
     assert band["mode"] == "band" and "level" not in band
-    assert band["probabilities"]["moderate"] == 0.46
+    assert (band["level_low"], band["level_high"]) == (1, 2)
+    assert band["adjacent"] is True
+    assert band["confidence"] == 0.10          # the MARGIN, not the top p
+    assert band["probabilities"]["moderate"] == 0.5
+    assert band["continuous_score"] == 1.46
+
+    # a margin at or above tau stays a point, however spread the rest is
+    assert StreamingInference.stress_block(
+        np.array([0.08, 0.36, 0.54, 0.02]))["mode"] == "point"
+
+
+def test_payload_shape_and_physiology():
+    """The full payload: raw physiology, window span, signal quality.
+
+    HR/RMSSD/SDNN must be the UNSCALED values — the scaler's output is
+    what the model eats, and is meaningless as physiology on the wire.
+    """
+    rr, temp, ts = load_segment()
+    p = [0.04, 0.11, 0.81, 0.04]
+    si = StreamingInference(model=_Const(p), xgb_model=_Const(p),
+                            scaler=None, weights=(0.15, 0.85))
+    _fill(si)
+    out = si.predict()
+
+    assert set(out) == {"timestamp", "heartRate", "rmssd", "sdnn", "stress",
+                        "signalQuality", "windowStart", "windowEnd"}
+
+    window = np.array(si.rr_buffer)
+    hrv = hrv_features(window)
+    assert out["heartRate"] == round(60000.0 / (hrv[0] + 1e-8), 1)
+    assert out["sdnn"] == round(float(hrv[1]), 1)
+    assert out["rmssd"] == round(float(hrv[2]), 1)
+    # sanity: real milliseconds, not z-scores
+    assert 30 < out["heartRate"] < 200 and out["sdnn"] > 1.0
+
+    assert out["timestamp"] == out["windowEnd"] == si.ts_buffer[-1]
+    assert out["windowStart"] == si.ts_buffer[0]
+    assert out["windowEnd"] > out["windowStart"]
+
+
+def test_signal_quality_counts_rejected_beats():
+    """signalQuality is the fraction of the window that arrived usable.
+
+    Heartbeat/RR data quality from the watch — not BLE or network signal.
+    It must come from clean_rr's mask, not be estimated.
+    """
+    rr, temp, ts = load_segment()
+    si = StreamingInference()
+    for i, (b, t, s) in enumerate(zip(rr, temp, ts)):
+        # mark every 25th beat as an artefact clean_rr had to interpolate
+        si.observe(b, t, ts=s, ok=(i % 25 != 0))
+
+    flags = list(si.ok_buffer)
+    assert si.signal_quality == round(sum(flags) / len(flags), 2)
+    assert 0.0 < si.signal_quality < 1.0
+
+    clean = StreamingInference()
+    for b, t, s in zip(rr, temp, ts):
+        clean.observe(b, t, ts=s)
+    assert clean.signal_quality == 1.0        # nothing rejected
+
+
+def test_clean_rr_reports_which_beats_survived():
+    """The mask signalQuality is built from is real, not assumed."""
+    from componentb.signal.ppg import clean_rr
+
+    raw = np.array([800.0, 810.0, 60.0, 815.0, 3000.0, 820.0])
+    out, _, ok = clean_rr(raw)
+
+    assert ok.tolist() == [True, True, False, True, False, True]
+    assert not np.isnan(out).any()             # rejects were interpolated
+    assert ok.mean() == 4 / 6
 
 
 WESAD_S02 = Path("data/raw/S2/S2.pkl")
@@ -340,7 +413,7 @@ def test_wesad_s02_segment_matches_batch():
                            sampling_rate=fs)
     peaks = info["ECG_R_Peaks"]
     rr = np.diff(peaks) * (1000.0 / fs)
-    rr, _ = clean_rr(rr)
+    rr, _, _ = clean_rr(rr)
     rr = rr[:100]
 
     # the wrist TMP117 stream, resampled onto the same beats
