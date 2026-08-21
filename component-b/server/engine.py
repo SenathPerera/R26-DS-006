@@ -1,9 +1,10 @@
 """Model loading for the server.
 
-Artifacts are not in the repo (see .gitignore), so the server has to
-cope with them being absent: it still accepts PPG and runs beat
-detection, it just cannot predict. Failing loudly at import time would
-make the whole backend un-runnable on a fresh clone.
+Artifacts are committed, so the normal path is that they load. The
+absent case is still handled — a partial checkout, or a working tree
+mid-re-export — by accepting PPG and running beat detection while
+refusing to predict. Failing at import time would take the whole
+backend down over a missing file it can report instead.
 """
 
 import logging

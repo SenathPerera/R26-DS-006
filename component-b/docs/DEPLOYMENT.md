@@ -80,8 +80,8 @@ Full field definitions in `ARCHITECTURE.md` §6.
 
 ## Required artifacts
 
-Export these from `notebooks/05_deployment/notebook-train-export-2way.ipynb`
-before the server will run. All are required — there is no partial mode:
+These are **committed to the repository**, so a fresh clone can run the
+server with no extra download:
 
 ```
 artifacts/models/mscgca_population.keras     # p_cnn
@@ -91,9 +91,15 @@ artifacts/config/model_config.json           # incl. ensemble_weights
 artifacts/fixtures/parity_fixture.npz        # tests only, not served
 ```
 
-The whole `artifacts/` tree is gitignored. A file is identified by the
-SHA-256 fingerprints in `ARCHITECTURE.md` §3 — check them before trusting
-one.
+All are required — there is no partial mode. They come from
+`notebooks/05_deployment/notebook-train-export-2way.ipynb`, and they are
+committed rather than regenerated because re-exporting does **not** reproduce
+them: the network's weights differ between runs, which shifts the blend weight
+and the reported metrics. Verify a file against the SHA-256 fingerprints in
+`ARCHITECTURE.md` §3 before trusting it.
+
+If you re-export, replace all five together and update those fingerprints in
+the same commit — a mixed set is a model nobody has measured.
 
 The scaler must be the exact object fitted during training; one fitted on
 different statistics normalises without error and silently moves every
