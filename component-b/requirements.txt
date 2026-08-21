@@ -1,10 +1,20 @@
 # --- core pipeline ---
+# Bounds are set by the exported artifacts, not by taste. See
+# docs/ARCHITECTURE.md §3 for the fingerprints these must load.
 numpy>=1.24
 scipy>=1.11
 pandas>=2.0
-scikit-learn==1.6.1
-xgboost>=2.0
-tensorflow>=2.15
+# The scaler is a pickled StandardScaler: unpickling across a scikit-learn
+# minor version warns (InconsistentVersionWarning) and is not guaranteed.
+# Re-pin to `==` once notebook-train-export-2way.ipynb has been re-run and
+# the exporting version is recorded — the previous `==1.6.1` pin described
+# an artifact that is no longer in the repo.
+scikit-learn>=1.6,<2.0
+# The booster JSON is written by XGBoost 3.x.
+xgboost>=3.0,<4.0
+# mscgca_population.keras is the Keras 3 format. TensorFlow 2.15 ships
+# Keras 2 and cannot load it — it fails at load_model, not at predict.
+tensorflow>=2.16,<3.0
 neurokit2>=0.2.7
 
 # --- server ---

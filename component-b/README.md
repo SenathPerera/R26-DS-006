@@ -83,7 +83,7 @@ Each prediction carries the full probability distribution alongside the decision
   "label": "moderate",
   "confidence": 0.81,
   "probabilities": {"relaxed": 0.04, "mild": 0.11, "moderate": 0.81, "high": 0.04},
-  "timestamp": "2026-08-19T10:32:14Z"
+  "timestamp": 1787282898.4
 }
 ```
 

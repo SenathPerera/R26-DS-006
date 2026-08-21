@@ -116,8 +116,8 @@ If a file on disk does not match, it is not the artifact these numbers describe.
 ### Reference: offline, non-causal
 
 The non-causal 120-beat offline model reaches macro F1 = 0.682, κ = 0.855
-(`Notebook_Improvements.ipynb` cell 14; nested estimate 0.6807 from
-`fold_store.json`). The deployable pipeline reaches ≈0.597.
+(`notebooks/01_pipeline/notebook-improvements.ipynb` cell 14). The deployable
+pipeline reaches ≈0.597.
 
 **The causal pipeline does not recover offline performance.** The ~0.085 F1 gap
 is the measured cost of past-only features plus endpoint labeling, and is
@@ -174,7 +174,7 @@ The wire format carries the full probability distribution alongside the decision
   "confidence": 0.54,
   "adjacent": true,
   "probabilities": {"relaxed": 0.08, "mild": 0.36, "moderate": 0.54, "high": 0.02},
-  "timestamp": "2026-08-19T10:32:18Z"
+  "timestamp": 1787282898.4
 }
 ```
 
@@ -182,6 +182,9 @@ The wire format carries the full probability distribution alongside the decision
 decision. `probabilities` is supplementary. **Consumers must not re-derive a
 label by taking argmax of `probabilities`** — doing so bypasses the confidence
 gate and reintroduces the false precision the band exists to prevent.
+
+`timestamp` is POSIX seconds as a float, matching `StressPrediction.timestamp`.
+It is the time of the window's **last** beat — the moment being predicted (§2).
 
 **[UNVERIFIED]** The 80%-coverage tradeoff (F1 +0.053, severe errors −0.036) and
 the 84.2% adjacent-error figure are midpoint-derived and uncited. Re-measure
