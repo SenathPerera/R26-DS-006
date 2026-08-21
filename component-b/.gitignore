@@ -4,11 +4,13 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
-# artifacts and data are large / private
-artifacts/models/*
-artifacts/scalers/*
+# artifacts and data are large / private.
+# The whole artifacts/ tree is ignored — models, scalers, config AND the
+# exported parity fixture. A file is identified by the SHA-256 fingerprints
+# in docs/ARCHITECTURE.md §3, not by being committed.
+artifacts/**
+!artifacts/**/
 !artifacts/**/.gitkeep
-!artifacts/config/*.json
 
 data/raw/*
 data/processed/*
