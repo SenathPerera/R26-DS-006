@@ -1,0 +1,61 @@
+# =========================
+# Unity
+# =========================
+
+/unity/[Ll]ibrary/
+/unity/[Tt]emp/
+/unity/[Oo]bj/
+/unity/[Bb]uild/
+/unity/[Bb]uilds/
+/unity/[Ll]ogs/
+/unity/[Uu]ser[Ss]ettings/
+/unity/[Mm]emoryCaptures/
+/unity/[Rr]ecordings/
+/unity/[Ee]xported[Oo]bj/
+/unity/.gradle/
+
+# IDE / generated project files
+/unity/*.csproj
+/unity/*.unityproj
+/unity/*.sln
+/unity/*.slnx
+/unity/*.suo
+/unity/*.tmp
+/unity/*.user
+/unity/*.userprefs
+/unity/*.pidb
+/unity/*.booproj
+/unity/*.svd
+/unity/*.pdb
+/unity/*.mdb
+/unity/*.opendb
+/unity/*.VC.db
+
+# Unity-generated metadata and crash diagnostics
+/unity/*.pidb.meta
+/unity/*.pdb.meta
+/unity/*.mdb.meta
+/unity/sysinfo.txt
+
+# Generated build packages
+/unity/**/*.apk
+/unity/**/*.aab
+/unity/**/*.app
+/unity/**/*.unitypackage
+
+# Generated Addressables content
+/unity/[Aa]ssets/[Aa]ddressable[Aa]ssets[Dd]ata/*/*.bin*
+/unity/[Ss]erver[Dd]ata/
+/unity/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/unity/[Aa]ssets/[Ss]treamingAssets/aa/
+
+# Auto-generated JetBrains Rider integration
+/unity/[Aa]ssets/Plugins/Editor/JetBrains*/
+
+# Visual Studio / Rider
+/unity/.vs/
+/unity/.idea/
+
+# OS-generated files
+.DS_Store
+Thumbs.db
