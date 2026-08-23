@@ -61,7 +61,7 @@ function CrossModalCard({ cross }) {
 function fmtDate(ts) { return new Date(ts).toLocaleString([], { month: "short", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
 
 /* ================= Welcome ================= */
-export function Welcome({ participant, setParticipant, onStart, onHistory, sessionsCount }) {
+export function Welcome({ participant, setParticipant, language, setLanguage, onStart, onHistory, sessionsCount }) {
   return (
     <section className="panel">
       <div className="card hero">
@@ -72,6 +72,13 @@ export function Welcome({ participant, setParticipant, onStart, onHistory, sessi
           <div className="field">
             <label htmlFor="pid">Participant name or ID (optional)</label>
             <input id="pid" value={participant} onChange={(e) => setParticipant(e.target.value)} placeholder="e.g. P01 or a nickname" />
+          </div>
+          <div className="field">
+            <label htmlFor="lang">Language spoken</label>
+            <select id="lang" value={language} onChange={(e) => setLanguage(e.target.value)}>
+              <option value="english">English</option>
+              <option value="sinhala">Sinhala</option>
+            </select>
           </div>
           <div className="row" style={{ justifyContent: "center" }}>
             <button className="btn primary" onClick={onStart}>Begin check-in →</button>
@@ -112,7 +119,7 @@ export function RoomCheck({ ambient, busy, onCheck, onContinue }) {
 }
 
 /* ================= Before / After check-in ================= */
-export function CheckIn({ phase, data, busy, onAnalyze, onContinue }) {
+export function CheckIn({ phase, data, busy, onAnalyze, onContinue, selfRating, setSelfRating }) {
   const warm = phase === "pre";
   const done = !!data?.result;
   return (
@@ -121,6 +128,13 @@ export function CheckIn({ phase, data, busy, onAnalyze, onContinue }) {
         <div className="eyebrow">{warm ? "Before your session" : "After your session"} · voice check-in</div>
         <h3 className="h-lead">{PROMPTS[phase].title}</h3>
         <p className="lead-sub">{PROMPTS[phase].sub}</p>
+        {setSelfRating && !done && (
+          <div className="field" style={{ maxWidth: 360, margin: "0 auto 18px" }}>
+            <label htmlFor={`sr-${phase}`}>How stressed do you feel right now? (0 = calm · 10 = very stressed)</label>
+            <input id={`sr-${phase}`} type="number" min="0" max="10" step="1" inputMode="numeric"
+                   value={selfRating} onChange={(e) => setSelfRating(e.target.value)} placeholder="0–10" />
+          </div>
+        )}
         {!done
           ? <AudioInput withTranscript duration={30} busy={busy} onSubmit={onAnalyze} ctaLabel="Analyse my voice" />
           : (

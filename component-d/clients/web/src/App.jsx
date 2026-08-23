@@ -25,6 +25,9 @@ export default function App() {
   const [health, setHealth] = useState(null);
   const [userId] = useState(() => { let u = localStorage.getItem("cv_user"); if (!u) { u = "u_" + Math.random().toString(36).slice(2, 9); localStorage.setItem("cv_user", u); } return u; });
   const [participant, setParticipant] = useState("");
+  const [language, setLanguage] = useState("english");   // english | sinhala (for the test log)
+  const [selfPre, setSelfPre] = useState("");            // subject's own 0-10 stress before
+  const [selfPost, setSelfPost] = useState("");          //   ...and after (ground truth)
   const [sessionId, setSessionId] = useState(() => crypto.randomUUID());
 
   const [step, setStep] = useState(() => (window.location.hash.replace("#", "") === "research" ? "research" : "welcome"));
@@ -78,7 +81,10 @@ export default function App() {
       // POLL_B on: D pulls the REAL Component B reading at this phase moment.
       // Off (default): the heart-rate signal comes from Component B's simulated
       // provider, so Layer 4 is still a real cross-check (not voice vs itself).
-      const result = await infer(file, sessionId, phase, POLL_B);
+      // log=true persists the clip + scores so the live test yields labelled data.
+      const result = await infer(file, sessionId, phase, {
+        pollB: POLL_B, log: true, userId: participant || userId, language,
+      });
       setter({ result, transcript });
     } catch (e) { setter({ error: e.message }); }
     finally { setBusy(false); }
@@ -90,12 +96,14 @@ export default function App() {
       setFullLoading(true);
       // Real B poll happened at /infer -> use stored readings (mock off); else
       // fall back to the simulated HRV provider for a solo demo.
-      fullSession(sessionId, userId, !POLL_B)
+      fullSession(sessionId, participant || userId, {
+        useMockHrv: !POLL_B, language, selfPre, selfPost, log: true,
+      })
         .then((f) => {
           setFull(f);
           if (savedFor.current !== sessionId) {
             savedFor.current = sessionId;
-            const entry = { id: sessionId, at: Date.now(), participant, pre: pre.result, post: post.result, full: f };
+            const entry = { id: sessionId, at: Date.now(), participant, language, selfPre, selfPost, pre: pre.result, post: post.result, full: f };
             setSessions((prev) => { const next = [entry, ...prev].slice(0, 50); localStorage.setItem(STORE, JSON.stringify(next)); return next; });
             setSaved(true);
           }
@@ -103,12 +111,13 @@ export default function App() {
         .catch((e) => setFullError(e.message))
         .finally(() => setFullLoading(false));
     }
-  }, [step, pre, post, full, fullLoading, fullError, sessionId, userId, participant]);
+  }, [step, pre, post, full, fullLoading, fullError, sessionId, userId, participant, language, selfPre, selfPost]);
 
   const newSession = () => {
     setSessionId(crypto.randomUUID());
     setAmbient(null); setPre(null); setPost(null); setFull(null);
     setFullError(""); setCalmDone(false); setSaved(false); savedFor.current = null;
+    setSelfPre(""); setSelfPost("");   // keep language + participant for the next take
     setStep("welcome");
   };
   const openSaved = (s) => { setPre({ result: s.pre }); setPost({ result: s.post }); setFull(s.full); setSaved(true); savedFor.current = s.id; setStep("report"); };
@@ -126,9 +135,9 @@ export default function App() {
   const main = (
     <>
       {step === "room" && <RoomCheck ambient={ambient} busy={ambientBusy} onCheck={onAmbient} onContinue={() => go("before")} />}
-      {step === "before" && <CheckIn phase="pre" data={pre} busy={busy} onAnalyze={analyze("pre")} onContinue={() => go("calm")} />}
+      {step === "before" && <CheckIn phase="pre" data={pre} busy={busy} onAnalyze={analyze("pre")} onContinue={() => go("calm")} selfRating={selfPre} setSelfRating={setSelfPre} />}
       {step === "calm" && <CalmMoment onDone={() => { setCalmDone(true); go("after"); }} />}
-      {step === "after" && <CheckIn phase="post" data={post} busy={busy} onAnalyze={analyze("post")} onContinue={() => go("report")} />}
+      {step === "after" && <CheckIn phase="post" data={post} busy={busy} onAnalyze={analyze("post")} onContinue={() => go("report")} selfRating={selfPost} setSelfRating={setSelfPost} />}
       {step === "report" && <Report full={full} pre={pre} post={post} saved={saved} loading={fullLoading} error={fullError}
         onNewSession={newSession} onHistory={() => go("history")} onRetry={() => { setFullError(""); setFull(null); }} />}
       {step === "history" && <History sessions={sessions} onOpen={openSaved} onClear={clearHistory} onBack={() => go(pre?.result ? "report" : "room")} />}
@@ -149,7 +158,8 @@ export default function App() {
         )}
 
         {step === "welcome"
-          ? <Welcome participant={participant} setParticipant={setParticipant} sessionsCount={sessions.length}
+          ? <Welcome participant={participant} setParticipant={setParticipant}
+              language={language} setLanguage={setLanguage} sessionsCount={sessions.length}
               onStart={() => go("room")} onHistory={() => go("history")} />
           : (
             <div className="grid">

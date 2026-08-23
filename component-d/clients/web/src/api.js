@@ -71,8 +71,15 @@ export const ambientCheck = (file) => postForm("/ambient-check", {}, { file });
 
 // Layer 2 — voice stress. -> {stress_score, stress_level, stress_type,
 //   confidence, valence, arousal, quality, session_id}
-export const infer = (file, sessionId, phase, pollB = false) =>
-  postForm(`/infer?session_id=${encodeURIComponent(sessionId)}&phase=${phase}&poll_b=${pollB}`, {}, { file });
+// opts: { pollB, log, userId, language } — log=true persists the clip + scores
+// (for the live test); userId/language tag the record.
+export const infer = (file, sessionId, phase, opts = {}) => {
+  const { pollB = false, log = false, userId, language } = opts;
+  const q = new URLSearchParams({ session_id: sessionId, phase, poll_b: String(pollB), log: String(log) });
+  if (userId) q.set("user_id", userId);
+  if (language) q.set("language", language);
+  return postForm(`/infer?${q.toString()}`, {}, { file });
+};
 
 // LLM companion turn. -> {reply}
 export const companionMessage = (sessionId, text, phase) =>
@@ -82,6 +89,14 @@ export const companionMessage = (sessionId, text, phase) =>
 export const sessionUpdate = (sessionId, phase, stressLevel) =>
   postJson("/session-update", { session_id: sessionId, phase, stress_level: stressLevel });
 
-// Layers 3+4+5 combined. -> {comparison, crossmodal, anomaly, personal_baseline, ...}
-export const fullSession = (sessionId, userId, useMockHrv = false) =>
-  postJson("/full-session", { session_id: sessionId, user_id: userId, use_mock_hrv: useMockHrv });
+// Layers 3+4+5 combined. -> {verdict, comparison, crossmodal, anomaly, personal_baseline, ...}
+// opts: { useMockHrv, language, selfPre, selfPost, log } — self-report values are
+// the subject's own 0-10 stress (ground truth), written to the log when log=true.
+export const fullSession = (sessionId, userId, opts = {}) => {
+  const { useMockHrv = false, language, selfPre, selfPost, log = false } = opts;
+  const body = { session_id: sessionId, user_id: userId, use_mock_hrv: useMockHrv, log };
+  if (language) body.language = language;
+  if (selfPre !== undefined && selfPre !== "") body.self_report_pre = Number(selfPre);
+  if (selfPost !== undefined && selfPost !== "") body.self_report_post = Number(selfPost);
+  return postJson("/full-session", body);
+};
