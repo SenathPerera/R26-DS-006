@@ -19,6 +19,8 @@ import io
 import math
 import numbers
 import os
+import shutil
+import subprocess
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -35,7 +37,8 @@ from pydantic import BaseModel
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-from componentd.config import MODELS_DIR, SAMPLE_RATE, STRESS_LEVELS
+from componentd.config import (MODELS_DIR, SAMPLE_RATE, STRESS_LEVELS,
+                                faint_confidence_penalty)
 from componentd.layer1_quality import check_ambient, check_speech
 from componentd.layer3_compare import compare_scores
 from componentd.layer4_crossmodal import (MockHRVProvider, StoredHRVProvider,
@@ -45,6 +48,7 @@ from componentd.component_b_client import poll_into_store
 from componentd.layer5_anomaly import SessionAnomalyDetector
 from componentd.personal_baseline import PersonalBaseline
 from componentd.companion import HealthCompanion
+from componentd.session_log import SessionLogger
 
 # Trained checkpoints (produced by the training scripts). The fusion model
 # defaults to fusion_meld_baseline: under valence-primary scoring it gives the
@@ -76,6 +80,11 @@ companion = HealthCompanion(
 # Per-session Layer 2 results, so /compare and /full-session can look back.
 # In-memory for now; a database replaces this in production.
 session_scores: dict[str, dict] = {}
+
+# Optional persistence of live sessions (clips + scores + self-reported ground
+# truth + language) so a test run becomes reusable, labelled data. Off unless a
+# request opts in via log=True - scoring is unaffected either way.
+session_logger = SessionLogger()
 
 
 @asynccontextmanager
@@ -125,7 +134,9 @@ async def read_audio(file: UploadFile) -> np.ndarray:
     upload failed with 'could not decode audio file'.
     """
     raw = await file.read()
-    # fast path: soundfile straight from memory (WAV/FLAC/OGG)
+    # fast path: soundfile straight from memory (WAV/FLAC/OGG, and MP3 on
+    # recent libsndfile). Container formats (MP4/M4A/AAC, WebM/Opus) are not
+    # supported by libsndfile and fall through to the ffmpeg path below.
     try:
         audio, sr = sf.read(io.BytesIO(raw), dtype="float32")
         if audio.ndim > 1:
@@ -136,18 +147,28 @@ async def read_audio(file: UploadFile) -> np.ndarray:
     except Exception:
         pass  # not a soundfile-supported format; try the ffmpeg path
 
-    # fallback: librosa via ffmpeg, from a temp file (handles mp3/m4a/webm)
-    import tempfile
-    suffix = Path(file.filename or "audio").suffix or ".bin"
-    try:
-        with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
-            tmp.write(raw)
-            tmp.flush()
-            audio, _ = librosa.load(tmp.name, sr=SAMPLE_RATE, mono=True)
-        return audio.astype(np.float32)
-    except Exception as e:
+    # fallback: shell out to ffmpeg, which decodes essentially anything (MP4/
+    # M4A/AAC, WebM/Opus, MP3, ...) to 16 kHz mono WAV on stdout. We call ffmpeg
+    # DIRECTLY rather than via librosa, because librosa only reaches ffmpeg
+    # through the optional `audioread` package, which is not a dependency here.
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
         raise HTTPException(
-            400, f"could not decode audio file ({file.filename}): {e}")
+            400, f"could not decode audio file ({file.filename}): "
+                 "this format needs ffmpeg, which is not installed. Upload a "
+                 "WAV/FLAC/OGG file, or install ffmpeg.")
+    try:
+        proc = subprocess.run(
+            [ffmpeg, "-nostdin", "-loglevel", "error", "-i", "pipe:0",
+             "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "wav", "pipe:1"],
+            input=raw, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        audio, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32")
+        return audio if audio.ndim == 1 else audio.mean(axis=1)
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
+        why = detail[-1] if detail else "unknown decode error"
+        raise HTTPException(
+            400, f"could not decode audio file ({file.filename}): {why}")
 
 
 MIN_AUDIO_SAMPLES = int(SAMPLE_RATE * 0.15)   # ~150 ms; shorter = empty/failed capture
@@ -209,7 +230,8 @@ async def ambient_check(file: UploadFile = File(...)):
 @app.post("/infer")
 async def infer(file: UploadFile = File(...),
                 session_id: str | None = None, phase: str = "pre",
-                poll_b: bool = False):
+                poll_b: bool = False, log: bool = False,
+                user_id: str = "default", language: str | None = None):
     """Audio -> stress score. Layer 1 gates the input first.
 
     poll_b: pull Component B's live HRV reading (GET /stress/latest) AT THIS
@@ -233,6 +255,17 @@ async def infer(file: UploadFile = File(...),
     result["quality"] = quality["metrics"]
     result = _json_safe(result)          # sanitise BEFORE storing so downstream layers stay finite
 
+    # Faint-recording guard: a clip quieter than FAINT_INPUT_RMS gets amplified
+    # heavily by loudness normalisation, which can produce a CONFIDENT wrong read
+    # (Phase-3 OOD failure). Down-weight confidence in proportion to how faint the
+    # raw input was, and flag it - Layer 3 then widens its noise band and Layer 4
+    # defers to Component B, instead of over-asserting on an amplified whisper.
+    penalty = faint_confidence_penalty(quality["metrics"].get("rms", 1.0))
+    if penalty < 1.0:
+        result["confidence"] = round(result["confidence"] * penalty, 3)
+        result["input_level"] = "faint"
+        result.setdefault("warnings", []).append("faint_recording")
+
     # Remember this score so /compare and /full-session can use it.
     sid = session_id or str(uuid.uuid4())
     session_scores.setdefault(sid, {})[phase] = result
@@ -243,6 +276,21 @@ async def infer(file: UploadFile = File(...),
         result["body"] = None if reading is None else {
             "level": reading.level, "confidence": reading.confidence,
             "source": "component_b"}
+
+    # Optional: persist this clip + its scores so the session can be re-analysed
+    # and the live test yields labelled data (ground truth is added at /full-session).
+    if log:
+        clip_path = session_logger.save_clip(sid, phase, audio)
+        session_logger.note(sid, phase, {
+            "user_id": user_id, "language": language, "clip": clip_path,
+            "stress_score": result["stress_score"],
+            "stress_level": result.get("stress_level"),
+            "confidence": result["confidence"],
+            "valence": result.get("valence"), "arousal": result.get("arousal"),
+            "input_level": result.get("input_level", "ok"),
+            "warnings": result.get("warnings", []),
+            "body": result.get("body"),
+        })
     return result
 
 
@@ -402,6 +450,12 @@ class FullSessionRequest(BaseModel):
     session_id: str
     user_id: str = "default"
     use_mock_hrv: bool = False
+    # Live-test extras (all optional; scoring is unchanged if omitted):
+    language: str | None = None            # "english" | "sinhala" - for the test log
+    self_report_pre: float | None = None   # subject's own 0-10 stress before (ground truth)
+    self_report_post: float | None = None  # subject's own 0-10 stress after
+    notes: str | None = None               # free-text note for the session
+    log: bool = False                      # persist a labelled record for later analysis
 
 
 @app.post("/full-session")
@@ -445,11 +499,41 @@ def full_session(req: FullSessionRequest):
     baseline = personal_baseline.relative(req.user_id, pre_stress)
     personal_baseline.observe(req.user_id, pre_stress)
 
-    return _json_safe({
+    # Speaker-relative verdict: for an UNSEEN voice the absolute post score can be
+    # confidently wrong (Phase-3), but the within-speaker pre->post CHANGE is
+    # robust - so we name the change as the primary signal and mark the absolute
+    # stress_level as secondary. Additive to the payload (Component C keeps reading
+    # the existing fields; this only makes the honest ranking explicit).
+    verdict = {
+        "primary_signal": "change",
+        "session_helped": comparison["improved"],
+        "direction": comparison["direction"],
+        "reliable": comparison["reliable"],
+        "note": "Primary signal is the within-speaker pre->post change; the "
+                "absolute stress_level is secondary and less reliable for an "
+                "unseen voice.",
+    }
+
+    response = _json_safe({
         "stress_level": stored["post"]["stress_score"],
         "confidence": stored["post"]["confidence"],
+        "verdict": verdict,
         "comparison": comparison,
         "crossmodal": crossmodal,
         "anomaly": anomaly,
         "personal_baseline": baseline,
     })
+
+    if req.log:
+        session_logger.complete(req.session_id, {
+            "user_id": req.user_id,
+            "language": req.language,
+            "self_report_pre": req.self_report_pre,
+            "self_report_post": req.self_report_post,
+            "notes": req.notes,
+            "verdict": verdict,
+            "comparison": comparison,
+            "crossmodal": crossmodal,
+            "personal_baseline": baseline,
+        })
+    return response

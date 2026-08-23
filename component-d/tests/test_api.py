@@ -196,3 +196,77 @@ def test_anomaly_503_without_checkpoint():
     r = client.post("/anomaly-check",
                     json={"user_id": "u1", "features": [0.0] * 12})
     assert r.status_code == 503
+
+
+# --------------------------------------------- faint-recording guard (Phase-3)
+def _rms(a):
+    return float(np.sqrt(np.mean(np.asarray(a, dtype=np.float32) ** 2)))
+
+
+def _fake_infer_setup(monkeypatch):
+    """Fake scorer (valence -0.7 -> confidence 0.7) + passing VAD, no encoder."""
+    monkeypatch.setattr(api_server, "scorer", _FakeScorer(7.0, -0.7, 0.4))
+    import componentd.layer1_quality as l1
+    monkeypatch.setattr(l1, "speech_segments",
+                        lambda audio, sr: [{"start": 0, "end": len(audio)}])
+
+
+def test_infer_faint_recording_downweights_confidence(monkeypatch):
+    """A clip below FAINT_INPUT_RMS is kept but its confidence is reduced and it
+    is flagged, so Layer 3/4 stop over-asserting on an amplified whisper."""
+    _fake_infer_setup(monkeypatch)
+    base = speech_like()
+    faint = (base * (0.01 / _rms(base))).astype(np.float32)   # rms ~0.01 < 0.02
+    r = client.post("/infer?session_id=s-faint&phase=pre",
+                    files={"file": ("q.wav", wav_bytes(faint), "audio/wav")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["input_level"] == "faint"
+    assert "faint_recording" in body["warnings"]
+    assert body["confidence"] < 0.7          # 0.7 * penalty(0.01)=0.5 -> ~0.35
+
+
+def test_infer_normal_level_not_flagged(monkeypatch):
+    """A healthy-level clip keeps full confidence and no faint flag/warning."""
+    _fake_infer_setup(monkeypatch)
+    r = client.post("/infer?session_id=s-ok&phase=pre",
+                    files={"file": ("c.wav", wav_bytes(speech_like()), "audio/wav")})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body.get("input_level") != "faint"
+    assert "faint_recording" not in body.get("warnings", [])
+    assert body["confidence"] == 0.7
+
+
+# --------------------------------------------- session logging (live-test data)
+def test_infer_and_full_session_logging(monkeypatch, tmp_path):
+    """log=true persists each clip, and /full-session writes ONE labelled JSONL
+    record carrying language + self-reported ground truth + the per-phase notes."""
+    import json
+    from componentd.session_log import SessionLogger
+    monkeypatch.setattr(api_server, "session_logger", SessionLogger(root=tmp_path))
+    _fake_infer_setup(monkeypatch)
+
+    for phase in ("pre", "post"):
+        r = client.post(
+            f"/infer?session_id=s-log&phase={phase}&log=true"
+            f"&language=sinhala&user_id=p1",
+            files={"file": ("c.wav", wav_bytes(speech_like()), "audio/wav")})
+        assert r.status_code == 200, r.text
+
+    assert (tmp_path / "s-log" / "pre.wav").exists()
+    assert (tmp_path / "s-log" / "post.wav").exists()
+
+    r = client.post("/full-session", json={
+        "session_id": "s-log", "user_id": "p1", "language": "sinhala",
+        "self_report_pre": 8.0, "self_report_post": 3.0, "log": True})
+    assert r.status_code == 200, r.text
+    assert "verdict" in r.json() and "primary_signal" in r.json()["verdict"]
+
+    lines = (tmp_path / "sessions.jsonl").read_text().strip().splitlines()
+    assert len(lines) == 1
+    rec = json.loads(lines[0])
+    assert rec["language"] == "sinhala"
+    assert rec["self_report_pre"] == 8.0 and rec["self_report_post"] == 3.0
+    assert "pre" in rec["phases"] and "post" in rec["phases"]
+    assert rec["phases"]["pre"]["clip"].endswith("pre.wav")

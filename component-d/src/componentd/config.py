@@ -169,6 +169,33 @@ def confidence_from_va(valence: float, arousal: float) -> float:
     return min(1.0, abs(float(valence)))
 
 
+# --------------------------------------------- faint-recording guard
+# A clip quieter than this RAW rms (measured before conditioning) is FAINT:
+# loudness normalisation (conditioning.TARGET_RMS = 0.05) then amplifies it - and
+# its noise floor - by TARGET_RMS/rms (5x at rms 0.01), which can turn a quiet,
+# out-of-distribution voice into a CONFIDENT wrong reading. This is the exact
+# Phase-3 failure mode: a ~0.01-rms calm clip scored 9.13/10 at confidence 0.91,
+# sailing past Layer 4's 0.4 defer gate (see docs/ABLATION_STUDY.md Phase 3).
+#
+# The clip is still ABOVE the speech_min_rms reject floor, so we keep it - but we
+# DOWN-WEIGHT its confidence in proportion to how faint it is. That single lever
+# is load-bearing: Layer 3 widens its noise band when confidence drops, and Layer
+# 4 defers to Component B below CONF_MIN - so a faint recording stops over-asserting
+# on its own. A user-facing "faint_recording" warning also invites a re-record.
+FAINT_INPUT_RMS = 0.02
+
+
+def faint_confidence_penalty(raw_rms: float) -> float:
+    """Multiplier in [0, 1] for voice confidence, given the clip's RAW (pre-
+    conditioning) rms. 1.0 at/above FAINT_INPUT_RMS, then linear down to 0 as
+    rms -> 0, so the confidence we report tracks how hard loudness-norm had to
+    amplify the clip (and thus its noise). Pure + deterministic for testing."""
+    r = float(raw_rms)
+    if r >= FAINT_INPUT_RMS:
+        return 1.0
+    return max(0.0, r / FAINT_INPUT_RMS)
+
+
 # Product-facing ordinal stress levels. Shared with Component B (HRV), whose
 # WESAD model emits the SAME four levels - so Layer 4 compares like with like.
 STRESS_LEVELS = ["no", "mild", "moderate", "high"]
