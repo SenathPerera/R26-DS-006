@@ -17,8 +17,10 @@ Design split (so the mapping is testable without a network):
   * feed_into_store()       - stores a BodyReading via the shared push_level path.
 
 B's wire schema (componentb/server/schemas/messages.py):
-  mode: "point"|"band"; level | level_low/level_high (int 0-3);
-  label; confidence (0-1); deviation; baseline_maturity; adjacent (band only).
+  top level: timestamp, heartRate, rmssd, sdnn, signalQuality, windowStart,
+    windowEnd, and the gated decision NESTED under "stress".
+  stress block: mode ("point"|"band"); level | level_low/level_high (int 0-3);
+    label; confidence (0-1); adjacent; probabilities; continuous_score.
 B's levels (componentb/config.CLASS_NAMES) are index-aligned with D's, so an int
 level maps by B_CLASS_NAMES[level] then normalize_level() ("relaxed" -> "no").
 """
@@ -70,24 +72,31 @@ def _level_name(level_int: int) -> str:
 def map_stress_prediction(pred: dict) -> BodyReading:
     """PURE: turn one of B's StressPrediction dicts into a BodyReading.
 
+    B nests the gated decision under a "stress" block (mode/level/label/
+    confidence) alongside top-level physiology (heartRate/rmssd/sdnn). We read
+    the decision from that block; a flat payload (decision at the top level) is
+    still accepted, so if B tweaks the envelope again this degrades to a clean
+    map rather than a silent voice-only fallback.
+
     Raises ValueError on a malformed payload (missing/oob level, bad mode) so a
     broken contract surfaces loudly instead of poisoning Layer 4 with a guess.
     """
     if not isinstance(pred, dict):
         raise ValueError(f"prediction must be a dict, got {type(pred).__name__}")
-    mode = pred.get("mode")
+    block = pred.get("stress") if isinstance(pred.get("stress"), dict) else pred
+    mode = block.get("mode")
     try:
-        conf = float(pred.get("confidence"))
+        conf = float(block.get("confidence"))
     except (TypeError, ValueError):
         raise ValueError("prediction missing numeric 'confidence'")
-    label = str(pred.get("label", ""))
+    label = str(block.get("label", ""))
 
     if mode == "point":
-        level = _level_name(pred.get("level"))
+        level = _level_name(block.get("level"))
         return BodyReading(level=level, confidence=conf, mode="point", label=label)
 
     if mode == "band":
-        lo, hi = _level_name(pred.get("level_low")), _level_name(pred.get("level_high"))
+        lo, hi = _level_name(block.get("level_low")), _level_name(block.get("level_high"))
         # Take the HIGHER level (don't under-call stress) and hold confidence LOW
         # so an uncertain B reading defers instead of asserting a mismatch.
         higher = max(lo, hi, key=STRESS_LEVELS.index)
