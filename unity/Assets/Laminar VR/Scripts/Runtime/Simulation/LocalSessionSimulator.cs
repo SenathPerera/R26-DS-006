@@ -1,4 +1,5 @@
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
+using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using LaminarVR.AdaptiveMeditation.Session;
 using UnityEngine;
@@ -13,6 +14,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Simulation
         [SerializeField]
         private SessionTimingProfile timingProfile = null;
 
+        [SerializeField]
+        private LocalPhysiologySimulator physiologySimulator = null;
+
         [Header("Development Controls")]
         [SerializeField, Min(0f)]
         private float simulationSpeedMultiplier = 1f;
@@ -20,15 +24,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Simulation
         [SerializeField]
         private bool showDebugPanel = true;
 
-        [Tooltip(
-            "Development-only resume gate. Step 6 will source this from the "
-            + "validated physiology buffer; this control does not fabricate a payload.")]
-        [SerializeField]
-        private bool freshPhysiologyAvailableForResume = false;
-
         private SessionStateMachine stateMachine;
         private double simulatedMonotonicTimeSeconds;
         private int localCommandSequence;
+        private long pausePhysiologySequenceNumber;
         private string statusMessage = string.Empty;
 
         public VrSessionPhase Phase => stateMachine == null
@@ -78,7 +77,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Simulation
             }
 
             GUILayout.BeginArea(
-                new Rect(16f, 16f, 360f, 390f),
+                new Rect(16f, 16f, 380f, 450f),
                 "Adaptive Meditation - Local Session",
                 GUI.skin.window);
             GUILayout.Label("Phase: " + stateMachine.Phase);
@@ -93,6 +92,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Simulation
             GUILayout.Label(
                 "Decision opportunities: "
                 + stateMachine.DecisionOpportunityCount);
+            GUILayout.Label(
+                "Physiology sequence: "
+                + (physiologySimulator == null
+                    ? "not assigned"
+                    : physiologySimulator.LatestAcceptedSequenceNumber.ToString()));
             GUILayout.Space(6f);
 
             DrawPhaseButton(
@@ -110,15 +114,15 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Simulation
             DrawPhaseButton(
                 "Pause",
                 stateMachine.Phase == VrSessionPhase.Adaptive,
-                () => ProcessLocalCommand(SessionCommandType.Pause, false));
-
-            freshPhysiologyAvailableForResume = GUILayout.Toggle(
-                freshPhysiologyAvailableForResume,
-                "Fresh physiology available for resume");
+                Pause);
             DrawPhaseButton(
                 "Resume",
                 stateMachine.Phase == VrSessionPhase.Paused,
                 Resume);
+            DrawPhaseButton(
+                "Emit Mock Physiology Now",
+                physiologySimulator != null && physiologySimulator.IsInitialized,
+                EmitMockPhysiology);
             DrawPhaseButton(
                 "Stop",
                 !stateMachine.IsTerminal,
@@ -168,13 +172,41 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Simulation
 
         private void Resume()
         {
+            var hasFreshPhysiology = physiologySimulator != null
+                && physiologySimulator.HasFreshDecisionWindowAfter(
+                    pausePhysiologySequenceNumber);
             var result = ProcessLocalCommand(
                 SessionCommandType.Resume,
-                freshPhysiologyAvailableForResume);
+                hasFreshPhysiology);
+            if (!result.Applied
+                && result.ResultCode
+                    == SessionCommandResultCode.FreshPhysiologyRequired)
+            {
+                statusMessage =
+                    "Resume requires a new, fresh, decision-quality physiology window.";
+            }
+        }
+
+        private void Pause()
+        {
+            var result = ProcessLocalCommand(SessionCommandType.Pause, false);
             if (result.Applied)
             {
-                freshPhysiologyAvailableForResume = false;
+                pausePhysiologySequenceNumber = physiologySimulator == null
+                    ? 0L
+                    : physiologySimulator.LatestAcceptedSequenceNumber;
             }
+        }
+
+        private void EmitMockPhysiology()
+        {
+            var result = physiologySimulator.EmitNow();
+            statusMessage = result.Accepted
+                ? "Mock physiology window accepted."
+                : "Mock physiology rejected: "
+                    + result.ResultCode
+                    + "/"
+                    + result.ValidationReasonCode;
         }
 
         private SessionCommandResult ProcessLocalCommand(
@@ -216,13 +248,26 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Simulation
         private void HandleDecisionOpportunity(
             SessionDecisionOpportunity opportunity)
         {
+            var physiologyResult = PhysiologyQueryResultCode.NoData;
+            var physiologySequence = 0L;
+            if (physiologySimulator != null
+                && physiologySimulator.TryGetLatestDecisionWindow(
+                    0L,
+                    out var snapshot,
+                    out physiologyResult))
+            {
+                physiologySequence = snapshot.SequenceNumber;
+            }
+
             Debug.Log(
                 "[LocalSessionSimulator] decision_opportunity"
                 + " sequence=" + opportunity.SequenceNumber
                 + " monotonic_seconds="
                 + opportunity.MonotonicTimeSeconds.ToString("F3")
                 + " adaptive_seconds="
-                + opportunity.AdaptiveElapsedSeconds.ToString("F3"),
+                + opportunity.AdaptiveElapsedSeconds.ToString("F3")
+                + " physiology_result=" + physiologyResult
+                + " physiology_sequence=" + physiologySequence,
                 this);
         }
 
