@@ -21,6 +21,7 @@ import numbers
 import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,6 +31,7 @@ import numpy as np
 import soundfile as sf
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
 
 # This file lives at <repo>/server/main.py; put <repo>/src on the path so the
@@ -47,8 +49,10 @@ from componentd.layer4_crossmodal import (MockHRVProvider, StoredHRVProvider,
 from componentd.component_b_client import poll_into_store
 from componentd.layer5_anomaly import SessionAnomalyDetector
 from componentd.personal_baseline import PersonalBaseline
-from componentd.companion import HealthCompanion
+from componentd.companion import HealthCompanion, is_crisis
+from componentd.companion.transcribe import transcribe
 from componentd.session_log import SessionLogger
+from componentd.store import ComponentDStore
 
 # Trained checkpoints (produced by the training scripts). The fusion model
 # defaults to fusion_meld_baseline: under valence-primary scoring it gives the
@@ -66,20 +70,37 @@ anomaly_detector = None
 hrv_store = StoredHRVProvider()
 hrv_mock = MockHRVProvider()
 
+# Durable storage (SQLite). Fail-soft: if it can't open, everything below falls
+# back to memory-only. In-memory dicts stay as a hot cache in front of it.
+store = ComponentDStore()
+
 # Per-user stress history for relative ("vs your own normal") reporting.
+# Backed by the store so history survives restarts (PROBLEM 6).
 personal_baseline = PersonalBaseline()
 
 # The AI voice health companion (LLM dialogue stage). Stress-aware: the app
 # injects Component D's voice stress and Component B's HRV level as a private
 # note (no tool-calling - small local models are unreliable at it).
 companion = HealthCompanion(
-    get_voice=lambda sid, phase: session_scores.get(sid, {}).get(phase),
+    get_voice=lambda sid, phase: _scores_for(sid).get(phase),
     get_body=lambda sid, phase: hrv_store.get_level(sid, phase),
 )
 
 # Per-session Layer 2 results, so /compare and /full-session can look back.
-# In-memory for now; a database replaces this in production.
+# Hot cache in front of the SQLite store; a restart between pre and post no
+# longer 404s /full-session because _scores_for() reloads from disk on a miss.
 session_scores: dict[str, dict] = {}
+
+
+def _scores_for(session_id: str) -> dict:
+    """Layer 2 results for a session: cache first, else reload from the store
+    (survives a restart between the pre and post recordings)."""
+    if session_id in session_scores:
+        return session_scores[session_id]
+    stored = store.get_phase_readings(session_id)
+    if stored:
+        session_scores[session_id] = stored
+    return stored
 
 # Optional persistence of live sessions (clips + scores + self-reported ground
 # truth + language) so a test run becomes reusable, labelled data. Off unless a
@@ -91,6 +112,11 @@ session_logger = SessionLogger()
 async def lifespan(_: FastAPI):
     """Load whatever trained models exist, once, at server start."""
     global scorer, anomaly_detector
+    # Reload per-user baseline history from disk so MIN_HISTORY carries across
+    # restarts (PROBLEM 6). Fail-soft if the store is unavailable.
+    personal_baseline.load_history(store)
+    if store.ok:
+        print(f"loaded personal baseline history for {len(personal_baseline.history)} user(s)")
     if FUSION_CKPT.exists():
         from componentd.layer2_inference import StressScorer
         scorer = StressScorer(str(FUSION_CKPT))
@@ -98,7 +124,7 @@ async def lifespan(_: FastAPI):
     else:
         print(f"fusion checkpoint missing ({FUSION_CKPT}) - /infer disabled")
     if ANOMALY_CKPT.exists():
-        anomaly_detector = SessionAnomalyDetector(str(ANOMALY_CKPT))
+        anomaly_detector = SessionAnomalyDetector(str(ANOMALY_CKPT), store=store)
         print(f"loaded anomaly model: {ANOMALY_CKPT}")
     else:
         print(f"anomaly checkpoint missing ({ANOMALY_CKPT}) - "
@@ -148,27 +174,36 @@ async def read_audio(file: UploadFile) -> np.ndarray:
         pass  # not a soundfile-supported format; try the ffmpeg path
 
     # fallback: shell out to ffmpeg, which decodes essentially anything (MP4/
-    # M4A/AAC, WebM/Opus, MP3, ...) to 16 kHz mono WAV on stdout. We call ffmpeg
-    # DIRECTLY rather than via librosa, because librosa only reaches ffmpeg
-    # through the optional `audioread` package, which is not a dependency here.
+    # M4A/AAC, WebM/Opus, MP3, ...) to 16 kHz mono WAV on stdout. We write the
+    # upload to a temp FILE and give ffmpeg a seekable path (-i <path>) rather
+    # than piping it via stdin (pipe:0): MP4/MOV containers routinely keep their
+    # `moov` index at the END of the file, and ffmpeg cannot reach it over a
+    # non-seekable pipe, so piped mp4s decode to empty audio (they play fine in
+    # a seekable player). A real file is seekable and decodes reliably. We call
+    # ffmpeg DIRECTLY rather than via librosa, because librosa only reaches
+    # ffmpeg through the optional `audioread` package, not a dependency here.
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise HTTPException(
             400, f"could not decode audio file ({file.filename}): "
                  "this format needs ffmpeg, which is not installed. Upload a "
                  "WAV/FLAC/OGG file, or install ffmpeg.")
-    try:
-        proc = subprocess.run(
-            [ffmpeg, "-nostdin", "-loglevel", "error", "-i", "pipe:0",
-             "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "wav", "pipe:1"],
-            input=raw, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        audio, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32")
-        return audio if audio.ndim == 1 else audio.mean(axis=1)
-    except subprocess.CalledProcessError as e:
-        detail = (e.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
-        why = detail[-1] if detail else "unknown decode error"
-        raise HTTPException(
-            400, f"could not decode audio file ({file.filename}): {why}")
+    suffix = Path(file.filename or "").suffix or ".bin"
+    with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+        tmp.write(raw)
+        tmp.flush()
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-nostdin", "-loglevel", "error", "-i", tmp.name,
+                 "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "wav", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        except subprocess.CalledProcessError as e:
+            detail = (e.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
+            why = detail[-1] if detail else "unknown decode error"
+            raise HTTPException(
+                400, f"could not decode audio file ({file.filename}): {why}")
+    audio, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32")
+    return audio if audio.ndim == 1 else audio.mean(axis=1)
 
 
 MIN_AUDIO_SAMPLES = int(SAMPLE_RATE * 0.15)   # ~150 ms; shorter = empty/failed capture
@@ -269,6 +304,7 @@ async def infer(file: UploadFile = File(...),
     # Remember this score so /compare and /full-session can use it.
     sid = session_id or str(uuid.uuid4())
     session_scores.setdefault(sid, {})[phase] = result
+    store.save_phase_reading(sid, phase, result)   # survive a restart mid-session
     result["session_id"] = sid
 
     if poll_b:
@@ -301,7 +337,7 @@ class CompareRequest(BaseModel):
 
 @app.post("/compare")
 def compare(req: CompareRequest):
-    stored = session_scores.get(req.session_id, {})
+    stored = _scores_for(req.session_id)
     if "pre" not in stored or "post" not in stored:
         raise HTTPException(404, "need both pre and post /infer results "
                                  "for this session")
@@ -370,7 +406,7 @@ def _run_crossmodal(session_id: str, voice_pre: float, voice_post: float,
     confidence (|valence|, from the stored /infer result) and Component B's
     per-phase confidence (if it sent one). Layer 4 uses these to defer to HRV
     when the voice is uncertain instead of asserting a false mismatch."""
-    stored = session_scores.get(session_id, {})
+    stored = _scores_for(session_id)
     voice_conf = (float(stored.get("pre", {}).get("confidence", 1.0)),
                   float(stored.get("post", {}).get("confidence", 1.0)))
 
@@ -400,7 +436,7 @@ class CrossValidateRequest(BaseModel):
 
 @app.post("/cross-validate")
 def cross_validate(req: CrossValidateRequest):
-    stored = session_scores.get(req.session_id, {})
+    stored = _scores_for(req.session_id)
     if "pre" not in stored or "post" not in stored:
         raise HTTPException(404, "need both pre and post /infer results "
                                  "for this session")
@@ -445,6 +481,142 @@ def companion_message(req: CompanionMessage, phase: str = "pre"):
                                  f"(is Ollama running? `ollama serve`): {e}")
 
 
+# ---------------------------------------------- realistic companion voice (TTS)
+# ElevenLabs is proxied here so the API key stays server-side (never on the phone).
+# If no key is set, the endpoint 503s and the app falls back to on-device TTS.
+_ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY")
+# Default to a free-tier PREMADE voice (Sarah — warm, reassuring). The premium
+# "library" voices (e.g. Rachel 21m00...) 402 on free keys, so don't default to one.
+_ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
+_ELEVEN_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_turbo_v2_5")
+
+
+@app.get("/companion/tts")
+def companion_tts(text: str, language: str | None = None):
+    """Speak a companion line in a realistic AI voice (ElevenLabs), returned as
+    audio/mpeg for the phone to play. GET so the phone can stream it directly.
+
+    Graceful by design: no key -> 503; upstream failure -> 503. The app treats a
+    503 as "use on-device TTS instead", so the companion always speaks."""
+    if not _ELEVEN_KEY:
+        raise HTTPException(503, "tts not configured (set ELEVENLABS_API_KEY)")
+    clean = (text or "").strip()
+    if not clean:
+        raise HTTPException(400, "empty text")
+    # Multilingual model when Sinhala is requested; turbo (fast/cheap) for English.
+    model = "eleven_multilingual_v2" if (language or "").lower().startswith(("si", "sin")) else _ELEVEN_MODEL
+    try:
+        import httpx
+        r = httpx.post(
+            f"https://api.elevenlabs.io/v1/text-to-speech/{_ELEVEN_VOICE}",
+            headers={"xi-api-key": _ELEVEN_KEY, "accept": "audio/mpeg",
+                     "content-type": "application/json"},
+            json={"text": clean, "model_id": model,
+                  "voice_settings": {"stability": 0.5, "similarity_boost": 0.75, "style": 0.0}},
+            timeout=20.0,
+        )
+        r.raise_for_status()
+        return Response(content=r.content, media_type="audio/mpeg")
+    except Exception as e:                       # noqa: BLE001 - fall back to on-device TTS
+        raise HTTPException(503, f"tts upstream failed: {e}")
+
+
+# Whisper wants ISO codes; the app speaks in human language names.
+_WHISPER_LANG = {"english": "en", "en": "en", "sinhala": "si", "si": "si"}
+
+# When STT yields nothing (unavailable, or genuine silence) we still want a warm
+# turn so the flow never dead-ends. A neutral placeholder nudges the companion to
+# gently continue without polluting history with a fake utterance.
+_EMPTY_TURN = "(the person is here but has not said much yet)"
+
+
+@app.post("/companion/voice-turn")
+async def companion_voice_turn(
+    file: UploadFile = File(...),
+    session_id: str | None = None, phase: str = "pre",
+    user_id: str = "default", language: str | None = None,
+    poll_b: bool = False, log: bool = False, is_final: bool = False):
+    """One whole conversational turn in a single round trip: transcribe the clip,
+    reply as the companion, and - only when is_final - score it exactly as /infer
+    does and store it in session_scores so /full-session works unchanged.
+
+    Additive: /infer and /companion/message are left exactly as they are. The
+    phone posts the SAME WAV it would send to /infer; doing STT + dialogue +
+    (optional) scoring here means the mic never races an on-device recognizer.
+
+    is_final=False: transcribe + reply only (no scoring, no store) - lets the
+    phone hold a multi-turn conversation and score once, on the concatenated clip.
+    """
+    sid = session_id or str(uuid.uuid4())
+    audio = await read_audio(file)
+
+    # Empty/failed capture: no scoring, but still a warm re-ask - never a dead end.
+    try:
+        _require_nonempty(audio)
+    except HTTPException:
+        return {"transcript": "", "reply": companion.reply(sid, _EMPTY_TURN, phase),
+                "crisis": False, "accepted": False, "reasons": ["no_audio"],
+                "quality": None, "analysis": None, "session_id": sid}
+
+    stt = transcribe(audio, _WHISPER_LANG.get((language or "").lower()))
+    transcript = stt["text"]
+
+    quality = check_speech(audio)
+    accepted = bool(quality["ok"])
+
+    # Score only a final, accepted clip - and store it EXACTLY as /infer does, so
+    # the private sensor note, /compare and /full-session all keep working with
+    # zero downstream changes.
+    analysis = None
+    if accepted and is_final:
+        if scorer is None:
+            raise HTTPException(503, "fusion model not trained yet")
+        result = scorer.score_array(audio)
+        result["quality"] = quality["metrics"]
+        result = _json_safe(result)
+        penalty = faint_confidence_penalty(quality["metrics"].get("rms", 1.0))
+        if penalty < 1.0:
+            result["confidence"] = round(result["confidence"] * penalty, 3)
+            result["input_level"] = "faint"
+            result.setdefault("warnings", []).append("faint_recording")
+        session_scores.setdefault(sid, {})[phase] = result
+        store.save_phase_reading(sid, phase, result, transcript)  # survive a restart
+        result["session_id"] = sid
+        if poll_b:
+            reading = poll_into_store(hrv_store, sid, phase)
+            result["body"] = None if reading is None else {
+                "level": reading.level, "confidence": reading.confidence,
+                "source": "component_b"}
+        analysis = result
+
+    # Crisis net computed on the real transcript so the app can branch explicitly
+    # instead of string-matching the reply. companion.reply() runs the same net
+    # internally (returning CRISIS_REPLY), so the two always agree.
+    crisis = is_crisis(transcript)
+    reply = companion.reply(sid, transcript or _EMPTY_TURN, phase)
+
+    if log:
+        clip_path = session_logger.save_clip(sid, phase, audio)
+        note = {"user_id": user_id, "language": language, "clip": clip_path,
+                "transcript": transcript, "is_final": is_final,
+                "accepted": accepted, "quality": quality["metrics"]}
+        if analysis is not None:
+            note.update(stress_score=analysis["stress_score"],
+                        confidence=analysis["confidence"])
+        session_logger.note(sid, phase, note)
+
+    return {
+        "transcript": transcript,
+        "reply": reply,
+        "crisis": crisis,
+        "accepted": accepted,
+        "reasons": quality["reasons"],
+        "quality": quality["metrics"],
+        "analysis": analysis,
+        "session_id": sid,
+    }
+
+
 # ------------------------------------- full session (for Component C)
 class FullSessionRequest(BaseModel):
     session_id: str
@@ -463,7 +635,7 @@ def full_session(req: FullSessionRequest):
     """The one call the app makes after the post-session recording:
     comparison + cross-modal + anomaly, combined into the payload
     Component C (Unity) consumes."""
-    stored = session_scores.get(req.session_id, {})
+    stored = _scores_for(req.session_id)
     if "pre" not in stored or "post" not in stored:
         raise HTTPException(404, "need both pre and post /infer results "
                                  "for this session")
@@ -490,14 +662,15 @@ def full_session(req: FullSessionRequest):
             12.0,                                          # time_of_day
             1.0,                                           # days_since_last
         ]
-        anomaly = anomaly_detector.check(req.user_id, np.asarray(features))
+        anomaly = anomaly_detector.check(req.user_id, np.asarray(features),
+                                         session_id=req.session_id)
 
     # How the user's ARRIVAL (pre-session) stress compares to their own normal.
     # A relative reading that stays meaningful even when the absolute range is
     # compressed on real phone voices. Compute vs history, THEN record it.
     pre_stress = stored["pre"]["stress_score"]
     baseline = personal_baseline.relative(req.user_id, pre_stress)
-    personal_baseline.observe(req.user_id, pre_stress)
+    personal_baseline.observe(req.user_id, pre_stress, session_id=req.session_id)
 
     # Speaker-relative verdict: for an UNSEEN voice the absolute post score can be
     # confidently wrong (Phase-3), but the within-speaker pre->post CHANGE is
@@ -536,4 +709,26 @@ def full_session(req: FullSessionRequest):
             "crossmodal": crossmodal,
             "personal_baseline": baseline,
         })
+
+    # Persist the completed session so it survives a restart and the history
+    # endpoints / app can list it later (PROBLEM 6).
+    store.save_session(req.session_id, req.user_id, req.language, verdict,
+                       comparison, crossmodal, anomaly, baseline)
     return response
+
+
+# ------------------------------------------------- session history (read)
+@app.get("/sessions")
+def list_sessions(user_id: str, limit: int = 20):
+    """Recent completed sessions for a user, newest first — backs the app's
+    Past-sessions screen. Empty list if the store is unavailable."""
+    return store.list_sessions(user_id, limit)
+
+
+@app.get("/session/{session_id}")
+def get_session(session_id: str):
+    """The full stored record for one session (both phases + all layers)."""
+    rec = store.get_full_session(session_id)
+    if rec is None:
+        raise HTTPException(404, "no stored record for this session")
+    return _json_safe(rec)

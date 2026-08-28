@@ -52,7 +52,9 @@ fun HomeScreen(state: AppState, navigate: (String) -> Unit) {
                     StatusPill(if (state.vrStatus == VrStatus.Ready) "VR ready" else "VR setup needed", if (state.vrStatus == VrStatus.Ready) Green else Amber)
                 }
             }
-            PrimaryButton("Begin Session") { navigate(Routes.PreSession) }
+            // Single launch hook for Component D's voice flow (Prathikesh). The
+            // voice check-in owns Layer 1 -> 5 and the VR hand-off internally.
+            PrimaryButton("Begin Session") { navigate(Routes.VoiceCheckIn) }
         }
 
         GlassCard {

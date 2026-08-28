@@ -62,3 +62,6 @@ Thumbs.db
 
 #Generated build APKs
 /unity/Builds/
+
+/unity/.utmp/
+/debug.log

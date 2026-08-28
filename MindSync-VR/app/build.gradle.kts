@@ -19,12 +19,21 @@ android {
     }
 
     buildTypes {
+        debug {
+            // Component D (voice stress) dev host. Using localhost + `adb reverse
+            // tcp:8010 tcp:8010` tunnels the phone's loopback to the Mac over USB —
+            // no Wi-Fi/hotspot/firewall needed. (For emulator this is 10.0.2.2; for
+            // a LAN test, set the Mac's IP e.g. http://172.20.10.14:8010/.)
+            buildConfigField("String", "COMPONENT_D_BASE_URL", "\"http://localhost:8010/\"")
+        }
         release {
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Production must be HTTPS; this is a placeholder until D is deployed.
+            buildConfigField("String", "COMPONENT_D_BASE_URL", "\"https://componentd.cognify.invalid/\"")
         }
     }
 
@@ -39,6 +48,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -61,4 +71,9 @@ dependencies {
     implementation("no.nordicsemi.android:ble:2.9.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
+    testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.retrofit2:retrofit:2.11.0")
+    testImplementation("com.squareup.retrofit2:converter-kotlinx-serialization:2.11.0")
 }
