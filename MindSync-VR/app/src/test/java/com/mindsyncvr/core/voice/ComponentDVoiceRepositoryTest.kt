@@ -5,7 +5,9 @@ import kotlinx.serialization.json.Json
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -93,5 +95,50 @@ class ComponentDVoiceRepositoryTest {
         enqueue(404, """{"detail":"need both pre and post"}""")
         val result = repo.completeSession("s1")
         assertEquals(VoiceError.SessionIncomplete, result.exceptionOrNull()?.voiceError)
+    }
+
+    @Test
+    fun `ambient 400 maps to NoAudioCaptured with reasons (BUG-4)`() = runTest {
+        enqueue(400, """{"detail":{"error":"no_audio","reasons":["No audio was captured"]}}""")
+        val error = repo.ambientCheck(AudioPayload(ByteArray(16))).exceptionOrNull()?.voiceError
+        assertTrue(error is VoiceError.NoAudioCaptured)
+        assertTrue((error as VoiceError.NoAudioCaptured).reasons.any { it.contains("No audio") })
+    }
+
+    @Test
+    fun `network drop maps to NetworkUnavailable`() = runTest {
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
+        val error = repo.analyzeVoice("s1", SessionPhase.Pre, AudioPayload(ByteArray(16))).exceptionOrNull()?.voiceError
+        assertEquals(VoiceError.NetworkUnavailable, error)
+    }
+
+    @Test
+    fun `voice-turn parses transcript reply and analysis, and sends correct multipart`() = runTest {
+        enqueue(200, """{"transcript":"today was rough","reply":"tell me more","crisis":false,"accepted":true,"reasons":[],"quality":{"duration_sec":12.0,"rms":0.03,"clip_ratio":0.0,"speech_seconds":9.0,"speech_fraction":0.7,"speech_segments":3},"analysis":{"stress_score":6.4,"stress_level":"moderate","confidence":0.71,"valence":-0.34,"arousal":0.1,"session_id":"s1"},"session_id":"s1"}""")
+        val r = repo.voiceTurn("s1", SessionPhase.Pre, AudioPayload(ByteArray(16)), isFinal = true, language = "english").getOrThrow()
+        assertEquals("today was rough", r.transcript)
+        assertEquals("tell me more", r.reply)
+        assertFalse(r.crisis)
+        assertEquals(6.4, r.analysis?.stressScore ?: 0.0, 0.001)
+
+        val request = server.takeRequest()
+        // Query params — including is_final, which the accumulation flow relies on.
+        assertTrue(request.path!!.contains("/companion/voice-turn"))
+        assertTrue(request.path!!.contains("is_final=true"))
+        assertTrue(request.path!!.contains("phase=pre"))
+        assertTrue(request.path!!.contains("language=english"))
+        // Multipart: field name exactly "file", a .wav filename, audio/wav content type.
+        val body = request.body.readUtf8()
+        assertTrue(body.contains("""name="file""""))
+        assertTrue(body.contains(".wav"))
+        assertTrue(body.contains("audio/wav"))
+    }
+
+    @Test
+    fun `voice-turn crisis flag parses through`() = runTest {
+        enqueue(200, """{"transcript":"i want to die","reply":"I'm really glad you told me.","crisis":true,"accepted":true,"reasons":[],"analysis":null,"session_id":"s1"}""")
+        val r = repo.voiceTurn("s1", SessionPhase.Pre, AudioPayload(ByteArray(16)), isFinal = false).getOrThrow()
+        assertTrue(r.crisis)
+        assertNull(r.analysis)
     }
 }
