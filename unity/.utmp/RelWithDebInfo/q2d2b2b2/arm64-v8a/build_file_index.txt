@@ -1,2 +1,0 @@
-C:\My partition\SLIIT\Year 4\Semester 1\Research Project\R26-DS-006\unity\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\CMakeLists.txt
-C:\My partition\SLIIT\Year 4\Semester 1\Research Project\R26-DS-006\unity\Library\Bee\Android\Prj\IL2CPP\Gradle\unityLibrary\src\main\cpp\GameActivity\CMakeLists.txt
