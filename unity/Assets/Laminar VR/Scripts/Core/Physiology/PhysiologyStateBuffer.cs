@@ -118,7 +118,8 @@ namespace LaminarVR.AdaptiveMeditation.Physiology
             snapshot = new PhysiologyWindowSnapshot(
                 latest.SequenceNumber,
                 latest.Window,
-                latest.AgeAtReceiptSeconds);
+                latest.AgeAtReceiptSeconds,
+                latest.ReceivedMonotonicTimeSeconds);
             return true;
         }
 
@@ -181,9 +182,44 @@ namespace LaminarVR.AdaptiveMeditation.Physiology
             snapshot = new PhysiologyWindowSnapshot(
                 latest.SequenceNumber,
                 latest.Window,
-                ageSeconds);
+                ageSeconds,
+                latest.ReceivedMonotonicTimeSeconds);
             resultCode = PhysiologyQueryResultCode.Available;
             return true;
+        }
+
+        public PhysiologyWindowSnapshot[] GetRecentAccepted(int maximumCount)
+        {
+            if (maximumCount < 1)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(maximumCount),
+                    maximumCount,
+                    "At least one recent window must be requested.");
+            }
+
+            var resultCount = Math.Min(count, maximumCount);
+            var result = new PhysiologyWindowSnapshot[resultCount];
+            var startIndex = nextWriteIndex - resultCount;
+            if (startIndex < 0)
+            {
+                startIndex += windows.Length;
+            }
+
+            for (var resultIndex = 0;
+                resultIndex < resultCount;
+                resultIndex++)
+            {
+                var bufferIndex = (startIndex + resultIndex) % windows.Length;
+                var buffered = windows[bufferIndex];
+                result[resultIndex] = new PhysiologyWindowSnapshot(
+                    buffered.SequenceNumber,
+                    buffered.Window,
+                    buffered.AgeAtReceiptSeconds,
+                    buffered.ReceivedMonotonicTimeSeconds);
+            }
+
+            return result;
         }
 
         public bool HasFreshDecisionWindowAfter(

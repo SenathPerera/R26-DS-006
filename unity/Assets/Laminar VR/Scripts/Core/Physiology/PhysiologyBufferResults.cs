@@ -56,10 +56,20 @@ namespace LaminarVR.AdaptiveMeditation.Physiology
             long sequenceNumber,
             PhysiologyWindow window,
             double ageSeconds)
+            : this(sequenceNumber, window, ageSeconds, double.NaN)
+        {
+        }
+
+        public PhysiologyWindowSnapshot(
+            long sequenceNumber,
+            PhysiologyWindow window,
+            double ageSeconds,
+            double receivedMonotonicTimeSeconds)
         {
             SequenceNumber = sequenceNumber;
             Window = window;
             AgeSeconds = ageSeconds;
+            ReceivedMonotonicTimeSeconds = receivedMonotonicTimeSeconds;
         }
 
         public long SequenceNumber { get; }
@@ -67,5 +77,7 @@ namespace LaminarVR.AdaptiveMeditation.Physiology
         public PhysiologyWindow Window { get; }
 
         public double AgeSeconds { get; }
+
+        public double ReceivedMonotonicTimeSeconds { get; }
     }
 }

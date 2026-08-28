@@ -205,6 +205,23 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Physiology
         }
 
         [Test]
+        public void GetRecentAccepted_ReturnsNewestSubsetInAscendingOrder()
+        {
+            var buffer = CreateBuffer(capacity: 4);
+            buffer.Ingest(CreateWindow(1000d), 1000d, 1d);
+            buffer.Ingest(CreateWindow(1001d), 1001d, 2d);
+            buffer.Ingest(CreateWindow(1002d), 1002d, 3d);
+
+            var recent = buffer.GetRecentAccepted(2);
+
+            Assert.That(recent, Has.Length.EqualTo(2));
+            Assert.That(recent[0].SequenceNumber, Is.EqualTo(2L));
+            Assert.That(recent[1].SequenceNumber, Is.EqualTo(3L));
+            Assert.That(recent[0].ReceivedMonotonicTimeSeconds, Is.EqualTo(2d));
+            Assert.That(recent[1].ReceivedMonotonicTimeSeconds, Is.EqualTo(3d));
+        }
+
+        [Test]
         public void Query_RejectsTimeBeforeReceipt()
         {
             var buffer = CreateBuffer();
