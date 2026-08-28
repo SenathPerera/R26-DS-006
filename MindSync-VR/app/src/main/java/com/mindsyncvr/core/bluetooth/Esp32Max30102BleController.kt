@@ -25,6 +25,13 @@ import com.mindsyncvr.core.model.RawPpgSample
 import com.mindsyncvr.core.model.WearableDevice
 import com.mindsyncvr.core.model.WearableTelemetry
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +43,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -77,24 +85,32 @@ class WearableHealthBleController(
         mutableState.value = ConnectionState.Scanning
 
         val result = withTimeoutOrNull(SCAN_TIMEOUT_MS) {
-            scanResults(useServiceFilter = true).first()
+            scanResults(useServiceFilter = true, emitAll = false).first()
         } ?: withTimeoutOrNull(FALLBACK_SCAN_TIMEOUT_MS) {
             log("Service-filtered scan found nothing; running short fallback name scan", warn = true)
-            scanResults(useServiceFilter = false).first()
+            scanResults(useServiceFilter = false, emitAll = false).first()
         }
 
         mutableState.value = ConnectionState.Idle
 
-        if (result == null) {
+        if (result != null) {
+            log("Found $DEVICE_NAME at ${result.device.address}, RSSI=${result.rssi}")
+            return listOf(result.toWearableDevice(isVerifiedTarget = true))
+        }
+
+        val fallbackDevices = collectFallbackDevices()
+        if (fallbackDevices.isNotEmpty()) {
+            val message = "Wearable advertisement name/service not visible. Select the strongest nearby device, then connection will verify the service."
+            log(message, warn = true)
+            mutableErrors.value = null
+            return fallbackDevices
+        } else {
             val message = "Device not found: $DEVICE_NAME"
             log(message, warn = true)
             log("Confirm the ESP32 is advertising service $SERVICE_UUID and name $DEVICE_NAME", warn = true)
             mutableErrors.value = message
             return emptyList()
         }
-
-        log("Found $DEVICE_NAME at ${result.device.address}, RSSI=${result.rssi}")
-        return listOf(result.toWearableDevice())
     }
 
     override suspend fun connect(deviceId: String): WearableDevice {
@@ -137,7 +153,24 @@ class WearableHealthBleController(
     }
 
     @SuppressLint("MissingPermission")
-    private fun scanResults(useServiceFilter: Boolean): Flow<ScanResult> = callbackFlow {
+    private suspend fun collectFallbackDevices(): List<WearableDevice> {
+        val resultsByAddress = linkedMapOf<String, ScanResult>()
+        withTimeoutOrNull(FALLBACK_CANDIDATE_SCAN_TIMEOUT_MS) {
+            scanResults(useServiceFilter = false, emitAll = true).collect { result ->
+                val previous = resultsByAddress[result.device.address]
+                if (previous == null || result.rssi > previous.rssi) {
+                    resultsByAddress[result.device.address] = result
+                }
+            }
+        }
+        return resultsByAddress.values
+            .sortedByDescending { it.rssi }
+            .take(MAX_FALLBACK_CANDIDATES)
+            .map { it.toWearableDevice(isVerifiedTarget = false) }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun scanResults(useServiceFilter: Boolean, emitAll: Boolean): Flow<ScanResult> = callbackFlow {
         val seenAddresses = mutableSetOf<String>()
         val callback = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -150,7 +183,7 @@ class WearableHealthBleController(
                     log("Saw BLE device name=${advertisedName ?: "<no name>"} address=$address rssi=${result.rssi} services=$serviceText")
                 }
 
-                if (isTargetAdvertisement(advertisedName, hasService)) {
+                if (emitAll || isTargetAdvertisement(advertisedName, hasService)) {
                     trySend(result)
                 }
             }
@@ -233,6 +266,7 @@ class WearableHealthBleController(
                         ?.getCharacteristic(TELEMETRY_CHARACTERISTIC_UUID)
 
                     if (telemetryCharacteristic == null) {
+                        logDiscoveredGatt(gatt)
                         log("Telemetry characteristic not found", warn = true)
                         mutableErrors.value = "Telemetry characteristic not found"
                         mutableState.value = ConnectionState.Error
@@ -310,7 +344,7 @@ class WearableHealthBleController(
         }
 
         runCatching {
-            json.decodeFromString(WearableTelemetry.serializer(), jsonText)
+            parseTelemetry(jsonText)
         }.onSuccess { telemetry ->
             if (telemetry.ir == null || telemetry.red == null || telemetry.noiseAverage == null || telemetry.noisePeak == null) {
                 val message = "Malformed telemetry packet: missing required fields"
@@ -325,6 +359,53 @@ class WearableHealthBleController(
             val message = "Malformed telemetry packet: ${error.message}"
             log("$message payload=$jsonText", warn = true)
             mutableErrors.value = message
+        }
+    }
+
+    private fun parseTelemetry(jsonText: String): WearableTelemetry {
+        val fields = json.parseToJsonElement(jsonText).jsonObject
+        return WearableTelemetry(
+            timestampMs = fields.longValue("t") ?: fields.longValue("timestampMs"),
+            ir = fields.longValue("ir"),
+            red = fields.longValue("red"),
+            heartRateBpm = fields.doubleValue("hr") ?: fields.doubleValue("heartRateBpm"),
+            rrIntervalMs = fields.longValue("rr") ?: fields.longValue("rrIntervalMs"),
+            spo2 = fields.doubleValue("spo2"),
+            noiseAverage = fields.longValue("noiseAvg") ?: fields.longValue("nAvg"),
+            noisePeak = fields.longValue("noisePeak") ?: fields.longValue("nPeak"),
+            temperatureC = fields.doubleValue("temp") ?: fields.doubleValue("temperatureC"),
+            batteryPercent = fields.intValue("bat") ?: fields.intValue("batteryPercent"),
+            statusFlags = fields.intValue("flags") ?: fields.intValue("statusFlags") ?: 0
+        )
+    }
+
+    private fun Map<String, JsonElement>.longValue(key: String): Long? {
+        val value = this[key] ?: return null
+        if (value is JsonNull) return null
+        return value.jsonPrimitive.longOrNull
+    }
+
+    private fun Map<String, JsonElement>.intValue(key: String): Int? {
+        val value = this[key] ?: return null
+        if (value is JsonNull) return null
+        return value.jsonPrimitive.intOrNull
+    }
+
+    private fun Map<String, JsonElement>.doubleValue(key: String): Double? {
+        val value = this[key] ?: return null
+        if (value is JsonNull) return null
+        return value.jsonPrimitive.doubleOrNull
+    }
+
+    private fun logDiscoveredGatt(gatt: BluetoothGatt) {
+        if (gatt.services.isEmpty()) {
+            log("No GATT services discovered on connected device", warn = true)
+            return
+        }
+
+        gatt.services.forEach { service ->
+            val characteristics = service.characteristics.joinToString { it.uuid.toString() }
+            log("Discovered GATT service=${service.uuid} characteristics=[$characteristics]", warn = true)
         }
     }
 
@@ -381,14 +462,14 @@ class WearableHealthBleController(
     }
 
     @SuppressLint("MissingPermission")
-    private fun ScanResult.toWearableDevice(): WearableDevice {
-        val advertisedName = scanRecord?.deviceName ?: device.name ?: DEVICE_NAME
+    private fun ScanResult.toWearableDevice(isVerifiedTarget: Boolean): WearableDevice {
+        val advertisedName = scanRecord?.deviceName ?: device.name
         return WearableDevice(
             id = device.address,
-            name = advertisedName,
+            name = advertisedName ?: if (isVerifiedTarget) DEVICE_NAME else "Unknown BLE device ${device.address.takeLast(5)}",
             rssi = rssi,
             battery = 0,
-            firmware = "ESP32-S3 Mini MAX30100 + INMP441",
+            firmware = if (isVerifiedTarget) "ESP32-S3 Mini MAX30100 + INMP441" else "Unverified; connect to check wearable service",
             lastSync = "Discovered",
             signalQuality = 0,
             confidence = 0
@@ -399,13 +480,15 @@ class WearableHealthBleController(
         private const val DEVICE_NAME = "WearableHealthMonitor"
         private const val SCAN_TIMEOUT_MS = 12_000L
         private const val FALLBACK_SCAN_TIMEOUT_MS = 6_000L
+        private const val FALLBACK_CANDIDATE_SCAN_TIMEOUT_MS = 6_000L
+        private const val MAX_FALLBACK_CANDIDATES = 8
         private const val RECONNECT_DELAY_MS = 2_000L
         private const val MTU_FALLBACK_DISCOVERY_MS = 1_200L
         private const val MAX_LOG_LINES = 80
         private const val REQUESTED_MTU = 185
 
-        private val SERVICE_UUID: UUID = UUID.fromString("9f2d7a10-9c1b-4f3d-8a6e-7b35e2a10000")
-        private val TELEMETRY_CHARACTERISTIC_UUID: UUID = UUID.fromString("9f2d7a11-9c1b-4f3d-8a6e-7b35e2a10000")
+        private val SERVICE_UUID: UUID = UUID.fromString("7c69f001-7f70-4b0a-9c91-93d7f91b1001")
+        private val TELEMETRY_CHARACTERISTIC_UUID: UUID = UUID.fromString("7c69f002-7f70-4b0a-9c91-93d7f91b1001")
         private val CLIENT_CHARACTERISTIC_CONFIG_UUID: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
         private val json = Json {
             ignoreUnknownKeys = true
