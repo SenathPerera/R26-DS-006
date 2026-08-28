@@ -72,10 +72,14 @@ class MindSyncViewModel(application: Application) : AndroidViewModel(application
 
     override fun startVoiceCheckIn() = repository.startVoiceCheckIn()
 
+    override fun beginEnvironmentCheck(name: String, language: String) = repository.beginEnvironmentCheck(name, language)
+
     override fun submitAmbientClip(audio: AudioPayload?) = repository.submitAmbientClip(audio)
 
-    override fun submitVoiceCapture(phase: SessionPhase, audio: AudioPayload?, speechSec: Int) =
-        repository.submitVoiceCapture(phase, audio, speechSec)
+    override fun continueFromEnvironment() = repository.continueFromEnvironment()
+
+    override fun submitVoiceCapture(phase: SessionPhase, audio: AudioPayload?, pcm: ByteArray?, speechSec: Int) =
+        repository.submitVoiceCapture(phase, audio, pcm, speechSec)
 
     override fun sendCompanionMessage(phase: SessionPhase, text: String) =
         repository.sendCompanionMessage(phase, text)
@@ -83,6 +87,8 @@ class MindSyncViewModel(application: Application) : AndroidViewModel(application
     override fun advanceVoiceStage(stage: VoiceStage) = repository.advanceVoiceStage(stage)
 
     override fun completeVoiceCheckIn() = repository.completeVoiceCheckIn()
+
+    override fun setDebugMockHrv(enabled: Boolean) = repository.setDebugMockHrv(enabled)
 
     override fun endVoiceCheckIn() = repository.endVoiceCheckIn()
 }
@@ -100,10 +106,13 @@ interface MindSyncActions {
     fun startLiveSession(sessionId: String)
     fun submitQuestionnaire(templateId: String, sessionId: String?, answers: Map<String, String>)
     fun startVoiceCheckIn()
+    fun beginEnvironmentCheck(name: String, language: String)
     fun submitAmbientClip(audio: AudioPayload?)
-    fun submitVoiceCapture(phase: SessionPhase, audio: AudioPayload?, speechSec: Int)
+    fun continueFromEnvironment()
+    fun submitVoiceCapture(phase: SessionPhase, audio: AudioPayload?, pcm: ByteArray?, speechSec: Int)
     fun sendCompanionMessage(phase: SessionPhase, text: String)
     fun advanceVoiceStage(stage: VoiceStage)
     fun completeVoiceCheckIn()
+    fun setDebugMockHrv(enabled: Boolean)
     fun endVoiceCheckIn()
 }

@@ -44,6 +44,25 @@ QUALITY = {
     "speech_min_fraction": 0.25,     # >=25% of the clip must be VAD speech
 }
 
+# Ambient (Layer 1) — real acoustic analysis, replacing the single whole-clip
+# mean-RMS check that never fired on device (an UNPROCESSED phone mic under-gains,
+# so a noisy room and a quiet one both land near 0.003–0.012 whole-clip RMS; the
+# steady FLOOR and the SPECTRAL shape are what actually separate them, not the mean).
+# check_ambient() reads these; the old QUALITY["ambient_*"] keys stay for the
+# web client / existing callers. UNCALIBRATED starting guesses — run
+# scripts/calibrate_ambient.py on real Galaxy-A9 clips before trusting them.
+AMBIENT = {
+    "floor_dbfs_max":       -50.0,  # steady background ceiling (20th-pct frame RMS)
+    "peak_dbfs_max":        -38.0,  # transient ceiling (95th-pct frame RMS)
+    "max_speech_sec":         0.3,  # nearby voices tolerance (unchanged)
+    "max_clip_ratio":        0.01,  # mic overload (unchanged)
+    "min_duration_sec":       6.0,  # we now listen ~8s; a short sample is rejected
+    "low_freq_ratio_max":    0.70,  # tonal hum (fan/AC/motor) warning
+    "high_freq_ratio_max":   0.40,  # electrical hiss / fluorescent buzz
+    "dynamic_range_max_db":  26.0,  # wide spread = an unstable, event-filled room
+    "transient_floor_mult":   6.0,  # a frame this far above the floor = a transient
+}
+
 # Silero VAD: a small (~1.8MB), fast, pretrained voice-activity detector.
 # Used because arbitrary real-world noise (fans, traffic, background
 # chatter, hums) cannot be reliably distinguished from speech by hand-

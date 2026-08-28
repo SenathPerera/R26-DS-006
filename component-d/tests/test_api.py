@@ -58,10 +58,10 @@ def _patch_vad(monkeypatch, segments_fn):
 
 
 def test_ambient_check_passes_quiet_room(monkeypatch):
-    # A quiet room with NO detected voice must pass the ambient check.
+    # A genuinely quiet room (~8s, low floor) with NO detected voice must pass.
     _patch_vad(monkeypatch, lambda audio, sr: [])
     rng = np.random.RandomState(0)
-    quiet = (0.008 * rng.randn(SAMPLE_RATE * 3)).astype(np.float32)
+    quiet = (0.0025 * rng.randn(SAMPLE_RATE * 8)).astype(np.float32)
     r = client.post("/ambient-check",
                     files={"file": ("a.wav", wav_bytes(quiet), "audio/wav")})
     assert r.status_code == 200 and r.json()["ok"], r.json()
@@ -270,3 +270,100 @@ def test_infer_and_full_session_logging(monkeypatch, tmp_path):
     assert rec["self_report_pre"] == 8.0 and rec["self_report_post"] == 3.0
     assert "pre" in rec["phases"] and "post" in rec["phases"]
     assert rec["phases"]["pre"]["clip"].endswith("pre.wav")
+
+
+# ---------------------------------- /companion/voice-turn (STT + LLM + scoring)
+from componentd.companion import EchoBackend, HealthCompanion
+
+
+def _voice_turn_setup(monkeypatch, transcript, accepted=True,
+                      reply="I hear you - tell me more.", stt_lang="en"):
+    """Wire /companion/voice-turn with a fake transcriber, fake scorer, a VAD that
+    passes (accepted) or fails (rejected), and an EchoBackend companion so no
+    Whisper download / Ollama / encoder is needed."""
+    monkeypatch.setattr(api_server, "transcribe",
+                        lambda audio, lang=None: {"text": transcript, "language": stt_lang})
+    monkeypatch.setattr(api_server, "scorer", _FakeScorer(7.0, -0.7, 0.4))
+    import componentd.layer1_quality as l1
+    segs = [{"start": 0, "end": len(speech_like())}] if accepted else []
+    monkeypatch.setattr(l1, "speech_segments", lambda audio, sr: segs)
+    fake = HealthCompanion(backend=EchoBackend(lambda system, messages: reply))
+    monkeypatch.setattr(api_server, "companion", fake)
+
+
+def _post_turn(sid, phase="pre", is_final=True, language="english"):
+    return client.post(
+        f"/companion/voice-turn?session_id={sid}&phase={phase}"
+        f"&is_final={str(is_final).lower()}&language={language}",
+        files={"file": ("turn.wav", wav_bytes(speech_like()), "audio/wav")})
+
+
+def test_voice_turn_accepted_final_transcribes_replies_and_scores(monkeypatch):
+    """An accepted, final clip returns the transcript + a reply + non-null
+    analysis, and the score lands in session_scores (so /full-session works)."""
+    _voice_turn_setup(monkeypatch, "today has been really rough and I feel tense")
+    r = _post_turn("vt-accept", is_final=True)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["transcript"] == "today has been really rough and I feel tense"
+    assert body["reply"] and body["accepted"] is True
+    assert body["analysis"] is not None and body["analysis"]["stress_score"] == 7.0
+    assert api_server.session_scores["vt-accept"]["pre"]["stress_score"] == 7.0
+
+
+def test_voice_turn_rejected_clip_still_replies(monkeypatch):
+    """A Layer-1-rejected clip returns accepted=false with reasons, analysis=null,
+    but STILL a non-empty reply (a gentle re-ask, never a dead end)."""
+    _voice_turn_setup(monkeypatch, "hmm", accepted=False)
+    r = _post_turn("vt-reject", is_final=True)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["accepted"] is False and body["reasons"]
+    assert body["analysis"] is None
+    assert body["reply"]
+    assert "vt-reject" not in api_server.session_scores
+
+
+def test_voice_turn_stt_unavailable_returns_empty_transcript(monkeypatch):
+    """STT down (empty transcript) must not raise: reply still comes back and the
+    flow continues, mirroring the pre-STT fallback behaviour."""
+    _voice_turn_setup(monkeypatch, "", accepted=True)
+    r = _post_turn("vt-nostt", is_final=False)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["transcript"] == "" and body["reply"]
+
+
+def test_voice_turn_non_final_does_not_store_score(monkeypatch):
+    """is_final=false transcribes + replies but never scores or stores, so the
+    phone can hold a multi-turn conversation and score once at the end."""
+    _voice_turn_setup(monkeypatch, "still gathering my thoughts")
+    r = _post_turn("vt-nonfinal", is_final=False)
+    assert r.status_code == 200, r.text
+    assert r.json()["analysis"] is None
+    assert "vt-nonfinal" not in api_server.session_scores
+
+
+def test_voice_turn_crisis_flag_and_reply(monkeypatch):
+    """A crisis phrase in the transcript sets crisis=true and returns CRISIS_REPLY
+    verbatim, so the app can branch into its crisis UI explicitly."""
+    from componentd.companion import CRISIS_REPLY
+    _voice_turn_setup(monkeypatch, "honestly I want to die", accepted=True)
+    r = _post_turn("vt-crisis", is_final=False)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["crisis"] is True
+    assert body["reply"] == CRISIS_REPLY
+
+
+def test_voice_turn_scrubs_leaked_sensor_note(monkeypatch):
+    """The reply still passes through the sensor-note scrubber: a model that
+    parrots the private stress note must not leak scores to TTS."""
+    leaked = ("(Private app-sensor note - do NOT read these: voice stress high "
+              "(tense, 7.6/10, confidence 0.83)) It sounds like a lot is on you.")
+    _voice_turn_setup(monkeypatch, "i am overwhelmed", accepted=True, reply=leaked)
+    r = _post_turn("vt-scrub", is_final=False)
+    assert r.status_code == 200, r.text
+    reply = r.json()["reply"]
+    assert "7.6/10" not in reply and "confidence 0.83" not in reply
+    assert "Private app-sensor note" not in reply

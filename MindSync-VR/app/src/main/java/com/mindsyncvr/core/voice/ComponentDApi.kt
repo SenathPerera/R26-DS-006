@@ -7,6 +7,7 @@ import com.mindsyncvr.core.voice.dto.FullSessionDto
 import com.mindsyncvr.core.voice.dto.FullSessionRequestDto
 import com.mindsyncvr.core.voice.dto.HealthDto
 import com.mindsyncvr.core.voice.dto.InferDto
+import com.mindsyncvr.core.voice.dto.VoiceTurnDto
 import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.GET
@@ -46,6 +47,21 @@ interface ComponentDApi {
         @Query("phase") phase: String,
         @Body body: CompanionRequestDto,
     ): CompanionReplyDto
+
+    /** One conversational turn: STT + companion reply + (when isFinal) scoring, in
+     *  one round trip. The phone posts the same WAV it would send to /infer. */
+    @Multipart
+    @POST("companion/voice-turn")
+    suspend fun companionVoiceTurn(
+        @Part file: MultipartBody.Part,
+        @Query("session_id") sessionId: String,
+        @Query("phase") phase: String,
+        @Query("is_final") isFinal: Boolean,
+        @Query("poll_b") pollB: Boolean,
+        @Query("log") log: Boolean,
+        @Query("user_id") userId: String?,
+        @Query("language") language: String?,
+    ): VoiceTurnDto
 
     @POST("full-session")
     suspend fun fullSession(@Body body: FullSessionRequestDto): FullSessionDto

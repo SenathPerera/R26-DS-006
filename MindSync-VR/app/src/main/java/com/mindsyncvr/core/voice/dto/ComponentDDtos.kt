@@ -74,8 +74,22 @@ data class MetricsDto(
     @SerialName("speech_seconds") val speechSeconds: Double = 0.0,
     @SerialName("speech_fraction") val speechFraction: Double = 0.0,
     @SerialName("speech_segments") val speechSegments: Int = 0,
+    @SerialName("noise_floor_rms") val noiseFloorRms: Double? = null,
 ) {
-    fun toDomain() = AudioMetrics(durationSec, rms, clipRatio, speechSeconds, speechFraction, speechSegments)
+    fun toDomain() = AudioMetrics(durationSec, rms, clipRatio, speechSeconds, speechFraction, speechSegments, noiseFloorRms)
+}
+
+@Serializable
+data class AmbientCheckDto(
+    val id: String = "",
+    val label: String = "",
+    val value: Double = 0.0,
+    val unit: String = "",
+    val pass: Boolean = true,
+    val severity: String = "fail",
+    val message: String = "",
+) {
+    fun toDomain() = com.mindsyncvr.core.voice.AmbientCheck(id, label, value, unit, pass, severity, message)
 }
 
 @Serializable
@@ -83,8 +97,14 @@ data class AmbientDto(
     val ok: Boolean = false,
     val reasons: List<String> = emptyList(),
     val metrics: MetricsDto? = null,
+    val score: Int = 0,
+    @SerialName("noise_type") val noiseType: String = "quiet",
+    val checks: List<AmbientCheckDto> = emptyList(),
 ) {
-    fun toDomain() = AmbientResult(ok, reasons, metrics?.toDomain())
+    fun toDomain() = AmbientResult(
+        ok = ok, reasons = reasons, metrics = metrics?.toDomain(),
+        score = score, noiseType = noiseType, checks = checks.map { it.toDomain() },
+    )
 }
 
 @Serializable
@@ -130,6 +150,30 @@ data class InferDto(
 @Serializable
 data class CompanionReplyDto(val reply: String) {
     fun toDomain() = CompanionReply(reply)
+}
+
+/** Response of /companion/voice-turn. `analysis` reuses the /infer shape and is
+ *  null on non-final turns (and on rejected/empty clips). */
+@Serializable
+data class VoiceTurnDto(
+    val transcript: String = "",
+    val reply: String = "",
+    val crisis: Boolean = false,
+    val accepted: Boolean = false,
+    val reasons: List<String> = emptyList(),
+    val quality: MetricsDto? = null,
+    val analysis: InferDto? = null,
+    @SerialName("session_id") val sessionId: String = "",
+) {
+    fun toDomain() = com.mindsyncvr.core.voice.VoiceTurnResult(
+        transcript = transcript,
+        reply = reply,
+        crisis = crisis,
+        accepted = accepted,
+        reasons = reasons,
+        analysis = analysis?.toDomain(),
+        sessionId = sessionId,
+    )
 }
 
 @Serializable

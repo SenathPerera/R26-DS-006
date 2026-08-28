@@ -17,6 +17,10 @@ sealed class VoiceError {
      *  gentle "let's try that recording again", not these raw strings. */
     data class AudioRejected(val reasons: List<String>) : VoiceError()
 
+    /** 400 — the clip was empty / no audio was captured (distinct from a clip
+     *  that recorded fine but Layer 1 rejected). `reasons` come from the server. */
+    data class NoAudioCaptured(val reasons: List<String>) : VoiceError()
+
     /** /full-session before both pre and post /infer results exist. */
     object SessionIncomplete : VoiceError()
 
@@ -41,6 +45,7 @@ fun VoiceError.message(): String = when (this) {
     VoiceError.NetworkUnavailable -> "Can't reach the check-in service. Check your connection and try again."
     VoiceError.Timeout -> "That took too long — the service may still be warming up. Please try again."
     is VoiceError.AudioRejected -> "We couldn't get a clear enough recording. Let's try that again — somewhere quiet, speaking naturally."
+    is VoiceError.NoAudioCaptured -> "I didn't catch any sound that time. Let's try again — a little closer to the microphone."
     VoiceError.SessionIncomplete -> "We need both the before and after recordings before the report."
     is VoiceError.BackendUnavailable -> "The check-in service isn't fully ready yet. Please try again in a moment."
     VoiceError.Unauthorized -> "This check-in isn't authorised."

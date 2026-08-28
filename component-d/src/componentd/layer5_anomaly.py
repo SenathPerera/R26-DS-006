@@ -154,7 +154,7 @@ def simulate_sessions(n: int = 2000, seed: int = 42) -> np.ndarray:
 class SessionAnomalyDetector:
     """Loads a trained autoencoder and scores sessions per user."""
 
-    def __init__(self, checkpoint_path: str, device: str = "cpu"):
+    def __init__(self, checkpoint_path: str, device: str = "cpu", store=None):
         ckpt = torch.load(checkpoint_path, map_location=device,
                           weights_only=False)
         # Checkpoints tag their architecture; older ones (no tag) are the
@@ -173,9 +173,12 @@ class SessionAnomalyDetector:
         self.mean = np.asarray(ckpt["feat_mean"], dtype=np.float32)
         self.std = np.asarray(ckpt["feat_std"], dtype=np.float32)
         self.global_threshold = float(ckpt["threshold"])
-        # Per-user reconstruction-error history (in memory; a database
-        # would replace this in production).
-        self.user_errors: dict[str, list[float]] = {}
+        # Per-user reconstruction-error history. Optionally backed by a durable
+        # store (componentd.store) so min_personal_sessions becomes reachable
+        # across restarts and the per-user threshold actually engages (PROBLEM 6).
+        self.store = store
+        self.user_errors: dict[str, list[float]] = (
+            store.load_anomaly_history() if store is not None else {})
 
     def _reconstruction(self, features: np.ndarray):
         x = (features - self.mean) / (self.std + 1e-8)
@@ -199,7 +202,8 @@ class SessionAnomalyDetector:
             return float(h.mean() + ANOMALY["threshold_sigma"] * (h.std() + 1e-8))
         return self.global_threshold
 
-    def check(self, user_id: str, features: np.ndarray) -> dict:
+    def check(self, user_id: str, features: np.ndarray,
+              session_id: str | None = None) -> dict:
         """features: one session summary in ANOMALY_FEATURES order."""
         features = np.asarray(features, dtype=np.float32).flatten()
         assert features.shape == (len(self.mean),), \
@@ -245,6 +249,8 @@ class SessionAnomalyDetector:
         # anomaly would poison the personal threshold.
         if not is_anomalous:
             self.user_errors.setdefault(user_id, []).append(error)
+            if self.store is not None:
+                self.store.observe_anomaly(user_id, session_id or "", error)
 
         return {
             "anomaly": bool(is_anomalous),
