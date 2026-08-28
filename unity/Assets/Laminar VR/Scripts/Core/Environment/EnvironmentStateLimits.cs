@@ -47,5 +47,34 @@ namespace LaminarVR.AdaptiveMeditation.Environment
                 ColorRichness.Clamp(state.ColorRichness),
                 AmbientMotion.Clamp(state.AmbientMotion));
         }
+
+        public bool TryIntersect(
+            EnvironmentStateLimits other,
+            out EnvironmentStateLimits intersection)
+        {
+            if (!Illumination.TryIntersect(other.Illumination, out var illumination)
+                || !Warmth.TryIntersect(other.Warmth, out var warmth)
+                || !AtmosphericSoftness.TryIntersect(
+                    other.AtmosphericSoftness,
+                    out var atmosphericSoftness)
+                || !ColorRichness.TryIntersect(
+                    other.ColorRichness,
+                    out var colorRichness)
+                || !AmbientMotion.TryIntersect(
+                    other.AmbientMotion,
+                    out var ambientMotion))
+            {
+                intersection = default;
+                return false;
+            }
+
+            intersection = new EnvironmentStateLimits(
+                illumination,
+                warmth,
+                atmosphericSoftness,
+                colorRichness,
+                ambientMotion);
+            return true;
+        }
     }
 }

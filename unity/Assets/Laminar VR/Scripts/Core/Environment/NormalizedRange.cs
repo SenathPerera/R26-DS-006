@@ -38,6 +38,22 @@ namespace LaminarVR.AdaptiveMeditation.Environment
             return Math.Min(Maximum, Math.Max(Minimum, value));
         }
 
+        public bool TryIntersect(
+            NormalizedRange other,
+            out NormalizedRange intersection)
+        {
+            var minimum = Math.Max(Minimum, other.Minimum);
+            var maximum = Math.Min(Maximum, other.Maximum);
+            if (minimum > maximum)
+            {
+                intersection = default;
+                return false;
+            }
+
+            intersection = new NormalizedRange(minimum, maximum);
+            return true;
+        }
+
         public bool Equals(NormalizedRange other)
         {
             return Minimum.Equals(other.Minimum) && Maximum.Equals(other.Maximum);
