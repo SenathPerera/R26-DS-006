@@ -65,3 +65,6 @@ Thumbs.db
 
 /unity/.utmp/
 /debug.log
+
+#Context Bandit Research Contract
+/docs/architecture/ADAPTIVE_VR_LEARNING_RESEARCH_CONTRACT.md
