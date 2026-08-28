@@ -1,8 +1,7 @@
 namespace LaminarVR.AdaptiveMeditation.Physiology
 {
-    // TODO(RESEARCH_DECISION): The final shared schema must reconcile the
-    // blueprint's stress terminology with Component B's current numeric
-    // levels and authoritative labels. Unity preserves the producer decision.
+    // Component B's point/band schema and level names now align with the
+    // blueprint. Unity preserves the producer's authoritative mode and label.
     public enum StressDecisionMode
     {
         Point,

@@ -37,6 +37,25 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Physiology
         }
 
         [Test]
+        public void Validate_AcceptsCurrentComponentBBandPayloadSemantics()
+        {
+            var stress = new StressDecision(
+                StressDecisionMode.Band,
+                null,
+                1,
+                2,
+                "mild-to-moderate",
+                0.10d,
+                true,
+                new StressProbabilityVector(0.08d, 0.40d, 0.50d, 0.02d),
+                1.46d);
+
+            var result = validator.Validate(CreateWindow(stress: stress), 1000d);
+
+            Assert.That(result.Accepted, Is.True);
+        }
+
+        [Test]
         public void Validate_AcceptsMissingOptionalHrvMetrics()
         {
             var result = validator.Validate(

@@ -1,8 +1,8 @@
 namespace LaminarVR.AdaptiveMeditation.Physiology
 {
-    // Transport-neutral validated domain object. Session/schema envelope
-    // validation belongs in the future shared-contract transport adapter.
-    // TODO(RESEARCH_DECISION): Finalize that shared envelope before networking.
+    // Transport-neutral validated domain object. The Component B payload is
+    // intentionally accepted without an embedded session ID or schema version;
+    // the active session transport owns its session association.
     public sealed class PhysiologyWindow
     {
         public PhysiologyWindow(
