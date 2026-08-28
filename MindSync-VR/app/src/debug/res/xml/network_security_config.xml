@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  DEBUG ONLY. Component D runs over plain HTTP on a dev machine, so cleartext is
+  permitted here for the dev hosts only (emulator loopback, localhost, and the
+  Mac's LAN IP). This file lives in src/debug, so it never reaches a release
+  build — release keeps Android's default: cleartext blocked, HTTPS only.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">10.0.2.2</domain>
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">172.20.10.14</domain>
+    </domain-config>
+</network-security-config>

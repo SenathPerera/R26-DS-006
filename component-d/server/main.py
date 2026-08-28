@@ -21,6 +21,7 @@ import numbers
 import os
 import shutil
 import subprocess
+import tempfile
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -148,27 +149,36 @@ async def read_audio(file: UploadFile) -> np.ndarray:
         pass  # not a soundfile-supported format; try the ffmpeg path
 
     # fallback: shell out to ffmpeg, which decodes essentially anything (MP4/
-    # M4A/AAC, WebM/Opus, MP3, ...) to 16 kHz mono WAV on stdout. We call ffmpeg
-    # DIRECTLY rather than via librosa, because librosa only reaches ffmpeg
-    # through the optional `audioread` package, which is not a dependency here.
+    # M4A/AAC, WebM/Opus, MP3, ...) to 16 kHz mono WAV on stdout. We write the
+    # upload to a temp FILE and give ffmpeg a seekable path (-i <path>) rather
+    # than piping it via stdin (pipe:0): MP4/MOV containers routinely keep their
+    # `moov` index at the END of the file, and ffmpeg cannot reach it over a
+    # non-seekable pipe, so piped mp4s decode to empty audio (they play fine in
+    # a seekable player). A real file is seekable and decodes reliably. We call
+    # ffmpeg DIRECTLY rather than via librosa, because librosa only reaches
+    # ffmpeg through the optional `audioread` package, not a dependency here.
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         raise HTTPException(
             400, f"could not decode audio file ({file.filename}): "
                  "this format needs ffmpeg, which is not installed. Upload a "
                  "WAV/FLAC/OGG file, or install ffmpeg.")
-    try:
-        proc = subprocess.run(
-            [ffmpeg, "-nostdin", "-loglevel", "error", "-i", "pipe:0",
-             "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "wav", "pipe:1"],
-            input=raw, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
-        audio, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32")
-        return audio if audio.ndim == 1 else audio.mean(axis=1)
-    except subprocess.CalledProcessError as e:
-        detail = (e.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
-        why = detail[-1] if detail else "unknown decode error"
-        raise HTTPException(
-            400, f"could not decode audio file ({file.filename}): {why}")
+    suffix = Path(file.filename or "").suffix or ".bin"
+    with tempfile.NamedTemporaryFile(suffix=suffix) as tmp:
+        tmp.write(raw)
+        tmp.flush()
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-nostdin", "-loglevel", "error", "-i", tmp.name,
+                 "-ac", "1", "-ar", str(SAMPLE_RATE), "-f", "wav", "pipe:1"],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        except subprocess.CalledProcessError as e:
+            detail = (e.stderr or b"").decode("utf-8", "ignore").strip().splitlines()
+            why = detail[-1] if detail else "unknown decode error"
+            raise HTTPException(
+                400, f"could not decode audio file ({file.filename}): {why}")
+    audio, _ = sf.read(io.BytesIO(proc.stdout), dtype="float32")
+    return audio if audio.ndim == 1 else audio.mean(axis=1)
 
 
 MIN_AUDIO_SAMPLES = int(SAMPLE_RATE * 0.15)   # ~150 ms; shorter = empty/failed capture
