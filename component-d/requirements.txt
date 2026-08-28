@@ -19,6 +19,11 @@ fastapi>=0.104
 uvicorn>=0.24
 python-multipart         # multipart audio upload support
 
+# --- speech-to-text (companion STT stage: STT -> LLM -> TTS) ---
+# Transcribes the same 16 kHz clip already uploaded for stress scoring, so the
+# companion reflects on what the student actually said. CPU/int8, base model.
+faster-whisper>=1.0
+
 # --- health companion (LLM dialogue stage: STT -> LLM -> TTS) ---
 # Default backend is a LOCAL Ollama model (free, private) via the stdlib -
 # NO Python dependency. Install Ollama separately: https://ollama.com
