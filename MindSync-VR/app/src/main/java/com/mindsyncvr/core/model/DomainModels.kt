@@ -212,5 +212,6 @@ data class AppState(
     val sessions: List<MeditationSession> = emptyList(),
     val questionnaireTemplates: List<QuestionnaireTemplate> = emptyList(),
     val questionnaireResponses: List<QuestionnaireResponse> = emptyList(),
-    val pendingValidationCount: Int = 1
+    val pendingValidationCount: Int = 1,
+    val voiceCheckIn: VoiceCheckInState = VoiceCheckInState()
 )

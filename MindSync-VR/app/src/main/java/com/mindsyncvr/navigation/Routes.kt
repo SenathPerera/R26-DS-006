@@ -6,6 +6,7 @@ object Routes {
     const val SignUp = "signup"
     const val Onboarding = "onboarding"
     const val Home = "home"
+    const val VoiceCheckIn = "voice-checkin"
     const val Wearable = "wearable"
     const val WearableDetail = "wearable-detail"
     const val Vr = "vr"

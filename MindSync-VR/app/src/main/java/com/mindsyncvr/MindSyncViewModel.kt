@@ -7,12 +7,22 @@ import com.mindsyncvr.core.bluetooth.WearableHealthBleController
 import com.mindsyncvr.core.data.MindSyncRepository
 import com.mindsyncvr.core.model.AppState
 import com.mindsyncvr.core.model.OnboardingProfile
+import com.mindsyncvr.core.model.VoiceStage
+import com.mindsyncvr.core.voice.AudioPayload
+import com.mindsyncvr.core.voice.ComponentDConfig
+import com.mindsyncvr.core.voice.ComponentDVoiceRepository
+import com.mindsyncvr.core.voice.SessionPhase
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 class MindSyncViewModel(application: Application) : AndroidViewModel(application), MindSyncActions {
     private val repository = MindSyncRepository(
-        ble = WearableHealthBleController(application)
+        ble = WearableHealthBleController(application),
+        // Real Component D client (voice stress). Base URL comes from BuildConfig:
+        // the debug dev host, or the HTTPS production host in release.
+        voice = ComponentDVoiceRepository.create(
+            ComponentDConfig(baseUrl = BuildConfig.COMPONENT_D_BASE_URL, useMock = false)
+        )
     )
     val state: StateFlow<AppState> = repository.state
 
@@ -59,6 +69,22 @@ class MindSyncViewModel(application: Application) : AndroidViewModel(application
     override fun submitQuestionnaire(templateId: String, sessionId: String?, answers: Map<String, String>) {
         viewModelScope.launch { repository.submitQuestionnaire(templateId, sessionId, answers) }
     }
+
+    override fun startVoiceCheckIn() = repository.startVoiceCheckIn()
+
+    override fun submitAmbientClip(audio: AudioPayload?) = repository.submitAmbientClip(audio)
+
+    override fun submitVoiceCapture(phase: SessionPhase, audio: AudioPayload?, speechSec: Int) =
+        repository.submitVoiceCapture(phase, audio, speechSec)
+
+    override fun sendCompanionMessage(phase: SessionPhase, text: String) =
+        repository.sendCompanionMessage(phase, text)
+
+    override fun advanceVoiceStage(stage: VoiceStage) = repository.advanceVoiceStage(stage)
+
+    override fun completeVoiceCheckIn() = repository.completeVoiceCheckIn()
+
+    override fun endVoiceCheckIn() = repository.endVoiceCheckIn()
 }
 
 interface MindSyncActions {
@@ -73,4 +99,11 @@ interface MindSyncActions {
     fun createSession(): String
     fun startLiveSession(sessionId: String)
     fun submitQuestionnaire(templateId: String, sessionId: String?, answers: Map<String, String>)
+    fun startVoiceCheckIn()
+    fun submitAmbientClip(audio: AudioPayload?)
+    fun submitVoiceCapture(phase: SessionPhase, audio: AudioPayload?, speechSec: Int)
+    fun sendCompanionMessage(phase: SessionPhase, text: String)
+    fun advanceVoiceStage(stage: VoiceStage)
+    fun completeVoiceCheckIn()
+    fun endVoiceCheckIn()
 }

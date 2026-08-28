@@ -30,6 +30,7 @@ import com.mindsyncvr.features.session.ReadyScreen
 import com.mindsyncvr.features.session.SessionCompleteScreen
 import com.mindsyncvr.features.settings.SettingsScreen
 import com.mindsyncvr.features.settings.SupportScreen
+import com.mindsyncvr.features.voice.VoiceCheckInScreen
 import com.mindsyncvr.features.vr.VrScreen
 import com.mindsyncvr.features.wearable.WearableDetailScreen
 import com.mindsyncvr.features.wearable.WearableScreen
@@ -51,6 +52,7 @@ fun MindSyncApp(
                 composable(Routes.SignUp) { SignUpScreen(actions = actions, onDone = { navController.navigate(Routes.Onboarding) { popUpTo(Routes.Welcome) { inclusive = true } } }) }
                 composable(Routes.Onboarding) { OnboardingScreen(state = state, actions = actions, onDone = { navController.navigate(Routes.Home) { popUpTo(Routes.Onboarding) { inclusive = true } } }) }
                 composable(Routes.Home) { HomeScreen(state = state, navigate = navController::navigate) }
+                composable(Routes.VoiceCheckIn) { VoiceCheckInScreen(state = state, actions = actions, navigate = navController::navigate) }
                 composable(Routes.Wearable) { WearableScreen(state = state, actions = actions, navigate = navController::navigate) }
                 composable(Routes.WearableDetail) { WearableDetailScreen(state = state, actions = actions, navigate = navController::navigate) }
                 composable(Routes.Vr) { VrScreen(state = state, actions = actions, navigate = navController::navigate) }
