@@ -763,6 +763,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
 
         private sealed class RecordingAdapter : ISceneEnvironmentAdapter
         {
+            public string SceneId => "policy-controller-recording-scene";
+
+            public SceneBindingValidation ValidateBindings()
+            {
+                return SceneBindingValidation.Succeeded();
+            }
+
             public void ApplyState(EnvironmentState state)
             {
             }

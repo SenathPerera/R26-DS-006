@@ -26,6 +26,24 @@ namespace LaminarVR.AdaptiveMeditation.Environment
 
             this.sceneAdapter = sceneAdapter
                 ?? throw new ArgumentNullException(nameof(sceneAdapter));
+            if (string.IsNullOrWhiteSpace(sceneAdapter.SceneId))
+            {
+                throw new ArgumentException(
+                    "The scene adapter must provide a scene ID.",
+                    nameof(sceneAdapter));
+            }
+
+            var bindingValidation = sceneAdapter.ValidateBindings();
+            if (bindingValidation == null || !bindingValidation.IsValid)
+            {
+                var detail = bindingValidation == null
+                    ? "The scene adapter returned no binding validation result."
+                    : bindingValidation.Code + ": " + bindingValidation.Detail;
+                throw new ArgumentException(
+                    "The scene adapter bindings are invalid. " + detail,
+                    nameof(sceneAdapter));
+            }
+
             CurrentState = initialState;
             TargetState = initialState;
             sceneAdapter.ApplyState(initialState);

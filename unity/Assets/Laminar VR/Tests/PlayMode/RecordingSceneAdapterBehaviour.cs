@@ -15,6 +15,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         public EnvironmentState LastAppliedState =>
             appliedStates[appliedStates.Count - 1];
 
+        public string SceneId => "playmode-recording-scene";
+
+        public SceneBindingValidation ValidateBindings()
+        {
+            return SceneBindingValidation.Succeeded();
+        }
+
         public void ApplyState(EnvironmentState state)
         {
             appliedStates.Add(state);

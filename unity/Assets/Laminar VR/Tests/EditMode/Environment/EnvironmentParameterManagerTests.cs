@@ -21,6 +21,18 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
         }
 
         [Test]
+        public void Constructor_RejectsInvalidSceneBindingsBeforeApplication()
+        {
+            var exception = Assert.Throws<ArgumentException>(
+                () => new EnvironmentParameterManager(
+                    CreateState(0.5f),
+                    new InvalidAdapter()));
+
+            Assert.That(exception.Message,
+                Does.Contain("RequiredReferenceMissing"));
+        }
+
+        [Test]
         public void AdvanceTransition_InterpolatesAndCompletesDeterministically()
         {
             var adapter = new RecordingAdapter();
@@ -98,9 +110,33 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
             public List<EnvironmentState> AppliedStates { get; } =
                 new List<EnvironmentState>();
 
+            public string SceneId => "editmode-recording-scene";
+
+            public SceneBindingValidation ValidateBindings()
+            {
+                return SceneBindingValidation.Succeeded();
+            }
+
             public void ApplyState(EnvironmentState state)
             {
                 AppliedStates.Add(state);
+            }
+        }
+
+        private sealed class InvalidAdapter : ISceneEnvironmentAdapter
+        {
+            public string SceneId => "invalid-scene";
+
+            public SceneBindingValidation ValidateBindings()
+            {
+                return SceneBindingValidation.Failed(
+                    SceneBindingValidationCode.RequiredReferenceMissing,
+                    "Missing required test binding.");
+            }
+
+            public void ApplyState(EnvironmentState state)
+            {
+                Assert.Fail("Invalid scene bindings must not receive state.");
             }
         }
     }

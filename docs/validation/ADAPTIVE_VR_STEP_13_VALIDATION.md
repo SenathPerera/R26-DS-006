@@ -50,15 +50,19 @@ Open **Window → General → Test Runner → PlayMode**, run
 
 | Test | Status before run | Purpose |
 |---|---|---|
-| `CompleteActionResponseCycle_UpdatesBanditAfterReward` | Not run | Full decision, reward, and selected-arm update |
-| `PauseDuringPendingReward_InvalidatesWithoutUpdate` | Not run | Pause boundary prevents learning |
-| `EmergencyDuringTransition_CancelsAndFreezesState` | Not run | Local emergency cancellation preserves the current safe state |
-| `NetworkAndStalePhysiology_FreezeNewDecisions` | Not run | Network and freshness failures prevent adaptation |
-| `BootstrapPolicySelection_CreatesAllStudyPolicies` | Not run | Runtime factory selects all three study policies |
-| `SceneAdapterIntegration_AppliesSmoothTransitionPerFrame` | Not run | Unity component receives gradual normalized states |
+| `CompleteActionResponseCycle_UpdatesBanditAfterReward` | Passed | User-reported PlayMode run, 2026-08-29 |
+| `PauseDuringPendingReward_InvalidatesWithoutUpdate` | Passed | User-reported PlayMode run, 2026-08-29 |
+| `EmergencyDuringTransition_CancelsAndFreezesState` | Passed | User-reported PlayMode run, 2026-08-29 |
+| `NetworkAndStalePhysiology_FreezeNewDecisions` | Passed | User-reported PlayMode run, 2026-08-29 |
+| `BootstrapPolicySelection_CreatesAllStudyPolicies` | Passed | User-reported PlayMode run, 2026-08-29 |
+| `SceneAdapterIntegration_AppliesSmoothTransitionPerFrame` | Passed | User-reported PlayMode run, 2026-08-29 |
+| `TemplePondSceneAdapter_AppliesAllFiveMappings` | Not run | Production Temple adapter maps all five normalized dimensions through calibrated endpoints |
+| `ApplicationBootstrap_RegistersSceneAndStaticPolicy` | Not run | Production composition root validates bindings and applies the safe initial state |
 
-These tests use an isolated GameObject adapter. Production Temple/Forest scene
-adapter validation remains pending until scene-specific adapters are present.
+The first six tests use an isolated GameObject adapter. The two additional
+tests exercise the production Temple adapter and initial application composition
+root with isolated, explicitly approved test-only profiles. Validation against
+the serialized Temple scene remains pending.
 
 ## Android build validation
 
@@ -105,8 +109,10 @@ Record for every run:
 ## Current limitations
 
 - Forest Lake is not available.
-- Production scene-specific environment adapters and application bootstrap are
-  not yet present, so their PlayMode criteria cannot be validated against a
-  meditation scene.
+- The production Temple adapter and initial application composition root now
+  exist but are not wired into the serialized Temple scene.
+- The current Temple pond material does not expose a genuine ambient-motion
+  shader property. Binding validation intentionally rejects it until the water
+  implementation provides a restrained ripple-motion control.
 - No Android artifact or Quest 2 evidence has been produced in this step yet.
 - The final Quest performance threshold is an unresolved research decision.

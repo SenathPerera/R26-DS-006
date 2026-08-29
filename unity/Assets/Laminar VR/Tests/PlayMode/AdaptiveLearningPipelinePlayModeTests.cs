@@ -9,6 +9,9 @@ using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Policy.RuleBased;
 using LaminarVR.AdaptiveMeditation.Rewards;
+using LaminarVR.AdaptiveMeditation.Runtime.Application;
+using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
+using LaminarVR.AdaptiveMeditation.Runtime.Environment;
 using LaminarVR.AdaptiveMeditation.Safety;
 using LaminarVR.AdaptiveMeditation.Session;
 using LaminarVR.AdaptiveMeditation.Telemetry;
@@ -22,6 +25,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
     {
         private readonly List<GameObject> createdObjects =
             new List<GameObject>();
+        private readonly List<UnityEngine.Object> createdAssets =
+            new List<UnityEngine.Object>();
 
         [UnityTearDown]
         public IEnumerator TearDown()
@@ -34,7 +39,16 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 }
             }
 
+            for (var index = 0; index < createdAssets.Count; index++)
+            {
+                if (createdAssets[index] != null)
+                {
+                    UnityEngine.Object.Destroy(createdAssets[index]);
+                }
+            }
+
             createdObjects.Clear();
+            createdAssets.Clear();
             yield return null;
         }
 
@@ -295,6 +309,93 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(adapter.LastAppliedState, Is.EqualTo(target));
         }
 
+        [UnityTest]
+        public IEnumerator TemplePondSceneAdapter_AppliesAllFiveMappings()
+        {
+            var previousFog = RenderSettings.fog;
+            var previousFogDensity = RenderSettings.fogDensity;
+            var previousFogColor = RenderSettings.fogColor;
+            try
+            {
+                var setup = CreateTempleAdapter();
+                var state = new EnvironmentState(
+                    0.25f,
+                    0.5f,
+                    0.75f,
+                    0.4f,
+                    0.5f);
+
+                setup.Adapter.ApplyState(state);
+
+                Assert.That(setup.Adapter.HasAppliedState, Is.True);
+                Assert.That(setup.Adapter.LastAppliedState, Is.EqualTo(state));
+                Assert.That(setup.Light.intensity,
+                    Is.EqualTo(1.5f).Within(1e-6f));
+                Assert.That(setup.Light.color.r,
+                    Is.EqualTo(0.85f).Within(1e-6f));
+                Assert.That(RenderSettings.fog, Is.True);
+                Assert.That(RenderSettings.fogDensity,
+                    Is.EqualTo(0.00775f).Within(1e-6f));
+
+                var propertyBlock = new MaterialPropertyBlock();
+                setup.WaterRenderer.GetPropertyBlock(propertyBlock);
+                var waterColor = propertyBlock.GetColor(
+                    Shader.PropertyToID("_BaseColor"));
+                Assert.That(waterColor.g,
+                    Is.EqualTo(0.28f).Within(1e-6f));
+                Assert.That(
+                    propertyBlock.GetFloat(
+                        Shader.PropertyToID("_Smoothness")),
+                    Is.EqualTo(0.25f).Within(1e-6f));
+                yield return null;
+            }
+            finally
+            {
+                RenderSettings.fog = previousFog;
+                RenderSettings.fogDensity = previousFogDensity;
+                RenderSettings.fogColor = previousFogColor;
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator ApplicationBootstrap_RegistersSceneAndStaticPolicy()
+        {
+            var previousFog = RenderSettings.fog;
+            var previousFogDensity = RenderSettings.fogDensity;
+            var previousFogColor = RenderSettings.fogColor;
+            try
+            {
+                var setup = CreateTempleAdapter();
+                var sceneProfile = CreateApprovedSceneParameterProfile();
+                var bootstrap = setup.Root.AddComponent<ApplicationBootstrap>();
+                bootstrap.Configure(
+                    sceneProfile,
+                    setup.Adapter,
+                    StudyPolicyMode.StaticPersonalized);
+
+                var initialized = bootstrap.TryInitialize(
+                    out var validationError);
+
+                Assert.That(initialized, Is.True, validationError);
+                Assert.That(bootstrap.IsInitialized, Is.True);
+                Assert.That(bootstrap.SceneProfile.SceneId,
+                    Is.EqualTo("temple-pond"));
+                Assert.That(bootstrap.Policy.PolicyId,
+                    Is.EqualTo("StaticPersonalizedPolicy"));
+                Assert.That(bootstrap.EnvironmentManager.CurrentState,
+                    Is.EqualTo(State(0.5f)));
+                Assert.That(setup.Adapter.LastAppliedState,
+                    Is.EqualTo(State(0.5f)));
+                yield return null;
+            }
+            finally
+            {
+                RenderSettings.fog = previousFog;
+                RenderSettings.fogDensity = previousFogDensity;
+                RenderSettings.fogColor = previousFogColor;
+            }
+        }
+
         private Harness CreateHarness(StudyPolicyMode policyMode)
         {
             var root = CreateRoot("AdaptiveLearningPlayModeHarness");
@@ -367,6 +468,83 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             var root = new GameObject(name);
             createdObjects.Add(root);
             return root;
+        }
+
+        private TempleAdapterSetup CreateTempleAdapter()
+        {
+            var root = CreateRoot("TemplePondAdapterHarness");
+            var light = root.AddComponent<Light>();
+            light.type = LightType.Directional;
+            var waterRenderer = root.AddComponent<MeshRenderer>();
+            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            Assert.That(shader, Is.Not.Null,
+                "The active URP project must provide the URP Lit shader.");
+            var material = new Material(shader);
+            createdAssets.Add(material);
+            waterRenderer.sharedMaterial = material;
+            Assert.That(material.HasProperty("_BaseColor"), Is.True);
+            Assert.That(material.HasProperty("_Smoothness"), Is.True);
+
+            var mappingProfile = CreateApprovedTempleMappingProfile();
+            var adapter = root.AddComponent<TemplePondEnvironmentAdapter>();
+            adapter.Configure(mappingProfile, light, waterRenderer);
+            return new TempleAdapterSetup(
+                root,
+                adapter,
+                light,
+                waterRenderer);
+        }
+
+        private TemplePondEnvironmentMappingProfile
+            CreateApprovedTempleMappingProfile()
+        {
+            const string json = @"{
+                ""configurationId"": ""playmode-temple-mapping"",
+                ""configurationVersion"": 1,
+                ""researchConfigurationApproved"": true,
+                ""directionalLightIntensityRange"": { ""x"": 1.0, ""y"": 3.0 },
+                ""coolDirectionalLightColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 1.0, ""a"": 1.0 },
+                ""warmDirectionalLightColor"": { ""r"": 1.0, ""g"": 0.8, ""b"": 0.6, ""a"": 1.0 },
+                ""fogDensityRange"": { ""x"": 0.001, ""y"": 0.01 },
+                ""clearFogColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 0.9, ""a"": 1.0 },
+                ""softFogColor"": { ""r"": 0.8, ""g"": 0.8, ""b"": 0.8, ""a"": 1.0 },
+                ""waterColorProperty"": ""_BaseColor"",
+                ""mutedWaterColor"": { ""r"": 0.1, ""g"": 0.2, ""b"": 0.2, ""a"": 1.0 },
+                ""richWaterColor"": { ""r"": 0.0, ""g"": 0.4, ""b"": 0.6, ""a"": 1.0 },
+                ""waterMotionProperty"": ""_Smoothness"",
+                ""waterMotionRange"": { ""x"": 0.1, ""y"": 0.4 }
+            }";
+            var profile = ScriptableObject.CreateInstance<
+                TemplePondEnvironmentMappingProfile>();
+            JsonUtility.FromJsonOverwrite(json, profile);
+            createdAssets.Add(profile);
+            return profile;
+        }
+
+        private SceneParameterProfile CreateApprovedSceneParameterProfile()
+        {
+            const string json = @"{
+                ""sceneId"": ""temple-pond"",
+                ""displayName"": ""Japanese Temple Pond Garden"",
+                ""researchConfigurationApproved"": true,
+                ""defaultIllumination"": 0.5,
+                ""defaultWarmth"": 0.5,
+                ""defaultAtmosphericSoftness"": 0.5,
+                ""defaultColorRichness"": 0.5,
+                ""defaultAmbientMotion"": 0.5,
+                ""illuminationRange"": { ""x"": 0.2, ""y"": 0.8 },
+                ""warmthRange"": { ""x"": 0.2, ""y"": 0.8 },
+                ""atmosphericSoftnessRange"": { ""x"": 0.2, ""y"": 0.8 },
+                ""colorRichnessRange"": { ""x"": 0.2, ""y"": 0.8 },
+                ""ambientMotionRange"": { ""x"": 0.2, ""y"": 0.8 },
+                ""actionStep"": 0.1,
+                ""transitionDurationSeconds"": 2.0,
+                ""minimumSecondsBetweenActions"": 5.0
+            }";
+            var profile = ScriptableObject.CreateInstance<SceneParameterProfile>();
+            JsonUtility.FromJsonOverwrite(json, profile);
+            createdAssets.Add(profile);
+            return profile;
         }
 
         private static SessionDecisionOpportunity AdvanceToFirstDecision(
@@ -553,6 +731,29 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             public List<SessionDecisionOpportunity> Opportunities { get; }
             public RecordingSceneAdapterBehaviour SceneAdapter { get; }
             public RecordingSink Sink { get; }
+        }
+
+        private sealed class TempleAdapterSetup
+        {
+            public TempleAdapterSetup(
+                GameObject root,
+                TemplePondEnvironmentAdapter adapter,
+                Light light,
+                Renderer waterRenderer)
+            {
+                Root = root;
+                Adapter = adapter;
+                Light = light;
+                WaterRenderer = waterRenderer;
+            }
+
+            public GameObject Root { get; }
+
+            public TemplePondEnvironmentAdapter Adapter { get; }
+
+            public Light Light { get; }
+
+            public Renderer WaterRenderer { get; }
         }
 
         private sealed class RecordingSink : ITelemetryEventSink
