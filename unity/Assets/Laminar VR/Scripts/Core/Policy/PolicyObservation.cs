@@ -11,6 +11,21 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             EnvironmentState preferredEnvironment,
             EnvironmentState currentEnvironment,
             EnvironmentState safeDefaultEnvironment)
+            : this(
+                physiology,
+                preferredEnvironment,
+                currentEnvironment,
+                safeDefaultEnvironment,
+                null)
+        {
+        }
+
+        public PolicyObservation(
+            PhysiologyWindowSnapshot physiology,
+            EnvironmentState preferredEnvironment,
+            EnvironmentState currentEnvironment,
+            EnvironmentState safeDefaultEnvironment,
+            PhysiologyTrendResult? physiologyTrend)
         {
             if (physiology.SequenceNumber < 1L || physiology.Window == null)
             {
@@ -41,10 +56,29 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     nameof(physiology));
             }
 
+            if (physiologyTrend.HasValue
+                && physiologyTrend.Value.Available
+                && (physiologyTrend.Value.SampleCount < 2
+                    || physiologyTrend.Value.LastSequenceNumber
+                        != physiology.SequenceNumber
+                    || !IsFinite(
+                        physiologyTrend.Value.StressScorePerMinute)
+                    || !IsFinite(
+                        physiologyTrend.Value.HeartRateBpmPerMinute)
+                    || (physiologyTrend.Value.RmssdMsPerMinute.HasValue
+                        && !IsFinite(
+                            physiologyTrend.Value.RmssdMsPerMinute.Value))))
+            {
+                throw new ArgumentException(
+                    "An available trend must end at the observation window.",
+                    nameof(physiologyTrend));
+            }
+
             Physiology = physiology;
             PreferredEnvironment = preferredEnvironment;
             CurrentEnvironment = currentEnvironment;
             SafeDefaultEnvironment = safeDefaultEnvironment;
+            PhysiologyTrend = physiologyTrend;
         }
 
         public PhysiologyWindowSnapshot Physiology { get; }
@@ -54,6 +88,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         public EnvironmentState CurrentEnvironment { get; }
 
         public EnvironmentState SafeDefaultEnvironment { get; }
+
+        public PhysiologyTrendResult? PhysiologyTrend { get; }
 
         private static void ValidateNormalized(
             EnvironmentState state,
@@ -76,6 +112,11 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 && !double.IsInfinity(value)
                 && value >= minimum
                 && value <= maximum;
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
         }
     }
 }
