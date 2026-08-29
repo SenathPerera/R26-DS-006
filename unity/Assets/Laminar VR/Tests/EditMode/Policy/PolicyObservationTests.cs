@@ -128,6 +128,57 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                     outsideDomain));
         }
 
+        [Test]
+        public void Constructor_CopiesValidatedSafetyFilteredCandidates()
+        {
+            var environment = CreateState(0.5f);
+            var candidates = new[]
+            {
+                new PolicyActionCandidate(
+                    EnvironmentAction.NoChange,
+                    0d),
+                new PolicyActionCandidate(
+                    EnvironmentAction.IncreaseWarmth,
+                    0.1d)
+            };
+
+            var observation = new PolicyObservation(
+                CreateSnapshot(),
+                environment,
+                environment,
+                environment,
+                null,
+                candidates);
+            candidates[1] = new PolicyActionCandidate(
+                EnvironmentAction.DecreaseWarmth,
+                0.1d);
+
+            Assert.That(observation.ActionCandidateCount, Is.EqualTo(2));
+            Assert.That(
+                observation.GetActionCandidate(1).Action,
+                Is.EqualTo(EnvironmentAction.IncreaseWarmth));
+        }
+
+        [Test]
+        public void Constructor_RejectsCandidateSetWithoutNoChange()
+        {
+            var environment = CreateState(0.5f);
+
+            Assert.Throws<ArgumentException>(
+                () => new PolicyObservation(
+                    CreateSnapshot(),
+                    environment,
+                    environment,
+                    environment,
+                    null,
+                    new[]
+                    {
+                        new PolicyActionCandidate(
+                            EnvironmentAction.IncreaseWarmth,
+                            0.1d)
+                    }));
+        }
+
         internal static PhysiologyWindowSnapshot CreateSnapshot(
             double? rmssdMs = 34d,
             double? sdnnMs = 42d)

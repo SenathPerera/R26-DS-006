@@ -41,7 +41,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             PhysiologyStateBuffer physiologyBuffer,
             RewardPipelineConfiguration rewardConfiguration,
             PhysiologyBaseline baseline,
-            TelemetryRecorder telemetry)
+            TelemetryRecorder telemetry,
+            EnvironmentStateLimits? sessionAdaptationLimits = null)
         {
             this.policy = policy
                 ?? throw new ArgumentNullException(nameof(policy));
@@ -49,9 +50,11 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 ?? throw new ArgumentNullException(nameof(safetyValidator));
             this.environmentManager = environmentManager
                 ?? throw new ArgumentNullException(nameof(environmentManager));
-            this.sceneProfile = sceneProfile
-                ?? throw new ArgumentNullException(nameof(sceneProfile));
-            if (!sceneProfile.Limits.Contains(environmentManager.CurrentState))
+            this.sceneProfile = CreateEffectiveSceneProfile(
+                sceneProfile,
+                sessionAdaptationLimits);
+            if (!this.sceneProfile.Limits.Contains(
+                environmentManager.CurrentState))
             {
                 throw new ArgumentException(
                     "The current environment must be inside scene limits.",
@@ -167,12 +170,16 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             var trend = PhysiologyTrendCalculator.Calculate(
                 recentWindows,
                 rewardConfiguration.MinimumTrendSamples);
+            var actionCandidates = BuildPolicyActionCandidates(
+                opportunity.MonotonicTimeSeconds,
+                phase);
             var observation = new PolicyObservation(
                 physiology,
                 preferredEnvironment,
                 environmentManager.CurrentState,
                 sceneProfile.SafeDefault,
-                trend);
+                trend,
+                actionCandidates);
             var decision = policy.SelectAction(observation);
             latestDecisionPhysiologySequenceNumber =
                 physiology.SequenceNumber;
@@ -447,16 +454,6 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             var completedDecision = pendingDecision
                 ?? throw new InvalidOperationException(
                     "A matched reward has no pending policy decision.");
-            policy.ObserveOutcome(
-                new ActionOutcome(
-                    completedDecision.DecisionId,
-                    completedDecision.Decision,
-                    match.Request.ExecutedAction,
-                    calculation.Breakdown.TotalReward,
-                    match.Request.PreActionPhysiology.SequenceNumber,
-                    match.PostActionPhysiology.SequenceNumber));
-            pendingDecision = null;
-
             await RecordAsync(
                 TelemetryEventTypes.RewardCalculated,
                 utcTimestampUnixSeconds,
@@ -499,6 +496,90 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                         match.PostActionPhysiology.SequenceNumber)
                 },
                 cancellationToken).ConfigureAwait(false);
+            pendingDecision = null;
+            var policyStateBeforeUpdate = policy.CaptureState();
+            PolicyStateSnapshot policyStateAfterUpdate;
+            try
+            {
+                policy.ObserveOutcome(
+                    new ActionOutcome(
+                        completedDecision.DecisionId,
+                        completedDecision.Decision,
+                        match.Request.ExecutedAction,
+                        calculation.Breakdown.TotalReward,
+                        match.Request.PreActionPhysiology.SequenceNumber,
+                        match.PostActionPhysiology.SequenceNumber));
+                policyStateAfterUpdate = policy.CaptureState();
+            }
+            catch (Exception exception) when (
+                exception is ArgumentException
+                || exception is InvalidOperationException
+                || exception is OverflowException)
+            {
+                await RecordAsync(
+                    TelemetryEventTypes.BanditUpdateSkipped,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    true,
+                    new[]
+                    {
+                        TelemetryField.String(
+                            "decision_id",
+                            completedDecision.DecisionId),
+                        TelemetryField.String("policy_id", policy.PolicyId),
+                        TelemetryField.String(
+                            "executed_action",
+                            match.Request.ExecutedAction.ToString()),
+                        TelemetryField.String(
+                            "reason",
+                            exception.GetType().Name)
+                    },
+                    cancellationToken).ConfigureAwait(false);
+                return new PolicyRewardCycleResult(
+                    PolicyRewardCycleResultCode.PolicyUpdateSkipped,
+                    attributionCode,
+                    calculation);
+            }
+
+            if (policyStateAfterUpdate.ModelUpdateCount
+                > policyStateBeforeUpdate.ModelUpdateCount)
+            {
+                var updateFields = new List<TelemetryField>
+                {
+                    TelemetryField.String(
+                        "decision_id",
+                        completedDecision.DecisionId),
+                    TelemetryField.String(
+                        "policy_id",
+                        policyStateAfterUpdate.PolicyId),
+                    TelemetryField.String(
+                        "policy_version",
+                        policyStateAfterUpdate.PolicyVersion),
+                    TelemetryField.String(
+                        "executed_action",
+                        match.Request.ExecutedAction.ToString()),
+                    TelemetryField.Integer(
+                        "model_update_count",
+                        policyStateAfterUpdate.ModelUpdateCount)
+                };
+                if (completedDecision.Decision.FeatureVector != null)
+                {
+                    updateFields.Add(
+                        TelemetryField.String(
+                            "feature_schema_version",
+                            completedDecision.Decision.FeatureVector
+                                .SchemaVersion));
+                }
+
+                await RecordAsync(
+                    TelemetryEventTypes.BanditUpdated,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    false,
+                    updateFields,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
             return new PolicyRewardCycleResult(
                 PolicyRewardCycleResultCode.RewardApplied,
                 attributionCode,
@@ -619,6 +700,43 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             return SafetyBlockReason.None;
         }
 
+        private PolicyActionCandidate[] BuildPolicyActionCandidates(
+            double currentMonotonicTimeSeconds,
+            VrSessionPhase phase)
+        {
+            var candidates = new List<PolicyActionCandidate>();
+            for (var actionValue = (int)EnvironmentAction.NoChange;
+                actionValue
+                    <= (int)EnvironmentAction.DecreaseAmbientMotion;
+                actionValue++)
+            {
+                var action = (EnvironmentAction)actionValue;
+                var blockReason = DetermineSafetyBlockReason(
+                    currentMonotonicTimeSeconds,
+                    phase,
+                    action);
+                var validation = safetyValidator.Validate(
+                    action,
+                    environmentManager.CurrentState,
+                    sceneProfile,
+                    new SafetyRuntimeState(
+                        blockReason,
+                        previousExecutedAction,
+                        consecutiveSameDirectionActions,
+                        totalVariation),
+                    safetyLimits);
+                if (validation.Accepted)
+                {
+                    candidates.Add(
+                        new PolicyActionCandidate(
+                            action,
+                            validation.AppliedVariation));
+                }
+            }
+
+            return candidates.ToArray();
+        }
+
         private void UpdateSafetyHistory(
             EnvironmentAction executedAction,
             double appliedVariation,
@@ -651,24 +769,47 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             double sessionElapsedSeconds,
             CancellationToken cancellationToken)
         {
+            var proposalFields = new List<TelemetryField>
+            {
+                TelemetryField.String("decision_id", decisionId.Trim()),
+                TelemetryField.String("policy_id", decision.PolicyId),
+                TelemetryField.String(
+                    "policy_version",
+                    decision.PolicyVersion),
+                TelemetryField.String(
+                    "proposed_action",
+                    decision.SelectedAction.ToString()),
+                TelemetryField.String(
+                    "reason_code",
+                    decision.ReasonCode),
+                TelemetryField.Integer(
+                    "physiology_sequence",
+                    decision.PhysiologySequenceNumber),
+                TelemetryField.Boolean(
+                    "exploration_used",
+                    decision.ExplorationUsed),
+                decision.ExpectedReward.HasValue
+                    ? TelemetryField.Number(
+                        "expected_reward",
+                        decision.ExpectedReward.Value)
+                    : TelemetryField.Null("expected_reward"),
+                decision.Uncertainty.HasValue
+                    ? TelemetryField.Number(
+                        "uncertainty",
+                        decision.Uncertainty.Value)
+                    : TelemetryField.Null("uncertainty"),
+                decision.FeatureVector != null
+                    ? TelemetryField.String(
+                        "feature_schema_version",
+                        decision.FeatureVector.SchemaVersion)
+                    : TelemetryField.Null("feature_schema_version")
+            };
             await RecordAsync(
                 TelemetryEventTypes.ActionProposed,
                 utcTimestampUnixSeconds,
                 sessionElapsedSeconds,
                 false,
-                new[]
-                {
-                    TelemetryField.String("decision_id", decisionId.Trim()),
-                    TelemetryField.String(
-                        "proposed_action",
-                        decision.SelectedAction.ToString()),
-                    TelemetryField.String(
-                        "reason_code",
-                        decision.ReasonCode),
-                    TelemetryField.Integer(
-                        "physiology_sequence",
-                        decision.PhysiologySequenceNumber)
-                },
+                proposalFields,
                 cancellationToken).ConfigureAwait(false);
 
             for (var index = 0;
@@ -676,24 +817,35 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 index++)
             {
                 var score = decision.GetCandidateScore(index);
+                var scoreFields = new[]
+                {
+                    TelemetryField.String(
+                        "decision_id",
+                        decisionId.Trim()),
+                    TelemetryField.String(
+                        "action",
+                        score.Action.ToString()),
+                    TelemetryField.Number("score", score.Score),
+                    TelemetryField.Number(
+                        "uncertainty",
+                        score.Uncertainty),
+                    score.ExpectedReward.HasValue
+                        ? TelemetryField.Number(
+                            "expected_reward",
+                            score.ExpectedReward.Value)
+                        : TelemetryField.Null("expected_reward"),
+                    score.ExplorationBonus.HasValue
+                        ? TelemetryField.Number(
+                            "exploration_bonus",
+                            score.ExplorationBonus.Value)
+                        : TelemetryField.Null("exploration_bonus")
+                };
                 await RecordAsync(
                     TelemetryEventTypes.PolicyCandidateScore,
                     utcTimestampUnixSeconds,
                     sessionElapsedSeconds,
                     false,
-                    new[]
-                    {
-                        TelemetryField.String(
-                            "decision_id",
-                            decisionId.Trim()),
-                        TelemetryField.String(
-                            "action",
-                            score.Action.ToString()),
-                        TelemetryField.Number("score", score.Score),
-                        TelemetryField.Number(
-                            "uncertainty",
-                            score.Uncertainty)
-                    },
+                    scoreFields,
                     cancellationToken).ConfigureAwait(false);
             }
         }
@@ -827,6 +979,63 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     "Environment state must be normalized.",
                     parameterName);
             }
+        }
+
+        private static SceneEnvironmentProfile CreateEffectiveSceneProfile(
+            SceneEnvironmentProfile sceneProfile,
+            EnvironmentStateLimits? sessionAdaptationLimits)
+        {
+            if (sceneProfile == null)
+            {
+                throw new ArgumentNullException(nameof(sceneProfile));
+            }
+
+            if (!sessionAdaptationLimits.HasValue)
+            {
+                return sceneProfile;
+            }
+
+            var limits = sessionAdaptationLimits.Value;
+            if (!IsSubset(limits, sceneProfile.Limits))
+            {
+                throw new ArgumentException(
+                    "Session adaptation limits must be inside scene limits.",
+                    nameof(sessionAdaptationLimits));
+            }
+
+            return new SceneEnvironmentProfile(
+                sceneProfile.SceneId,
+                sceneProfile.DisplayName,
+                limits.Clamp(sceneProfile.SafeDefault),
+                limits,
+                sceneProfile.ActionStep,
+                sceneProfile.TransitionDurationSeconds,
+                sceneProfile.MinimumSecondsBetweenActions);
+        }
+
+        private static bool IsSubset(
+            EnvironmentStateLimits candidate,
+            EnvironmentStateLimits container)
+        {
+            return IsSubset(candidate.Illumination, container.Illumination)
+                && IsSubset(candidate.Warmth, container.Warmth)
+                && IsSubset(
+                    candidate.AtmosphericSoftness,
+                    container.AtmosphericSoftness)
+                && IsSubset(
+                    candidate.ColorRichness,
+                    container.ColorRichness)
+                && IsSubset(
+                    candidate.AmbientMotion,
+                    container.AmbientMotion);
+        }
+
+        private static bool IsSubset(
+            NormalizedRange candidate,
+            NormalizedRange container)
+        {
+            return candidate.Minimum >= container.Minimum
+                && candidate.Maximum <= container.Maximum;
         }
 
         private static void ValidateTimes(

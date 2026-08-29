@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
 
@@ -6,6 +7,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 {
     public sealed class PolicyObservation
     {
+        private readonly PolicyActionCandidate[] actionCandidates;
+
         public PolicyObservation(
             PhysiologyWindowSnapshot physiology,
             EnvironmentState preferredEnvironment,
@@ -16,6 +19,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 preferredEnvironment,
                 currentEnvironment,
                 safeDefaultEnvironment,
+                null,
                 null)
         {
         }
@@ -26,6 +30,23 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             EnvironmentState currentEnvironment,
             EnvironmentState safeDefaultEnvironment,
             PhysiologyTrendResult? physiologyTrend)
+            : this(
+                physiology,
+                preferredEnvironment,
+                currentEnvironment,
+                safeDefaultEnvironment,
+                physiologyTrend,
+                null)
+        {
+        }
+
+        public PolicyObservation(
+            PhysiologyWindowSnapshot physiology,
+            EnvironmentState preferredEnvironment,
+            EnvironmentState currentEnvironment,
+            EnvironmentState safeDefaultEnvironment,
+            PhysiologyTrendResult? physiologyTrend,
+            IReadOnlyList<PolicyActionCandidate> actionCandidates)
         {
             if (physiology.SequenceNumber < 1L || physiology.Window == null)
             {
@@ -79,6 +100,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             CurrentEnvironment = currentEnvironment;
             SafeDefaultEnvironment = safeDefaultEnvironment;
             PhysiologyTrend = physiologyTrend;
+            this.actionCandidates = CopyAndValidateCandidates(
+                actionCandidates);
         }
 
         public PhysiologyWindowSnapshot Physiology { get; }
@@ -90,6 +113,69 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         public EnvironmentState SafeDefaultEnvironment { get; }
 
         public PhysiologyTrendResult? PhysiologyTrend { get; }
+
+        public int ActionCandidateCount => actionCandidates.Length;
+
+        public PolicyActionCandidate GetActionCandidate(int index)
+        {
+            return actionCandidates[index];
+        }
+
+        public PolicyActionCandidate[] CopyActionCandidates()
+        {
+            var copy = new PolicyActionCandidate[actionCandidates.Length];
+            Array.Copy(actionCandidates, copy, actionCandidates.Length);
+            return copy;
+        }
+
+        private static PolicyActionCandidate[] CopyAndValidateCandidates(
+            IReadOnlyList<PolicyActionCandidate> candidates)
+        {
+            if (candidates == null)
+            {
+                return Array.Empty<PolicyActionCandidate>();
+            }
+
+            if (candidates.Count == 0)
+            {
+                throw new ArgumentException(
+                    "An explicit candidate set cannot be empty.",
+                    nameof(candidates));
+            }
+
+            var actionCount =
+                (int)EnvironmentAction.DecreaseAmbientMotion + 1;
+            var seen = new bool[actionCount];
+            var containsNoChange = false;
+            var copy = new PolicyActionCandidate[candidates.Count];
+            for (var index = 0; index < candidates.Count; index++)
+            {
+                var candidate = candidates[index];
+                var actionIndex = (int)candidate.Action;
+                if (actionIndex < 0
+                    || actionIndex >= actionCount
+                    || seen[actionIndex])
+                {
+                    throw new ArgumentException(
+                        "Policy candidates must be supported and unique.",
+                        nameof(candidates));
+                }
+
+                seen[actionIndex] = true;
+                containsNoChange |=
+                    candidate.Action == EnvironmentAction.NoChange;
+                copy[index] = candidate;
+            }
+
+            if (!containsNoChange)
+            {
+                throw new ArgumentException(
+                    "NoChange must remain available.",
+                    nameof(candidates));
+            }
+
+            return copy;
+        }
 
         private static void ValidateNormalized(
             EnvironmentState state,

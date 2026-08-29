@@ -10,6 +10,21 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             EnvironmentAction action,
             double score,
             double uncertainty)
+            : this(
+                action,
+                score,
+                uncertainty,
+                null,
+                null)
+        {
+        }
+
+        public PolicyCandidateScore(
+            EnvironmentAction action,
+            double score,
+            double uncertainty,
+            double? expectedReward,
+            double? explorationBonus)
         {
             if (!Enum.IsDefined(typeof(EnvironmentAction), action))
             {
@@ -26,9 +41,24 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 throw new ArgumentOutOfRangeException(nameof(uncertainty));
             }
 
+            ValidateOptionalFinite(
+                expectedReward,
+                nameof(expectedReward));
+            ValidateOptionalFinite(
+                explorationBonus,
+                nameof(explorationBonus));
+            if (explorationBonus.HasValue
+                && explorationBonus.Value < 0d)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(explorationBonus));
+            }
+
             Action = action;
             Score = score;
             Uncertainty = uncertainty;
+            ExpectedReward = expectedReward;
+            ExplorationBonus = explorationBonus;
         }
 
         public EnvironmentAction Action { get; }
@@ -36,6 +66,20 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         public double Score { get; }
 
         public double Uncertainty { get; }
+
+        public double? ExpectedReward { get; }
+
+        public double? ExplorationBonus { get; }
+
+        private static void ValidateOptionalFinite(
+            double? value,
+            string parameterName)
+        {
+            if (value.HasValue && !IsFinite(value.Value))
+            {
+                throw new ArgumentOutOfRangeException(parameterName);
+            }
+        }
 
         private static bool IsFinite(double value)
         {

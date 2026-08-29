@@ -1,4 +1,5 @@
 using LaminarVR.AdaptiveMeditation.Policy;
+using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Policy.RuleBased;
 using LaminarVR.AdaptiveMeditation.Policy.Static;
 using NUnit.Framework;
@@ -47,7 +48,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
         }
 
         [Test]
-        public void TryCreate_ContextualBanditRemainsUnavailableUntilStep10()
+        public void TryCreate_ContextualBanditFailsClosedWithoutConfiguration()
         {
             var created = StudyPolicyFactory.TryCreate(
                 StudyPolicyMode.ContextualBandit,
@@ -59,7 +60,32 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
             Assert.That(policy, Is.Null);
             Assert.That(
                 code,
-                Is.EqualTo(StudyPolicyCreationResultCode.NotImplemented));
+                Is.EqualTo(
+                    StudyPolicyCreationResultCode.ConfigurationRequired));
+        }
+
+        [Test]
+        public void TryCreate_CreatesConfiguredContextualBanditPolicy()
+        {
+            var builder = new PolicyFeatureVectorBuilder();
+
+            var created = StudyPolicyFactory.TryCreate(
+                StudyPolicyMode.ContextualBandit,
+                null,
+                new LinUcbModelConfiguration(
+                    "factory-linucb",
+                    1,
+                    builder.FeatureSchemaVersion,
+                    builder.FeatureCount,
+                    1d,
+                    0.1d),
+                builder,
+                out var policy,
+                out var code);
+
+            Assert.That(created, Is.True);
+            Assert.That(code, Is.EqualTo(StudyPolicyCreationResultCode.Created));
+            Assert.That(policy, Is.TypeOf<ContextualBanditPolicy>());
         }
 
         private static RuleBasedPolicyConfiguration CreateRuleConfiguration()

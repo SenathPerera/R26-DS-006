@@ -26,6 +26,7 @@ namespace LaminarVR.AdaptiveMeditation.Telemetry
         public const string RewardCalculated = "reward.calculated";
         public const string RewardInvalidated = "reward.invalidated";
         public const string BanditUpdated = "bandit.updated";
+        public const string BanditUpdateSkipped = "bandit.update_skipped";
         public const string NetworkConnected = "network.connected";
         public const string NetworkDisconnected = "network.disconnected";
         public const string SessionPaused = "session.paused";

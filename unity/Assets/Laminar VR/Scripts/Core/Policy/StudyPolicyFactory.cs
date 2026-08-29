@@ -1,3 +1,4 @@
+using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Policy.RuleBased;
 using LaminarVR.AdaptiveMeditation.Policy.Static;
 
@@ -26,6 +27,23 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             out IEnvironmentPolicy policy,
             out StudyPolicyCreationResultCode resultCode)
         {
+            return TryCreate(
+                mode,
+                ruleBasedConfiguration,
+                null,
+                null,
+                out policy,
+                out resultCode);
+        }
+
+        public static bool TryCreate(
+            StudyPolicyMode mode,
+            RuleBasedPolicyConfiguration ruleBasedConfiguration,
+            LinUcbModelConfiguration linUcbConfiguration,
+            IFeatureVectorBuilder featureVectorBuilder,
+            out IEnvironmentPolicy policy,
+            out StudyPolicyCreationResultCode resultCode)
+        {
             switch (mode)
             {
                 case StudyPolicyMode.StaticPersonalized:
@@ -46,9 +64,20 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     resultCode = StudyPolicyCreationResultCode.Created;
                     return true;
                 case StudyPolicyMode.ContextualBandit:
-                    policy = null;
-                    resultCode = StudyPolicyCreationResultCode.NotImplemented;
-                    return false;
+                    if (linUcbConfiguration == null
+                        || featureVectorBuilder == null)
+                    {
+                        policy = null;
+                        resultCode = StudyPolicyCreationResultCode
+                            .ConfigurationRequired;
+                        return false;
+                    }
+
+                    policy = new ContextualBanditPolicy(
+                        featureVectorBuilder,
+                        new DisjointLinUcbModel(linUcbConfiguration));
+                    resultCode = StudyPolicyCreationResultCode.Created;
+                    return true;
                 default:
                     policy = null;
                     resultCode = StudyPolicyCreationResultCode.UnsupportedMode;

@@ -42,6 +42,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
     {
         RewardApplied,
         RewardInvalid,
+        PolicyUpdateSkipped,
         AttributionInvalidated,
         Waiting,
         NoPending

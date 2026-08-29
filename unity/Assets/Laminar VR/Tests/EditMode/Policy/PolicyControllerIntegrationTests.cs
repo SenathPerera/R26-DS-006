@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy;
+using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Policy.RuleBased;
 using LaminarVR.AdaptiveMeditation.Rewards;
 using LaminarVR.AdaptiveMeditation.Safety;
@@ -19,7 +20,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
     {
         [TestCase(StudyPolicyMode.StaticPersonalized)]
         [TestCase(StudyPolicyMode.RuleBasedAdaptive)]
-        public async Task BaselinePolicy_CompletesSameSimulatedSessionPipeline(
+        [TestCase(StudyPolicyMode.ContextualBandit)]
+        public async Task StudyPolicy_CompletesSameSimulatedSessionPipeline(
             StudyPolicyMode policyMode)
         {
             var harness = CreateHarness(policyMode);
@@ -37,7 +39,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
 
             double rewardMonotonicTime;
             double postWindowEndUtc;
-            if (policyMode == StudyPolicyMode.StaticPersonalized)
+            if (policyMode != StudyPolicyMode.RuleBasedAdaptive)
             {
                 Assert.That(
                     decisionResult.ResultCode,
@@ -101,7 +103,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 Is.EqualTo(PolicyRewardCycleResultCode.RewardApplied));
             Assert.That(state.DecisionCount, Is.EqualTo(1L));
             Assert.That(state.ObservedOutcomeCount, Is.EqualTo(1L));
-            Assert.That(state.ModelUpdateCount, Is.Zero);
+            Assert.That(
+                state.ModelUpdateCount,
+                Is.EqualTo(
+                    policyMode == StudyPolicyMode.ContextualBandit
+                        ? 1L
+                        : 0L));
             Assert.That(harness.Session.Phase, Is.EqualTo(VrSessionPhase.Completed));
             Assert.That(
                 harness.Sink.EventTypes,
@@ -121,6 +128,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
             Assert.That(
                 harness.Sink.EventTypes,
                 Does.Contain(TelemetryEventTypes.RewardCalculated));
+            Assert.That(
+                harness.Sink.EventTypes.Contains(
+                    TelemetryEventTypes.BanditUpdated),
+                Is.EqualTo(
+                    policyMode == StudyPolicyMode.ContextualBandit));
         }
 
         [Test]
@@ -164,6 +176,98 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 harness.Controller.Policy.CaptureState().DecisionCount,
                 Is.Zero);
             Assert.That(harness.EnvironmentManager.IsTransitionActive, Is.False);
+        }
+
+        [Test]
+        public async Task LearnedContextualPreference_StillUsesFinalSafetyPipeline()
+        {
+            var harness = CreateHarness(StudyPolicyMode.ContextualBandit);
+            var opportunity = AdvanceToFirstDecision(harness);
+            Assert.That(
+                harness.PhysiologyBuffer.TryGetLatestAccepted(
+                    out var physiology),
+                Is.True);
+            var builder = new PolicyFeatureVectorBuilder();
+            var trainingObservation = new PolicyObservation(
+                physiology,
+                PreferredEnvironment(),
+                harness.EnvironmentManager.CurrentState,
+                harness.EnvironmentManager.CurrentState);
+            var policy = (ContextualBanditPolicy)harness.Controller.Policy;
+            policy.Model.Update(
+                EnvironmentAction.IncreaseWarmth,
+                builder.Build(trainingObservation),
+                2d);
+
+            var result = await harness.Controller.ProcessDecisionAsync(
+                "learned-warmth",
+                opportunity,
+                harness.Session.Phase,
+                true,
+                PreferredEnvironment(),
+                1120d,
+                harness.Session.ActiveSessionElapsedSeconds,
+                CancellationToken.None);
+
+            Assert.That(
+                result.ResultCode,
+                Is.EqualTo(PolicyDecisionCycleResultCode.TransitionStarted));
+            Assert.That(
+                result.Decision.SelectedAction,
+                Is.EqualTo(EnvironmentAction.IncreaseWarmth));
+            Assert.That(result.Validation.HasValue, Is.True);
+            Assert.That(result.Validation.Value.Accepted, Is.True);
+            Assert.That(
+                result.Validation.Value.ExecutedAction,
+                Is.EqualTo(EnvironmentAction.IncreaseWarmth));
+            Assert.That(harness.EnvironmentManager.IsTransitionActive, Is.True);
+        }
+
+        [Test]
+        public async Task ContextualCandidates_RespectSessionSensitivityLimits()
+        {
+            var boundaryState = new EnvironmentState(
+                0.5f,
+                0.7f,
+                0.5f,
+                0.5f,
+                0.5f);
+            var sceneRange = new NormalizedRange(0.2f, 0.8f);
+            var sensitivityLimits = new EnvironmentStateLimits(
+                sceneRange,
+                new NormalizedRange(0.2f, 0.7f),
+                sceneRange,
+                sceneRange,
+                sceneRange);
+            var harness = CreateHarness(
+                StudyPolicyMode.ContextualBandit,
+                sceneProfileOverride: CreateSceneProfile(boundaryState),
+                sessionAdaptationLimits: sensitivityLimits);
+            var opportunity = AdvanceToFirstDecision(harness);
+
+            var result = await harness.Controller.ProcessDecisionAsync(
+                "warmth-boundary",
+                opportunity,
+                harness.Session.Phase,
+                true,
+                PreferredEnvironment(),
+                1120d,
+                harness.Session.ActiveSessionElapsedSeconds,
+                CancellationToken.None);
+
+            Assert.That(result.Decision, Is.Not.Null);
+            for (var index = 0;
+                index < result.Decision.CandidateScoreCount;
+                index++)
+            {
+                Assert.That(
+                    result.Decision.GetCandidateScore(index).Action,
+                    Is.Not.EqualTo(EnvironmentAction.IncreaseWarmth));
+            }
+
+            Assert.That(
+                result.Decision.SelectedAction,
+                Is.Not.EqualTo(EnvironmentAction.IncreaseWarmth));
         }
 
         [Test]
@@ -241,6 +345,51 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
         }
 
         [Test]
+        public async Task PolicyUpdateFailure_IsLoggedAndDoesNotBlockSession()
+        {
+            var rejectingPolicy = new RejectingOutcomePolicy();
+            var harness = CreateHarness(
+                StudyPolicyMode.StaticPersonalized,
+                rejectingPolicy);
+            var opportunity = AdvanceToFirstDecision(harness);
+            await harness.Controller.ProcessDecisionAsync(
+                "rejected-update",
+                opportunity,
+                harness.Session.Phase,
+                true,
+                PreferredEnvironment(),
+                1120d,
+                harness.Session.ActiveSessionElapsedSeconds,
+                CancellationToken.None);
+            harness.Session.AdvanceTo(8d);
+            Assert.That(
+                harness.PhysiologyBuffer.Ingest(
+                    CreateWindow(1181d, 2.2d),
+                    1181d,
+                    8d).Accepted,
+                Is.True);
+
+            var result = await harness.Controller.TryResolveRewardAsync(
+                8d,
+                1181d,
+                harness.Session.ActiveSessionElapsedSeconds,
+                harness.Session.Phase,
+                true,
+                0d,
+                0d,
+                CancellationToken.None);
+
+            Assert.That(
+                result.ResultCode,
+                Is.EqualTo(PolicyRewardCycleResultCode.PolicyUpdateSkipped));
+            Assert.That(harness.Controller.HasPendingOutcome, Is.False);
+            Assert.That(rejectingPolicy.ObservedOutcomeCount, Is.Zero);
+            Assert.That(
+                harness.Sink.EventTypes,
+                Does.Contain(TelemetryEventTypes.BanditUpdateSkipped));
+        }
+
+        [Test]
         public async Task NetworkLossDuringTransition_FreezesEnvironmentSafely()
         {
             var harness = CreateHarness(StudyPolicyMode.RuleBasedAdaptive);
@@ -278,7 +427,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 Does.Contain(TelemetryEventTypes.RewardInvalidated));
         }
 
-        private static Harness CreateHarness(StudyPolicyMode policyMode)
+        private static Harness CreateHarness(
+            StudyPolicyMode policyMode,
+            IEnvironmentPolicy policyOverride = null,
+            SceneEnvironmentProfile sceneProfileOverride = null,
+            EnvironmentStateLimits? sessionAdaptationLimits = null)
         {
             var ruleConfiguration = new RuleBasedPolicyConfiguration(
                 "integration-rules",
@@ -287,13 +440,27 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 2d,
                 0.1d,
                 0.05d);
-            Assert.That(
-                StudyPolicyFactory.TryCreate(
-                    policyMode,
-                    ruleConfiguration,
-                    out var policy,
-                    out _),
-                Is.True);
+            var featureVectorBuilder = new PolicyFeatureVectorBuilder();
+            var linUcbConfiguration = new LinUcbModelConfiguration(
+                "integration-linucb",
+                1,
+                featureVectorBuilder.FeatureSchemaVersion,
+                featureVectorBuilder.FeatureCount,
+                1d,
+                0.1d);
+            var policy = policyOverride;
+            if (policy == null)
+            {
+                Assert.That(
+                    StudyPolicyFactory.TryCreate(
+                        policyMode,
+                        ruleConfiguration,
+                        linUcbConfiguration,
+                        featureVectorBuilder,
+                        out policy,
+                        out _),
+                    Is.True);
+            }
 
             var physiologyBuffer = new PhysiologyStateBuffer(
                 new PhysiologyValidationConfiguration(
@@ -307,7 +474,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                     0.8d,
                     0.8d,
                     8));
-            var sceneProfile = CreateSceneProfile();
+            var sceneProfile = sceneProfileOverride ?? CreateSceneProfile();
             var adapter = new RecordingAdapter();
             var environmentManager = new EnvironmentParameterManager(
                 sceneProfile.SafeDefault,
@@ -350,7 +517,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 physiologyBuffer,
                 rewardConfiguration,
                 CreateBaseline(),
-                telemetry);
+                telemetry,
+                sessionAdaptationLimits);
             var session = new SessionStateMachine();
             var opportunities = new List<SessionDecisionOpportunity>();
             session.DecisionOpportunityReached += opportunities.Add;
@@ -416,13 +584,14 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 Is.True);
         }
 
-        private static SceneEnvironmentProfile CreateSceneProfile()
+        private static SceneEnvironmentProfile CreateSceneProfile(
+            EnvironmentState? safeDefault = null)
         {
             var range = new NormalizedRange(0.2f, 0.8f);
             return new SceneEnvironmentProfile(
                 "integration-scene",
                 "Integration Scene",
-                CreateState(0.5f),
+                safeDefault ?? CreateState(0.5f),
                 new EnvironmentStateLimits(
                     range,
                     range,
@@ -536,6 +705,56 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 return Task.CompletedTask;
+            }
+        }
+
+        private sealed class RejectingOutcomePolicy : IEnvironmentPolicy
+        {
+            private long decisionCount;
+
+            public string PolicyId => "RejectingOutcomePolicy";
+
+            public string PolicyVersion => "test/1";
+
+            public long ObservedOutcomeCount { get; private set; }
+
+            public PolicyDecision SelectAction(PolicyObservation observation)
+            {
+                decisionCount++;
+                return new PolicyDecision(
+                    PolicyId,
+                    PolicyVersion,
+                    EnvironmentAction.NoChange,
+                    observation.Physiology.SequenceNumber,
+                    "TEST_REJECT_OUTCOME",
+                    null,
+                    null,
+                    false,
+                    null,
+                    Array.Empty<PolicyCandidateScore>());
+            }
+
+            public void ObserveOutcome(ActionOutcome outcome)
+            {
+                throw new InvalidOperationException(
+                    "Synthetic model-update rejection.");
+            }
+
+            public PolicyStateSnapshot CaptureState()
+            {
+                return new PolicyStateSnapshot(
+                    PolicyId,
+                    PolicyVersion,
+                    "rejecting-policy-state/1",
+                    decisionCount,
+                    ObservedOutcomeCount,
+                    0L);
+            }
+
+            public void Reset(PolicyResetContext context)
+            {
+                decisionCount = 0L;
+                ObservedOutcomeCount = 0L;
             }
         }
     }
