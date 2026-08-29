@@ -58,6 +58,53 @@ namespace LaminarVR.AdaptiveMeditation.Policy.ContextualBandit
 
         public IContextualBanditModel Model => model;
 
+        public LinUcbModelSnapshot CaptureModelSnapshot(
+            string snapshotId,
+            string participantPseudonym,
+            double createdUtcUnixSeconds,
+            double updatedUtcUnixSeconds,
+            string trainingModelSource)
+        {
+            return RequireSnapshotPersistence().CaptureSnapshot(
+                new LinUcbSnapshotMetadata(
+                    snapshotId,
+                    participantPseudonym,
+                    PolicyId,
+                    PolicyVersion,
+                    createdUtcUnixSeconds,
+                    updatedUtcUnixSeconds,
+                    trainingModelSource));
+        }
+
+        public LinUcbSnapshotRestoreResult TryRestoreModelSnapshot(
+            LinUcbModelSnapshot snapshot,
+            string expectedParticipantPseudonym)
+        {
+            var result = RequireSnapshotPersistence().TryRestoreSnapshot(
+                snapshot,
+                expectedParticipantPseudonym,
+                PolicyId,
+                PolicyVersion);
+            if (result.Restored)
+            {
+                observedOutcomeCount = model.TotalUpdateCount;
+            }
+
+            return result;
+        }
+
+        private ILinUcbModelSnapshotPersistence RequireSnapshotPersistence()
+        {
+            if (model is ILinUcbModelSnapshotPersistence persistence)
+            {
+                return persistence;
+            }
+
+            throw new NotSupportedException(
+                "The configured contextual-bandit model does not support "
+                + "the LinUCB snapshot contract.");
+        }
+
         public PolicyDecision SelectAction(PolicyObservation observation)
         {
             if (observation == null)

@@ -4,8 +4,12 @@ using LaminarVR.AdaptiveMeditation.Environment;
 
 namespace LaminarVR.AdaptiveMeditation.Policy.ContextualBandit
 {
-    public sealed class DisjointLinUcbModel : IContextualBanditModel
+    public sealed class DisjointLinUcbModel
+        : IContextualBanditModel, ILinUcbModelSnapshotPersistence
     {
+        public const string SnapshotSchemaVersion =
+            "disjoint-linucb-model-snapshot/1.0";
+
         private const int ActionCount =
             (int)EnvironmentAction.DecreaseAmbientMotion + 1;
 
@@ -27,6 +31,71 @@ namespace LaminarVR.AdaptiveMeditation.Policy.ContextualBandit
         public int FeatureCount => configuration.FeatureCount;
 
         public long TotalUpdateCount { get; private set; }
+
+        public LinUcbModelSnapshot CaptureSnapshot(
+            LinUcbSnapshotMetadata metadata)
+        {
+            if (metadata == null)
+            {
+                throw new ArgumentNullException(nameof(metadata));
+            }
+
+            var actions = new EnvironmentAction[ActionCount];
+            var states = new LinUcbArmStateSnapshot[ActionCount];
+            for (var actionIndex = 0; actionIndex < ActionCount; actionIndex++)
+            {
+                var action = (EnvironmentAction)actionIndex;
+                actions[actionIndex] = action;
+                states[actionIndex] = CaptureArmState(action);
+            }
+
+            return new LinUcbModelSnapshot(
+                SnapshotSchemaVersion,
+                metadata.SnapshotId,
+                metadata.ParticipantPseudonym,
+                metadata.PolicyId,
+                metadata.PolicyVersion,
+                ModelVersion,
+                FeatureSchemaVersion,
+                FeatureCount,
+                configuration.ConfigurationId,
+                configuration.ConfigurationVersion,
+                configuration.RidgeRegularization,
+                configuration.ExplorationCoefficient,
+                false,
+                TotalUpdateCount,
+                metadata.CreatedUtcUnixSeconds,
+                metadata.UpdatedUtcUnixSeconds,
+                metadata.TrainingModelSource,
+                actions,
+                states);
+        }
+
+        public LinUcbSnapshotRestoreResult TryRestoreSnapshot(
+            LinUcbModelSnapshot snapshot,
+            string expectedParticipantPseudonym,
+            string expectedPolicyId,
+            string expectedPolicyVersion)
+        {
+            var validation = ValidateSnapshot(
+                snapshot,
+                expectedParticipantPseudonym,
+                expectedPolicyId,
+                expectedPolicyVersion,
+                out var restoredArms);
+            if (!validation.Restored)
+            {
+                return validation;
+            }
+
+            for (var index = 0; index < ActionCount; index++)
+            {
+                arms[index] = restoredArms[index];
+            }
+
+            TotalUpdateCount = snapshot.TotalUpdateCount;
+            return validation;
+        }
 
         public ContextualBanditSelection Select(
             FeatureVector featureVector,
@@ -131,6 +200,249 @@ namespace LaminarVR.AdaptiveMeditation.Policy.ContextualBandit
             }
 
             TotalUpdateCount = 0L;
+        }
+
+        private LinUcbSnapshotRestoreResult ValidateSnapshot(
+            LinUcbModelSnapshot snapshot,
+            string expectedParticipantPseudonym,
+            string expectedPolicyId,
+            string expectedPolicyVersion,
+            out ArmState[] restoredArms)
+        {
+            restoredArms = null;
+            if (snapshot == null)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.SnapshotMissing,
+                    "Snapshot is missing.");
+            }
+
+            if (!HasText(snapshot.SnapshotId)
+                || !HasText(snapshot.ParticipantPseudonym)
+                || !HasText(snapshot.PolicyId)
+                || !HasText(snapshot.PolicyVersion)
+                || !HasText(snapshot.ConfigurationId)
+                || !HasText(snapshot.ModelVersion)
+                || !HasText(snapshot.FeatureSchemaVersion)
+                || !HasText(snapshot.TrainingModelSource))
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.SnapshotIdentityInvalid,
+                    "Snapshot identity metadata is incomplete.");
+            }
+
+            if (!string.Equals(
+                    snapshot.SnapshotSchemaVersion,
+                    SnapshotSchemaVersion,
+                    StringComparison.Ordinal))
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.SnapshotSchemaMismatch,
+                    "Snapshot schema version is incompatible.");
+            }
+
+            if (!string.Equals(
+                    snapshot.ParticipantPseudonym,
+                    expectedParticipantPseudonym,
+                    StringComparison.Ordinal))
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.ParticipantMismatch,
+                    "Snapshot participant does not match the active participant.");
+            }
+
+            if (!string.Equals(snapshot.PolicyId, expectedPolicyId, StringComparison.Ordinal)
+                || !string.Equals(
+                    snapshot.PolicyVersion,
+                    expectedPolicyVersion,
+                    StringComparison.Ordinal))
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.PolicyMismatch,
+                    "Snapshot policy identity is incompatible.");
+            }
+
+            if (!string.Equals(
+                    snapshot.ConfigurationId,
+                    configuration.ConfigurationId,
+                    StringComparison.Ordinal)
+                || snapshot.ConfigurationVersion
+                    != configuration.ConfigurationVersion)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.ConfigurationMismatch,
+                    "Snapshot configuration is incompatible.");
+            }
+
+            if (!string.Equals(snapshot.ModelVersion, ModelVersion, StringComparison.Ordinal))
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.ModelVersionMismatch,
+                    "Snapshot model version is incompatible.");
+            }
+
+            if (!string.Equals(
+                    snapshot.FeatureSchemaVersion,
+                    FeatureSchemaVersion,
+                    StringComparison.Ordinal)
+                || snapshot.FeatureCount != FeatureCount)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.FeatureSchemaMismatch,
+                    "Snapshot feature schema is incompatible.");
+            }
+
+            if (snapshot.RidgeRegularization
+                    != configuration.RidgeRegularization
+                || snapshot.ExplorationCoefficient
+                    != configuration.ExplorationCoefficient)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.HyperparameterMismatch,
+                    "Snapshot hyperparameters are incompatible.");
+            }
+
+            if (snapshot.ForgettingEnabled)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.ForgettingUnsupported,
+                    "Forgetting is disabled for the initial implementation.");
+            }
+
+            if (!IsTimestamp(snapshot.CreatedUtcUnixSeconds)
+                || !IsTimestamp(snapshot.UpdatedUtcUnixSeconds)
+                || snapshot.UpdatedUtcUnixSeconds
+                    < snapshot.CreatedUtcUnixSeconds)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.TimestampInvalid,
+                    "Snapshot timestamps are invalid.");
+            }
+
+            if (snapshot.ActionCount != ActionCount
+                || snapshot.ArmStateCount != ActionCount)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.ActionContractMismatch,
+                    "Snapshot action or arm count is incompatible.");
+            }
+
+            var candidateArms = new ArmState[ActionCount];
+            long calculatedUpdateCount = 0L;
+            for (var actionIndex = 0; actionIndex < ActionCount; actionIndex++)
+            {
+                var expectedAction = (EnvironmentAction)actionIndex;
+                var state = snapshot.GetArmState(actionIndex);
+                if (snapshot.GetAction(actionIndex) != expectedAction
+                    || state == null
+                    || state.Action != expectedAction)
+                {
+                    return Rejected(
+                        LinUcbSnapshotRestoreResultCode.ActionContractMismatch,
+                        "Snapshot action ordering is incompatible.");
+                }
+
+                if (state.FeatureCount != FeatureCount
+                    || state.UpdateCount < 0L)
+                {
+                    return Rejected(
+                        LinUcbSnapshotRestoreResultCode.ArmStateInvalid,
+                        "Snapshot arm dimensions or counters are invalid.");
+                }
+
+                var matrix = state.CopyDesignMatrix();
+                var vector = state.CopyRewardVector();
+                if (matrix.GetLength(0) != FeatureCount
+                    || matrix.GetLength(1) != FeatureCount
+                    || vector.Length != FeatureCount)
+                {
+                    return Rejected(
+                        LinUcbSnapshotRestoreResultCode.ArmStateInvalid,
+                        "Snapshot arm dimensions are incompatible.");
+                }
+
+                for (var row = 0; row < FeatureCount; row++)
+                {
+                    if (!IsFinite(vector[row]))
+                    {
+                        return Rejected(
+                            LinUcbSnapshotRestoreResultCode.NonFiniteState,
+                            "Snapshot reward vector contains a non-finite value.");
+                    }
+
+                    for (var column = 0; column < FeatureCount; column++)
+                    {
+                        if (!IsFinite(matrix[row, column]))
+                        {
+                            return Rejected(
+                                LinUcbSnapshotRestoreResultCode.NonFiniteState,
+                                "Snapshot design matrix contains a non-finite value.");
+                        }
+
+                        if (Math.Abs(matrix[row, column] - matrix[column, row])
+                            > 1e-10d)
+                        {
+                            return Rejected(
+                                LinUcbSnapshotRestoreResultCode.MatrixNotSymmetric,
+                                "Snapshot design matrix is not symmetric.");
+                        }
+                    }
+                }
+
+                try
+                {
+                    ValidatePositiveDefinite(matrix);
+                    calculatedUpdateCount = checked(
+                        calculatedUpdateCount + state.UpdateCount);
+                }
+                catch (LinUcbNumericalException)
+                {
+                    return Rejected(
+                        LinUcbSnapshotRestoreResultCode.MatrixNotPositiveDefinite,
+                        "Snapshot design matrix is not positive definite.");
+                }
+                catch (OverflowException)
+                {
+                    return Rejected(
+                        LinUcbSnapshotRestoreResultCode.UpdateCountMismatch,
+                        "Snapshot update count overflowed.");
+                }
+
+                candidateArms[actionIndex] = new ArmState(matrix, vector)
+                {
+                    UpdateCount = state.UpdateCount
+                };
+            }
+
+            if (snapshot.TotalUpdateCount < 0L
+                || calculatedUpdateCount != snapshot.TotalUpdateCount)
+            {
+                return Rejected(
+                    LinUcbSnapshotRestoreResultCode.UpdateCountMismatch,
+                    "Snapshot update counters are inconsistent.");
+            }
+
+            restoredArms = candidateArms;
+            return new LinUcbSnapshotRestoreResult(
+                LinUcbSnapshotRestoreResultCode.Restored,
+                "Snapshot restored.");
+        }
+
+        private static LinUcbSnapshotRestoreResult Rejected(
+            LinUcbSnapshotRestoreResultCode code,
+            string reason)
+        {
+            return new LinUcbSnapshotRestoreResult(code, reason);
+        }
+
+        private static bool HasText(string value)
+        {
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        private static bool IsTimestamp(double value)
+        {
+            return IsFinite(value) && value >= 0d;
         }
 
         private ContextualBanditActionScore Score(

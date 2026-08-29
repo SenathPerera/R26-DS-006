@@ -9,8 +9,10 @@ using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Policy.RuleBased;
 using LaminarVR.AdaptiveMeditation.Rewards;
+using LaminarVR.AdaptiveMeditation.Runtime.Telemetry;
 using LaminarVR.AdaptiveMeditation.Safety;
 using LaminarVR.AdaptiveMeditation.Session;
+using LaminarVR.AdaptiveMeditation.Stabilization;
 using LaminarVR.AdaptiveMeditation.Telemetry;
 using NUnit.Framework;
 
@@ -121,6 +123,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 Does.Contain(TelemetryEventTypes.ActionValidated));
             Assert.That(
                 harness.Sink.EventTypes,
+                Does.Contain(TelemetryEventTypes.ActionExecuted));
+            Assert.That(
+                harness.Sink.EventTypes,
                 Does.Contain(TelemetryEventTypes.RewardWindowOpened));
             Assert.That(
                 harness.Sink.EventTypes,
@@ -133,6 +138,42 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                     TelemetryEventTypes.BanditUpdated),
                 Is.EqualTo(
                     policyMode == StudyPolicyMode.ContextualBandit));
+            var validationEvent = harness.Sink.Events.Last(
+                telemetryEvent => telemetryEvent.EventType
+                    == TelemetryEventTypes.ActionValidated);
+            Assert.That(
+                validationEvent.CopyFields().Select(field => field.Name),
+                Does.Contain("state_before_illumination")
+                    .And.Contain("safe_target_ambient_motion"));
+            if (policyMode == StudyPolicyMode.ContextualBandit)
+            {
+                var proposalEvent = harness.Sink.Events.Last(
+                    telemetryEvent => telemetryEvent.EventType
+                        == TelemetryEventTypes.ActionProposed);
+                Assert.That(
+                    proposalEvent.CopyFields().Select(field => field.Name),
+                    Does.Contain("model_version")
+                        .And.Contain("feature_0"));
+                var updateEvent = harness.Sink.Events.Last(
+                    telemetryEvent => telemetryEvent.EventType
+                        == TelemetryEventTypes.BanditUpdated);
+                Assert.That(
+                    updateEvent.CopyFields().Select(field => field.Name),
+                    Does.Contain("model_version")
+                        .And.Contain("snapshot_schema_version"));
+                var formatter = new JsonLinesTelemetryFormatter();
+                var jsonLines = string.Join(
+                    "\n",
+                    harness.Sink.Events.Select(formatter.Format));
+                Assert.That(jsonLines,
+                    Does.Contain("\"eventType\":\"decision.requested\"")
+                        .And.Contain("\"state_before_illumination\"")
+                        .And.Contain("\"feature_0\"")
+                        .And.Contain("\"eventType\":\"action.executed\"")
+                        .And.Contain("\"total_reward\"")
+                        .And.Contain("\"model_update_count\"")
+                        .And.Contain("\"snapshot_schema_version\""));
+            }
         }
 
         [Test]
@@ -176,6 +217,10 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 harness.Controller.Policy.CaptureState().DecisionCount,
                 Is.Zero);
             Assert.That(harness.EnvironmentManager.IsTransitionActive, Is.False);
+            Assert.That(
+                harness.Sink.EventTypes.Count(
+                    eventType => eventType == TelemetryEventTypes.DecisionSkipped),
+                Is.EqualTo(2));
         }
 
         [Test]
@@ -427,11 +472,49 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 Does.Contain(TelemetryEventTypes.RewardInvalidated));
         }
 
+        [Test]
+        public async Task StabilizationSelection_LogsCandidatesAndSelectedState()
+        {
+            var selector = new StabilizationStateSelector(
+                new StabilizationSelectionConfiguration(
+                    "integration-stabilization",
+                    1,
+                    3,
+                    0.8d,
+                    0.2d));
+            selector.RecordOutcome(
+                new StabilizationOutcome(
+                    "safe-outcome",
+                    10L,
+                    new EnvironmentState(0.6f, 0.5f, 0.5f, 0.5f, 0.5f),
+                    1d,
+                    false,
+                    false));
+            var harness = CreateHarness(
+                StudyPolicyMode.StaticPersonalized,
+                stabilizationSelector: selector);
+
+            var result = await harness.Controller
+                .SelectStabilizationStateAsync(
+                    VrSessionPhase.Stabilization,
+                    PreferredEnvironment(),
+                    1200d,
+                    12d,
+                    CancellationToken.None);
+
+            Assert.That(result.SelectedTransitionId, Is.EqualTo("safe-outcome"));
+            Assert.That(harness.Sink.EventTypes,
+                Does.Contain(TelemetryEventTypes.StabilizationCandidateScored));
+            Assert.That(harness.Sink.EventTypes,
+                Does.Contain(TelemetryEventTypes.StabilizationStateSelected));
+        }
+
         private static Harness CreateHarness(
             StudyPolicyMode policyMode,
             IEnvironmentPolicy policyOverride = null,
             SceneEnvironmentProfile sceneProfileOverride = null,
-            EnvironmentStateLimits? sessionAdaptationLimits = null)
+            EnvironmentStateLimits? sessionAdaptationLimits = null,
+            StabilizationStateSelector stabilizationSelector = null)
         {
             var ruleConfiguration = new RuleBasedPolicyConfiguration(
                 "integration-rules",
@@ -518,7 +601,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 rewardConfiguration,
                 CreateBaseline(),
                 telemetry,
-                sessionAdaptationLimits);
+                sessionAdaptationLimits,
+                stabilizationSelector);
             var session = new SessionStateMachine();
             var opportunities = new List<SessionDecisionOpportunity>();
             session.DecisionOpportunityReached += opportunities.Add;
@@ -691,6 +775,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
 
             public IEnumerable<string> EventTypes =>
                 events.Select(telemetryEvent => telemetryEvent.EventType);
+
+            public IEnumerable<TelemetryEvent> Events => events;
 
             public Task AppendAsync(
                 TelemetryEvent telemetryEvent,

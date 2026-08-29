@@ -15,9 +15,11 @@ namespace LaminarVR.AdaptiveMeditation.Telemetry
         public const string PhysiologyReceived = "physiology.received";
         public const string PhysiologyRejected = "physiology.rejected";
         public const string DecisionRequested = "decision.requested";
+        public const string DecisionSkipped = "decision.skipped";
         public const string PolicyCandidateScore = "policy.candidate_score";
         public const string ActionProposed = "action.proposed";
         public const string ActionValidated = "action.validated";
+        public const string ActionExecuted = "action.executed";
         public const string TransitionStarted = "transition.started";
         public const string TransitionCompleted = "transition.completed";
         public const string TransitionCancelled = "transition.cancelled";
@@ -27,6 +29,15 @@ namespace LaminarVR.AdaptiveMeditation.Telemetry
         public const string RewardInvalidated = "reward.invalidated";
         public const string BanditUpdated = "bandit.updated";
         public const string BanditUpdateSkipped = "bandit.update_skipped";
+        public const string BanditSnapshotSaved = "bandit.snapshot_saved";
+        public const string BanditSnapshotLoaded = "bandit.snapshot_loaded";
+        public const string BanditSnapshotRejected = "bandit.snapshot_rejected";
+        public const string BanditSnapshotSaveFailed =
+            "bandit.snapshot_save_failed";
+        public const string StabilizationCandidateScored =
+            "stabilization.candidate_scored";
+        public const string StabilizationStateSelected =
+            "stabilization.state_selected";
         public const string NetworkConnected = "network.connected";
         public const string NetworkDisconnected = "network.disconnected";
         public const string SessionPaused = "session.paused";

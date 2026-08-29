@@ -4,9 +4,11 @@ using System.Threading;
 using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
+using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Rewards;
 using LaminarVR.AdaptiveMeditation.Safety;
 using LaminarVR.AdaptiveMeditation.Session;
+using LaminarVR.AdaptiveMeditation.Stabilization;
 using LaminarVR.AdaptiveMeditation.Telemetry;
 
 namespace LaminarVR.AdaptiveMeditation.Policy
@@ -24,6 +26,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         private readonly RewardCalculator rewardCalculator;
         private readonly PhysiologyBaseline baseline;
         private readonly TelemetryRecorder telemetry;
+        private readonly StabilizationStateSelector stabilizationSelector;
 
         private PendingDecision pendingDecision;
         private long latestDecisionPhysiologySequenceNumber;
@@ -42,7 +45,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             RewardPipelineConfiguration rewardConfiguration,
             PhysiologyBaseline baseline,
             TelemetryRecorder telemetry,
-            EnvironmentStateLimits? sessionAdaptationLimits = null)
+            EnvironmentStateLimits? sessionAdaptationLimits = null,
+            StabilizationStateSelector stabilizationSelector = null)
         {
             this.policy = policy
                 ?? throw new ArgumentNullException(nameof(policy));
@@ -78,6 +82,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 ?? throw new ArgumentNullException(nameof(baseline));
             this.telemetry = telemetry
                 ?? throw new ArgumentNullException(nameof(telemetry));
+            this.stabilizationSelector = stabilizationSelector;
 
             attributionTracker = new RewardAttributionTracker(
                 rewardConfiguration);
@@ -109,45 +114,79 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 preferredEnvironment,
                 nameof(preferredEnvironment));
 
+            var requestFields = new List<TelemetryField>
+            {
+                TelemetryField.String("decision_id", decisionId.Trim()),
+                TelemetryField.Integer(
+                    "decision_sequence",
+                    opportunity.SequenceNumber),
+                TelemetryField.String("policy_id", policy.PolicyId),
+                TelemetryField.String("policy_version", policy.PolicyVersion),
+                TelemetryField.String("phase", phase.ToString())
+            };
+            AddEnvironmentFields(
+                requestFields,
+                "state_before",
+                environmentManager.CurrentState);
+            AddEnvironmentFields(
+                requestFields,
+                "preference_state",
+                preferredEnvironment);
+            AddBanditIdentityFields(requestFields);
             await RecordAsync(
                 TelemetryEventTypes.DecisionRequested,
                 utcTimestampUnixSeconds,
                 sessionElapsedSeconds,
                 false,
-                new[]
-                {
-                    TelemetryField.String("decision_id", decisionId.Trim()),
-                    TelemetryField.Integer(
-                        "decision_sequence",
-                        opportunity.SequenceNumber),
-                    TelemetryField.String("policy_id", policy.PolicyId),
-                    TelemetryField.String("phase", phase.ToString())
-                },
+                requestFields,
                 cancellationToken).ConfigureAwait(false);
 
             if (phase != VrSessionPhase.Adaptive)
             {
-                return Skipped(
-                    PolicyDecisionCycleResultCode.SkippedInvalidPhase);
+                return await SkipDecisionAsync(
+                    decisionId,
+                    PolicyDecisionCycleResultCode.SkippedInvalidPhase,
+                    phase.ToString(),
+                    null,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (!networkConnected)
             {
-                return Skipped(
-                    PolicyDecisionCycleResultCode
-                        .SkippedNetworkUnavailable);
+                return await SkipDecisionAsync(
+                    decisionId,
+                    PolicyDecisionCycleResultCode.SkippedNetworkUnavailable,
+                    "NetworkUnavailable",
+                    null,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (environmentManager.IsTransitionActive)
             {
-                return Skipped(
-                    PolicyDecisionCycleResultCode.SkippedTransitionActive);
+                return await SkipDecisionAsync(
+                    decisionId,
+                    PolicyDecisionCycleResultCode.SkippedTransitionActive,
+                    environmentManager.ActiveTransitionId,
+                    null,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (pendingDecision != null || attributionTracker.HasPending)
             {
-                return Skipped(
-                    PolicyDecisionCycleResultCode.SkippedRewardPending);
+                return await SkipDecisionAsync(
+                    decisionId,
+                    PolicyDecisionCycleResultCode.SkippedRewardPending,
+                    "RewardPending",
+                    null,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             if (!physiologyBuffer.TryGetLatestUsable(
@@ -157,12 +196,15 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 out var physiology,
                 out var physiologyQueryResult))
             {
-                return new PolicyDecisionCycleResult(
+                return await SkipDecisionAsync(
+                    decisionId,
                     PolicyDecisionCycleResultCode
                         .SkippedPhysiologyUnavailable,
-                    null,
-                    null,
-                    physiologyQueryResult);
+                    physiologyQueryResult.ToString(),
+                    physiologyQueryResult,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             var recentWindows = physiologyBuffer.GetRecentAccepted(
@@ -208,6 +250,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 
             await RecordActionValidationAsync(
                 decisionId,
+                decision,
                 validation,
                 utcTimestampUnixSeconds,
                 sessionElapsedSeconds,
@@ -236,6 +279,11 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     phase,
                     networkConnected,
                     out _);
+                await RecordActionExecutedAsync(
+                    pendingDecision,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
                 await RecordRewardWindowOpenedAsync(
                     decisionId,
                     utcTimestampUnixSeconds,
@@ -314,6 +362,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             var completedAt = progress.CompletedMonotonicTimeSeconds.Value;
             var completedUtc = utcTimestampUnixSeconds
                 - (currentMonotonicTimeSeconds - completedAt);
+            var executedDecision = pendingDecision;
             var rewardWindowOpened = OpenRewardAttribution(
                 completedAt,
                 completedUtc,
@@ -334,6 +383,11 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                         "completed_monotonic_seconds",
                         completedAt)
                 },
+                cancellationToken).ConfigureAwait(false);
+            await RecordActionExecutedAsync(
+                executedDecision,
+                utcTimestampUnixSeconds,
+                sessionElapsedSeconds,
                 cancellationToken).ConfigureAwait(false);
             if (rewardWindowOpened)
             {
@@ -395,6 +449,11 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     || attributionCode
                         == RewardAttributionResolutionCode.TimedOut)
                 {
+                    await RecordBanditUpdateSkippedAsync(
+                        attributionCode.ToString(),
+                        utcTimestampUnixSeconds,
+                        sessionElapsedSeconds,
+                        cancellationToken).ConfigureAwait(false);
                     await RecordRewardInvalidationAsync(
                         attributionCode.ToString(),
                         utcTimestampUnixSeconds,
@@ -439,6 +498,11 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 cancellationToken).ConfigureAwait(false);
             if (!calculation.Valid)
             {
+                await RecordBanditUpdateSkippedAsync(
+                    calculation.ResultCode.ToString(),
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
                 await RecordRewardInvalidationAsync(
                     calculation.ResultCode.ToString(),
                     utcTimestampUnixSeconds,
@@ -454,6 +518,21 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             var completedDecision = pendingDecision
                 ?? throw new InvalidOperationException(
                     "A matched reward has no pending policy decision.");
+            if (stabilizationSelector != null)
+            {
+                // TODO(RESEARCH_DECISION): Freeze discomfort and safety
+                // eligibility thresholds. Until then, any positive severity
+                // excludes the state from final stabilization selection.
+                stabilizationSelector.RecordOutcome(
+                    new StabilizationOutcome(
+                        match.Request.TransitionId,
+                        match.PostActionPhysiology.SequenceNumber,
+                        match.Request.EnvironmentAfter,
+                        calculation.Breakdown.TotalReward,
+                        discomfortSeverity > 0d,
+                        safetySeverity > 0d));
+            }
+
             await RecordAsync(
                 TelemetryEventTypes.RewardCalculated,
                 utcTimestampUnixSeconds,
@@ -516,24 +595,37 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 || exception is InvalidOperationException
                 || exception is OverflowException)
             {
+                var skippedFields = new List<TelemetryField>
+                {
+                    TelemetryField.String(
+                        "decision_id",
+                        completedDecision.DecisionId),
+                    TelemetryField.String("policy_id", policy.PolicyId),
+                    TelemetryField.String(
+                        "policy_version",
+                        policy.PolicyVersion),
+                    TelemetryField.String(
+                        "executed_action",
+                        match.Request.ExecutedAction.ToString()),
+                    TelemetryField.String(
+                        "reason",
+                        exception.GetType().Name)
+                };
+                AddBanditIdentityFields(skippedFields);
+                if (policy is ContextualBanditPolicy)
+                {
+                    skippedFields.Add(
+                        TelemetryField.String(
+                            "snapshot_schema_version",
+                            DisjointLinUcbModel.SnapshotSchemaVersion));
+                }
+
                 await RecordAsync(
                     TelemetryEventTypes.BanditUpdateSkipped,
                     utcTimestampUnixSeconds,
                     sessionElapsedSeconds,
                     true,
-                    new[]
-                    {
-                        TelemetryField.String(
-                            "decision_id",
-                            completedDecision.DecisionId),
-                        TelemetryField.String("policy_id", policy.PolicyId),
-                        TelemetryField.String(
-                            "executed_action",
-                            match.Request.ExecutedAction.ToString()),
-                        TelemetryField.String(
-                            "reason",
-                            exception.GetType().Name)
-                    },
+                    skippedFields,
                     cancellationToken).ConfigureAwait(false);
                 return new PolicyRewardCycleResult(
                     PolicyRewardCycleResultCode.PolicyUpdateSkipped,
@@ -571,6 +663,12 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                                 .SchemaVersion));
                 }
 
+                AddBanditIdentityFields(updateFields);
+                updateFields.Add(
+                    TelemetryField.String(
+                        "snapshot_schema_version",
+                        DisjointLinUcbModel.SnapshotSchemaVersion));
+
                 await RecordAsync(
                     TelemetryEventTypes.BanditUpdated,
                     utcTimestampUnixSeconds,
@@ -584,6 +682,111 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 PolicyRewardCycleResultCode.RewardApplied,
                 attributionCode,
                 calculation);
+        }
+
+        public async Task<StabilizationSelectionResult>
+            SelectStabilizationStateAsync(
+                VrSessionPhase phase,
+                EnvironmentState safePreferenceState,
+                double utcTimestampUnixSeconds,
+                double sessionElapsedSeconds,
+                CancellationToken cancellationToken)
+        {
+            ValidateFiniteNonNegative(
+                utcTimestampUnixSeconds,
+                nameof(utcTimestampUnixSeconds));
+            ValidateFiniteNonNegative(
+                sessionElapsedSeconds,
+                nameof(sessionElapsedSeconds));
+            if (phase != VrSessionPhase.Stabilization)
+            {
+                throw new InvalidOperationException(
+                    "Final state selection is only valid during stabilization.");
+            }
+
+            if (stabilizationSelector == null)
+            {
+                throw new InvalidOperationException(
+                    "A stabilization selector was not configured.");
+            }
+
+            if (environmentManager.IsTransitionActive
+                || pendingDecision != null
+                || attributionTracker.HasPending)
+            {
+                throw new InvalidOperationException(
+                    "Pending adaptive work must be closed before stabilization selection.");
+            }
+
+            var result = stabilizationSelector.Select(
+                safePreferenceState,
+                sceneProfile.Limits);
+            for (var index = 0; index < result.EvaluationCount; index++)
+            {
+                var evaluation = result.GetEvaluation(index);
+                var fields = new List<TelemetryField>
+                {
+                    TelemetryField.String(
+                        "transition_id",
+                        evaluation.Outcome.TransitionId),
+                    TelemetryField.Integer(
+                        "post_physiology_sequence",
+                        evaluation.Outcome.PostPhysiologySequenceNumber),
+                    TelemetryField.Integer(
+                        "recency_index",
+                        evaluation.RecencyIndex),
+                    TelemetryField.Number("reward", evaluation.Outcome.Reward),
+                    TelemetryField.Number(
+                        "selection_score",
+                        evaluation.SelectionScore),
+                    TelemetryField.Boolean("eligible", evaluation.Eligible),
+                    TelemetryField.String(
+                        "exclusion_reason",
+                        evaluation.ExclusionReason.ToString())
+                };
+                AddEnvironmentFields(
+                    fields,
+                    "candidate_state",
+                    evaluation.Outcome.State);
+                await RecordAsync(
+                    TelemetryEventTypes.StabilizationCandidateScored,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    false,
+                    fields,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var selectionFields = new List<TelemetryField>
+            {
+                TelemetryField.String(
+                    "configuration_id",
+                    stabilizationSelector.Configuration.ConfigurationId),
+                TelemetryField.Integer(
+                    "configuration_version",
+                    stabilizationSelector.Configuration.ConfigurationVersion),
+                TelemetryField.String("reason_code", result.ReasonCode),
+                TelemetryField.Boolean(
+                    "used_preference_fallback",
+                    result.UsedPreferenceFallback),
+                result.SelectedTransitionId == null
+                    ? TelemetryField.Null("selected_transition_id")
+                    : TelemetryField.String(
+                        "selected_transition_id",
+                        result.SelectedTransitionId)
+            };
+            AddEnvironmentFields(
+                selectionFields,
+                "selected_state",
+                result.SelectedState);
+            await RecordAsync(
+                TelemetryEventTypes.StabilizationStateSelected,
+                utcTimestampUnixSeconds,
+                sessionElapsedSeconds,
+                true,
+                selectionFields,
+                cancellationToken).ConfigureAwait(false);
+            return result;
         }
 
         public async Task<bool> InvalidatePendingAsync(
@@ -622,6 +825,11 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 
             if (invalidated || cancelled || pendingDecision != null)
             {
+                await RecordBanditUpdateSkippedAsync(
+                    reason.ToString(),
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken).ConfigureAwait(false);
                 await RecordRewardInvalidationAsync(
                     reason.ToString(),
                     utcTimestampUnixSeconds,
@@ -804,6 +1012,20 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                         decision.FeatureVector.SchemaVersion)
                     : TelemetryField.Null("feature_schema_version")
             };
+            AddBanditIdentityFields(proposalFields);
+            if (decision.FeatureVector != null)
+            {
+                for (var index = 0;
+                    index < decision.FeatureVector.Count;
+                    index++)
+                {
+                    proposalFields.Add(
+                        TelemetryField.Number(
+                            "feature_" + index,
+                            decision.FeatureVector[index]));
+                }
+            }
+
             await RecordAsync(
                 TelemetryEventTypes.ActionProposed,
                 utcTimestampUnixSeconds,
@@ -852,31 +1074,80 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 
         private Task RecordActionValidationAsync(
             string decisionId,
+            PolicyDecision decision,
             ActionValidationResult validation,
             double utcTimestampUnixSeconds,
             double sessionElapsedSeconds,
             CancellationToken cancellationToken)
         {
+            var fields = new List<TelemetryField>
+            {
+                TelemetryField.String("decision_id", decisionId.Trim()),
+                TelemetryField.String(
+                    "proposed_action",
+                    decision.SelectedAction.ToString()),
+                TelemetryField.Boolean("accepted", validation.Accepted),
+                TelemetryField.Boolean("modified", validation.Modified),
+                TelemetryField.String(
+                    "executed_action",
+                    validation.ExecutedAction.ToString()),
+                TelemetryField.String(
+                    "reason_code",
+                    validation.ReasonCode.ToString()),
+                TelemetryField.Number(
+                    "applied_variation",
+                    validation.AppliedVariation)
+            };
+            AddEnvironmentFields(
+                fields,
+                "state_before",
+                environmentManager.CurrentState);
+            AddEnvironmentFields(fields, "safe_target", validation.SafeTarget);
             return RecordAsync(
                 TelemetryEventTypes.ActionValidated,
                 utcTimestampUnixSeconds,
                 sessionElapsedSeconds,
                 !validation.Accepted,
-                new[]
-                {
-                    TelemetryField.String("decision_id", decisionId.Trim()),
-                    TelemetryField.Boolean("accepted", validation.Accepted),
-                    TelemetryField.Boolean("modified", validation.Modified),
-                    TelemetryField.String(
-                        "executed_action",
-                        validation.ExecutedAction.ToString()),
-                    TelemetryField.String(
-                        "reason_code",
-                        validation.ReasonCode.ToString()),
-                    TelemetryField.Number(
-                        "applied_variation",
-                        validation.AppliedVariation)
-                },
+                fields,
+                cancellationToken);
+        }
+
+        private Task RecordActionExecutedAsync(
+            PendingDecision decision,
+            double utcTimestampUnixSeconds,
+            double sessionElapsedSeconds,
+            CancellationToken cancellationToken)
+        {
+            if (decision == null)
+            {
+                throw new InvalidOperationException(
+                    "An executed action must have a pending decision.");
+            }
+
+            var fields = new List<TelemetryField>
+            {
+                TelemetryField.String("decision_id", decision.DecisionId),
+                TelemetryField.String(
+                    "executed_action",
+                    decision.Validation.ExecutedAction.ToString()),
+                TelemetryField.Boolean(
+                    "safety_modified",
+                    decision.Validation.Modified)
+            };
+            AddEnvironmentFields(
+                fields,
+                "state_before",
+                decision.EnvironmentBefore);
+            AddEnvironmentFields(
+                fields,
+                "state_after",
+                decision.Validation.SafeTarget);
+            return RecordAsync(
+                TelemetryEventTypes.ActionExecuted,
+                utcTimestampUnixSeconds,
+                sessionElapsedSeconds,
+                false,
+                fields,
                 cancellationToken);
         }
 
@@ -930,6 +1201,40 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 cancellationToken);
         }
 
+        private Task RecordBanditUpdateSkippedAsync(
+            string reason,
+            double utcTimestampUnixSeconds,
+            double sessionElapsedSeconds,
+            CancellationToken cancellationToken)
+        {
+            if (!(policy is ContextualBanditPolicy contextualBandit)
+                || pendingDecision == null)
+            {
+                return Task.CompletedTask;
+            }
+
+            return RecordAsync(
+                TelemetryEventTypes.BanditUpdateSkipped,
+                utcTimestampUnixSeconds,
+                sessionElapsedSeconds,
+                true,
+                new[]
+                {
+                    TelemetryField.String(
+                        "decision_id",
+                        pendingDecision.DecisionId),
+                    TelemetryField.String("policy_id", policy.PolicyId),
+                    TelemetryField.String(
+                        "model_version",
+                        contextualBandit.Model.ModelVersion),
+                    TelemetryField.String(
+                        "snapshot_schema_version",
+                        DisjointLinUcbModel.SnapshotSchemaVersion),
+                    TelemetryField.String("reason", reason)
+                },
+                cancellationToken);
+        }
+
         private async Task RecordAsync(
             string eventType,
             double utcTimestampUnixSeconds,
@@ -947,14 +1252,77 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 cancellationToken).ConfigureAwait(false);
         }
 
-        private static PolicyDecisionCycleResult Skipped(
-            PolicyDecisionCycleResultCode resultCode)
+        private async Task<PolicyDecisionCycleResult> SkipDecisionAsync(
+            string decisionId,
+            PolicyDecisionCycleResultCode resultCode,
+            string reason,
+            PhysiologyQueryResultCode? physiologyQueryResult,
+            double utcTimestampUnixSeconds,
+            double sessionElapsedSeconds,
+            CancellationToken cancellationToken)
         {
+            var fields = new List<TelemetryField>
+            {
+                TelemetryField.String("decision_id", decisionId.Trim()),
+                TelemetryField.String("result_code", resultCode.ToString()),
+                TelemetryField.String("reason", reason ?? string.Empty)
+            };
+            if (physiologyQueryResult.HasValue)
+            {
+                fields.Add(
+                    TelemetryField.String(
+                        "physiology_query_result",
+                        physiologyQueryResult.Value.ToString()));
+            }
+
+            await RecordAsync(
+                TelemetryEventTypes.DecisionSkipped,
+                utcTimestampUnixSeconds,
+                sessionElapsedSeconds,
+                true,
+                fields,
+                cancellationToken).ConfigureAwait(false);
             return new PolicyDecisionCycleResult(
                 resultCode,
                 null,
                 null,
-                null);
+                physiologyQueryResult);
+        }
+
+        private void AddBanditIdentityFields(List<TelemetryField> fields)
+        {
+            if (policy is ContextualBanditPolicy contextualBandit)
+            {
+                fields.Add(
+                    TelemetryField.String(
+                        "model_version",
+                        contextualBandit.Model.ModelVersion));
+            }
+        }
+
+        private static void AddEnvironmentFields(
+            List<TelemetryField> fields,
+            string prefix,
+            EnvironmentState state)
+        {
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_illumination",
+                    state.Illumination));
+            fields.Add(
+                TelemetryField.Number(prefix + "_warmth", state.Warmth));
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_atmospheric_softness",
+                    state.AtmosphericSoftness));
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_color_richness",
+                    state.ColorRichness));
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_ambient_motion",
+                    state.AmbientMotion));
         }
 
         private static void ValidateIdentity(

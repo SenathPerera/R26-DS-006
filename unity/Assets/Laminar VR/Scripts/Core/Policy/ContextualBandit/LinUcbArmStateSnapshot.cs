@@ -8,12 +8,22 @@ namespace LaminarVR.AdaptiveMeditation.Policy.ContextualBandit
         private readonly double[,] designMatrix;
         private readonly double[] rewardVector;
 
-        internal LinUcbArmStateSnapshot(
+        public LinUcbArmStateSnapshot(
             EnvironmentAction action,
             double[,] designMatrix,
             double[] rewardVector,
             long updateCount)
         {
+            if (designMatrix == null)
+            {
+                throw new ArgumentNullException(nameof(designMatrix));
+            }
+
+            if (rewardVector == null)
+            {
+                throw new ArgumentNullException(nameof(rewardVector));
+            }
+
             Action = action;
             this.designMatrix = (double[,])designMatrix.Clone();
             this.rewardVector = (double[])rewardVector.Clone();
