@@ -60,6 +60,28 @@ class ComponentDVoiceRepository(
     override suspend fun companionMessage(sessionId: String, text: String, phase: SessionPhase): Result<CompanionReply> =
         call { api.companion(phase.wire, CompanionRequestDto(sessionId, text)).toDomain() }
 
+    override suspend fun voiceTurn(
+        sessionId: String,
+        phase: SessionPhase,
+        audio: AudioPayload,
+        isFinal: Boolean,
+        userId: String?,
+        language: String?,
+        pollB: Boolean,
+        log: Boolean,
+    ): Result<VoiceTurnResult> = call {
+        api.companionVoiceTurn(
+            file = audio.toPart(),
+            sessionId = sessionId,
+            phase = phase.wire,
+            isFinal = isFinal,
+            pollB = pollB,
+            log = log,
+            userId = userId,
+            language = language,
+        ).toDomain()
+    }
+
     override suspend fun completeSession(
         sessionId: String,
         userId: String?,
@@ -108,6 +130,7 @@ class ComponentDVoiceRepository(
     private fun mapHttp(e: HttpException): VoiceError {
         val raw = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
         return when (e.code()) {
+            400 -> VoiceError.NoAudioCaptured(parseRejectReasons(raw))
             401, 403 -> VoiceError.Unauthorized
             404 -> VoiceError.SessionIncomplete
             422 -> VoiceError.AudioRejected(parseRejectReasons(raw))

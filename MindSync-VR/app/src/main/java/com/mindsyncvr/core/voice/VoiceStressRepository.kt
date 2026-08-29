@@ -39,6 +39,23 @@ interface VoiceStressRepository {
         phase: SessionPhase,
     ): Result<CompanionReply>
 
+    /**
+     * One spoken conversational turn: uploads the clip, which the server
+     * transcribes (STT) and replies to; on [isFinal] it also scores the clip and
+     * stores it so [completeSession] works. The companion reflects on what the
+     * person actually said — no hardcoded seed text (BUG-2).
+     */
+    suspend fun voiceTurn(
+        sessionId: String,
+        phase: SessionPhase,
+        audio: AudioPayload,
+        isFinal: Boolean,
+        userId: String? = null,
+        language: String? = null,
+        pollB: Boolean = false,
+        log: Boolean = false,
+    ): Result<VoiceTurnResult>
+
     /** Layers 3+4+5 — the final report, after both pre and post analysis exist. */
     suspend fun completeSession(
         sessionId: String,
@@ -67,7 +84,20 @@ class MockVoiceStressRepository : VoiceStressRepository {
 
     override suspend fun ambientCheck(audio: AudioPayload): Result<AmbientResult> {
         delay(200)
-        return Result.success(AmbientResult(ok = true, reasons = emptyList(), metrics = SAMPLE_METRICS))
+        return Result.success(
+            AmbientResult(
+                ok = true, reasons = emptyList(), metrics = SAMPLE_METRICS,
+                score = 88, noiseType = "quiet",
+                checks = listOf(
+                    AmbientCheck("noise_floor", "Background noise", -54.0, "dBFS", true, "fail", "The room is quiet enough for a clean recording."),
+                    AmbientCheck("peaks", "Sudden sounds", -46.0, "dBFS", true, "fail", "No sudden sounds — good."),
+                    AmbientCheck("voices", "Nearby speech", 0.0, "s", true, "fail", "No nearby voices — good."),
+                    AmbientCheck("tonal_noise", "Hum", 0.2, "ratio", true, "warn", "No tonal hum — good."),
+                    AmbientCheck("clipping", "Distortion", 0.0, "ratio", true, "fail", "No distortion — good."),
+                    AmbientCheck("duration", "Sample length", 8.0, "s", true, "fail", "Enough audio to judge — good."),
+                ),
+            ),
+        )
     }
 
     override suspend fun analyzeVoice(
@@ -107,6 +137,36 @@ class MockVoiceStressRepository : VoiceStressRepository {
             "It sounds a little lighter now. What shifted for you in there?"
         }
         return Result.success(CompanionReply(reply))
+    }
+
+    override suspend fun voiceTurn(
+        sessionId: String,
+        phase: SessionPhase,
+        audio: AudioPayload,
+        isFinal: Boolean,
+        userId: String?,
+        language: String?,
+        pollB: Boolean,
+        log: Boolean,
+    ): Result<VoiceTurnResult> {
+        delay(300)
+        val transcript = if (phase == SessionPhase.Pre) {
+            "Honestly today was rough, I barely slept and I've got a deadline hanging over me."
+        } else {
+            "I feel a bit lighter now, my shoulders aren't as tight as before."
+        }
+        val analysis = if (isFinal) analyzeVoice(sessionId, phase, audio, userId, language, pollB, log).getOrNull() else null
+        val reply = if (phase == SessionPhase.Pre) {
+            "It sounds like the deadline and the lost sleep are piling up. What part of it weighs the most?"
+        } else {
+            "That easing in your shoulders is worth noticing. What feels different now?"
+        }
+        return Result.success(
+            VoiceTurnResult(
+                transcript = transcript, reply = reply, crisis = false,
+                accepted = true, reasons = emptyList(), analysis = analysis, sessionId = sessionId,
+            ),
+        )
     }
 
     override suspend fun completeSession(

@@ -38,8 +38,8 @@ fun WearableScreen(state: AppState, actions: MindSyncActions, navigate: (String)
         GlassCard {
             Text("ESP32-S3 target", color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
             Text("Device name: WearableHealthMonitor", color = TextMuted)
-            Text("Service: 9f2d7a10-9c1b-4f3d-8a6e-7b35e2a10000", color = TextMuted, fontSize = 12.sp)
-            Text("Telemetry characteristic: 9f2d7a11-9c1b-4f3d-8a6e-7b35e2a10000", color = TextMuted, fontSize = 12.sp)
+            Text("Service: 7c69f001-7f70-4b0a-9c91-93d7f91b1001", color = TextMuted, fontSize = 12.sp)
+            Text("Telemetry characteristic: 7c69f002-7f70-4b0a-9c91-93d7f91b1001", color = TextMuted, fontSize = 12.sp)
             Text("Telemetry: JSON notifications at about 5 Hz", color = TextMuted, fontSize = 12.sp)
         }
         PrimaryButton(if (state.wearableState == ConnectionState.Scanning) "Scanning..." else "Scan wearable") {
@@ -47,6 +47,30 @@ fun WearableScreen(state: AppState, actions: MindSyncActions, navigate: (String)
                 actions.scanWearables()
             } else {
                 launcher.launch(permissions)
+            }
+        }
+        if (state.wearableDevices.isNotEmpty()) {
+            SectionHeader("Nearby candidates", "Connect the strongest nearby device if the ESP32 name is hidden.")
+            state.wearableDevices.forEachIndexed { index, device ->
+                GlassCard {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                if (index == 0) "${device.name} · strongest" else device.name,
+                                color = TextPrimary,
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text("Address ${device.id}", color = TextMuted, fontSize = 12.sp)
+                            Text("RSSI ${device.rssi} dBm · ${device.firmware}", color = TextMuted)
+                        }
+                        StatusPill("${device.rssi}", if (device.rssi > -70) Green else Amber)
+                    }
+                    SecondaryButton("Connect and verify") {
+                        actions.connectWearable(device.id)
+                        navigate(Routes.WearableDetail)
+                    }
+                }
             }
         }
         state.bleIngestion.lastError?.let { error ->
@@ -62,21 +86,6 @@ fun WearableScreen(state: AppState, actions: MindSyncActions, navigate: (String)
             }
             if (state.bleIngestion.logs.isEmpty()) {
                 Text("Tap scan to see nearby BLE advertisements.", color = TextMuted)
-            }
-        }
-        state.wearableDevices.forEach { device ->
-            GlassCard {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Column {
-                        Text(device.name, color = TextPrimary, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("RSSI ${device.rssi} dBm · ${device.firmware}", color = TextMuted)
-                    }
-                    StatusPill("Nearby", if (device.rssi > -60) Green else Amber)
-                }
-                SecondaryButton("Connect") {
-                    actions.connectWearable(device.id)
-                    navigate(Routes.WearableDetail)
-                }
             }
         }
     }

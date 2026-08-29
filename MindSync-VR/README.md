@@ -136,8 +136,8 @@ Expected BLE contract:
 
 ```text
 Device name: WearableHealthMonitor
-Service UUID: 9f2d7a10-9c1b-4f3d-8a6e-7b35e2a10000
-Telemetry characteristic UUID: 9f2d7a11-9c1b-4f3d-8a6e-7b35e2a10000
+Service UUID: 7c69f001-7f70-4b0a-9c91-93d7f91b1001
+Telemetry characteristic UUID: 7c69f002-7f70-4b0a-9c91-93d7f91b1001
 Characteristic properties: READ + NOTIFY
 Notification frequency: approximately 5 Hz
 ```
@@ -145,19 +145,18 @@ Notification frequency: approximately 5 Hz
 Telemetry notifications use compact UTF-8 JSON so first-stage hardware debugging is readable while staying under practical BLE MTU limits:
 
 ```json
-{"t":123456,"ir":24500,"red":43000,"hr":null,"rr":null,"spo2":null,"nAvg":85000,"nPeak":180000,"temp":null,"bat":null,"flags":0}
+{"ir":24500,"red":43000,"noiseAvg":85000,"noisePeak":180000}
 ```
 
 Field meanings:
 
-- `t`: ESP32 uptime in milliseconds
 - `ir`: MAX30100 IR reading
 - `red`: MAX30100 RED reading
 - `hr`: heart rate BPM, currently `null` until implemented on firmware
 - `rr`: RR interval in milliseconds, currently `null`
 - `spo2`: oxygen saturation percentage, currently `null`
-- `nAvg`: INMP441 noise average magnitude
-- `nPeak`: INMP441 noise peak magnitude
+- `noiseAvg`: INMP441 noise average magnitude
+- `noisePeak`: INMP441 noise peak magnitude
 - `temp`: temperature in Celsius, currently `null`
 - `bat`: battery percentage, currently `null`
 - `flags`: bitmask for sensor/status faults; bit `0` = MAX30100 read issue, bit `1` = microphone issue

@@ -24,13 +24,28 @@ class PersonalBaseline:
     """Per-user stress history -> a relative reading. In-memory here; a
     database would back `history` in production (same as Layers 4/5)."""
 
-    def __init__(self, min_history: int = MIN_HISTORY):
+    def __init__(self, min_history: int = MIN_HISTORY, store=None):
         self.min_history = min_history
         self.history: dict[str, list[float]] = {}
+        # Optional durable backing (componentd.store.ComponentDStore). When set,
+        # observe() writes through so history survives a server restart — the fix
+        # that finally lets MIN_HISTORY be reached across restarts (PROBLEM 6).
+        self.store = store
 
-    def observe(self, user_id: str, stress_score: float) -> None:
-        """Record a reading into this user's baseline history."""
+    def load_history(self, store) -> None:
+        """Reload all per-user history from a durable store at startup."""
+        self.store = store
+        try:
+            self.history = store.load_baseline_history()
+        except Exception as e:  # noqa: BLE001 - fail soft to memory-only
+            print(f"[baseline] load_history failed: {e}")
+
+    def observe(self, user_id: str, stress_score: float,
+                session_id: str | None = None) -> None:
+        """Record a reading into this user's baseline history (and the store)."""
         self.history.setdefault(user_id, []).append(float(stress_score))
+        if self.store is not None:
+            self.store.observe_baseline(user_id, session_id or "", float(stress_score))
 
     def relative(self, user_id: str, stress_score: float) -> dict:
         """Compare `stress_score` to the user's own normal. Call this BEFORE

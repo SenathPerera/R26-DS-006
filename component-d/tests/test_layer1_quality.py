@@ -29,16 +29,42 @@ def vad_half(audio, sr):
     return [{"start": 0, "end": len(audio) // 2}]
 
 
-def quiet(seconds=3.0, level=0.008):
-    """Low-level noise, no speech - a genuinely quiet room."""
+def quiet(seconds=8.0, level=0.0025):
+    """A genuinely quiet room: low broadband noise, no speech, long enough for
+    the ambient step (~8s). ~-52 dBFS floor, comfortably under the gate."""
     rng = np.random.RandomState(0)
     return (level * rng.randn(int(SAMPLE_RATE * seconds))).astype(np.float32)
 
 
-def loud_noise(seconds=3.0, level=0.06):
+def loud_noise(seconds=8.0, level=0.06):
     """Loud background noise (fan/traffic), still no speech."""
     rng = np.random.RandomState(1)
     return (level * rng.randn(int(SAMPLE_RATE * seconds))).astype(np.float32)
+
+
+def tonal_hum(seconds=8.0, freq=120.0, amp=0.011):
+    """A steady low-frequency tone — a fan, AC, motor or building hum. Below the
+    floor gate, tonal (low spectral flatness), energy concentrated <300 Hz."""
+    t = np.linspace(0, seconds, int(SAMPLE_RATE * seconds), endpoint=False)
+    return (amp * np.sin(2 * np.pi * freq * t)).astype(np.float32)
+
+
+def broadband_noise(seconds=8.0, level=0.01):
+    """Steady broadband noise (traffic, rain, crowd) at ~-40 dBFS — flat
+    spectrum, above the floor gate."""
+    rng = np.random.RandomState(2)
+    return (level * rng.randn(int(SAMPLE_RATE * seconds))).astype(np.float32)
+
+
+def quiet_with_transient(seconds=8.0):
+    """A quiet room with one burst of clatter (a door, footsteps) ~0.5s long —
+    the floor is fine but the peaks are not."""
+    a = quiet(seconds)
+    rng = np.random.RandomState(3)
+    start = int(3.0 * SAMPLE_RATE)
+    burst = (0.05 * rng.randn(int(0.5 * SAMPLE_RATE))).astype(np.float32)
+    a[start:start + len(burst)] += burst
+    return a
 
 
 def speech_like(seconds=3.0):
@@ -63,7 +89,7 @@ def test_ambient_fails_when_voice_present():
 
 
 def test_ambient_fails_loud_room_even_without_speech():
-    # Loud fan/traffic noise (no speech) must also fail on the rms floor.
+    # Loud fan/traffic noise (no speech) must also fail on the noise floor.
     r = check_ambient(loud_noise(), vad_fn=vad_none)
     assert not r["ok"]
     assert any("too_noisy" in x for x in r["reasons"])
@@ -73,6 +99,57 @@ def test_ambient_too_short_fails():
     r = check_ambient(quiet(0.3), vad_fn=vad_none)
     assert not r["ok"]
     assert any("too_short" in x for x in r["reasons"])
+
+
+# ---- new: real acoustic analysis (WP1 / PROBLEM 1) -------------------
+def test_ambient_names_a_tonal_hum():
+    # A 120 Hz fan/AC tone must fail AND be classified as a hum, so the
+    # companion can suggest turning off the fan rather than just "it's noisy".
+    r = check_ambient(tonal_hum(), vad_fn=vad_none)
+    assert not r["ok"]
+    assert r["noise_type"] == "hum", r["metrics"]
+    assert any("too_noisy" in x for x in r["reasons"])
+
+
+def test_ambient_names_broadband_noise():
+    # White/broadband noise at ~-40 dBFS must fail and read as broadband.
+    r = check_ambient(broadband_noise(), vad_fn=vad_none)
+    assert not r["ok"]
+    assert r["noise_type"] == "broadband", r["metrics"]
+
+
+def test_ambient_fails_on_transient_peaks():
+    # Quiet floor but a burst of clatter -> the peaks check fails.
+    r = check_ambient(quiet_with_transient(), vad_fn=vad_none)
+    assert not r["ok"]
+    assert any("peaks" in x for x in r["reasons"])
+    peaks = next(c for c in r["checks"] if c["id"] == "peaks")
+    assert not peaks["pass"]
+
+
+def test_ambient_speech_is_one_check_among_several():
+    # Speech detection still works, but is now one of several checks, each
+    # exposed in the structured `checks` array.
+    r = check_ambient(quiet(), vad_fn=vad_full)
+    assert not r["ok"]
+    assert any("voice_detected" in x for x in r["reasons"])
+    assert r["noise_type"] == "voices"
+
+
+def test_ambient_returns_structured_result():
+    # The additive contract the mobile panel renders.
+    r = check_ambient(quiet(), vad_fn=vad_none)
+    assert r["ok"], r["reasons"]
+    assert 0 <= r["score"] <= 100
+    ids = {c["id"] for c in r["checks"]}
+    assert ids == {"noise_floor", "peaks", "voices", "tonal_noise", "clipping", "duration"}
+    for key in ["noise_floor_dbfs", "peak_dbfs", "dynamic_range_db",
+                "spectral_flatness", "low_freq_ratio", "high_freq_ratio",
+                "transient_count"]:
+        assert key in r["metrics"], key
+    # a good score must never override a failed check
+    bad = check_ambient(loud_noise(), vad_fn=vad_none)
+    assert not bad["ok"]
 
 
 # ------------------------------- speech check (expects a voice) ------

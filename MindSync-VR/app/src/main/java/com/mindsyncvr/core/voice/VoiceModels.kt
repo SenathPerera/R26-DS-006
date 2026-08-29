@@ -13,10 +13,37 @@ enum class SessionPhase(val wire: String) { Pre("pre"), Post("post") }
 /** Automatic-capture policy, shared by the recorder (when to stop) and the flow
  *  (whether enough was said). Component D wants natural, ~30s conversational speech. */
 object CaptureParams {
-    const val MIN_SPEECH_SEC = 6      // below this, the companion asks another question
-    const val MAX_SEC = 30            // hard cap on one listening window
-    const val SILENCE_TAIL_SEC = 1.8  // pause after enough speech that ends a turn
-    const val AMBIENT_SEC = 5         // Layer-1 room sample (person stays silent)
+    const val MIN_SPEECH_SEC = 6      // UI hint threshold ("keep going") only
+    const val MAX_SEC = 30            // hard cap on ONE listening window
+    // A turn ends only after a LONG pause following real speech, so the companion
+    // never cuts the person off mid-thought (their #1 complaint). 3.5s of silence
+    // clearly means "done talking"; natural mid-sentence pauses are ~1s.
+    const val SILENCE_TAIL_SEC = 3.5
+    const val AMBIENT_SEC = 8         // Layer-1 room sample (person stays silent) — a deep listen
+
+    // --- turn-taking: let the person FINISH before the companion responds ---
+    // NEVER end a turn (on the speech path) before this many seconds of wall clock,
+    // whatever the VAD thinks — the hard floor that kills the 4-second cutoff (WP2).
+    const val MIN_LISTEN_SEC = 12
+    // A turn only ends after the person has spoken at least this much AND then gone
+    // quiet for SILENCE_TAIL_SEC — so a natural mid-thought pause never cuts them off.
+    const val TURN_END_SPEECH_SEC = 4
+
+    // Adaptive speech threshold = measured room noise floor × this, clamped. A fixed
+    // threshold is wrong both ways (too high for a soft speaker in a quiet room, too
+    // low in a noisy one); anchoring to the floor fixes both (WP2).
+    const val THRESHOLD_FLOOR_MULT = 4.0
+    const val THRESHOLD_MIN = 0.006
+    const val THRESHOLD_MAX = 0.030
+    // If the person says nothing at all, end the turn here so the companion can
+    // gently re-ask instead of holding the mic open for the full MAX_SEC.
+    const val NO_SPEECH_TIMEOUT_SEC = 10
+    // Enough CUMULATIVE voiced speech (across turns) to score. Tune on real hardware.
+    const val TARGET_SPEECH_SEC = 10
+    // The companion asks between MIN and MAX questions: at least two so the reading
+    // rests on more than one answer, at most three so it never drags (per spec).
+    const val MIN_TURNS = 2
+    const val MAX_TURNS = 3
 }
 
 /**
@@ -50,13 +77,30 @@ data class AudioMetrics(
     val speechSeconds: Double,
     val speechFraction: Double,
     val speechSegments: Int,
+    val noiseFloorRms: Double? = null,   // Layer-1 steady floor (ambient only), for the adaptive VAD threshold
 )
 
-/** Layer 1 — room quality gate before a real recording. */
+/** One Layer-1 acoustic check the app can render as a row (WP1). severity
+ *  "fail" gates the room; "warn" is advisory. */
+data class AmbientCheck(
+    val id: String,
+    val label: String,
+    val value: Double,
+    val unit: String,
+    val pass: Boolean,
+    val severity: String,   // "fail" | "warn"
+    val message: String,
+)
+
+/** Layer 1 — room quality gate before a real recording. [score]/[noiseType]/
+ *  [checks] are additive (older servers omit them; defaults keep the app working). */
 data class AmbientResult(
     val ok: Boolean,
     val reasons: List<String>,
     val metrics: AudioMetrics?,
+    val score: Int = 0,
+    val noiseType: String = "quiet",     // quiet | hum | broadband | hiss | intermittent | voices
+    val checks: List<AmbientCheck> = emptyList(),
 )
 
 /** Component B's ordinal reading echoed by /infer when poll_b=true (else null). */
@@ -83,6 +127,22 @@ data class VoiceAnalysis(
 )
 
 data class CompanionReply(val reply: String)
+
+/**
+ * One turn of `/companion/voice-turn`: the STT transcript of what the person
+ * said, the companion's spoken reply, whether Layer 1 accepted the clip, and —
+ * only on the final (is_final=true) call — the scored [analysis]. [crisis] is
+ * true when the transcript tripped the server's crisis net (reply == CRISIS_REPLY).
+ */
+data class VoiceTurnResult(
+    val transcript: String,
+    val reply: String,
+    val crisis: Boolean,
+    val accepted: Boolean,
+    val reasons: List<String>,
+    val analysis: VoiceAnalysis?,
+    val sessionId: String,
+)
 
 /** Layer 3 — within-speaker pre→post change (the primary, reliable signal). */
 data class StressComparison(

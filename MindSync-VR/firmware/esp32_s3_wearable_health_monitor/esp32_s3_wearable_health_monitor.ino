@@ -1,315 +1,377 @@
-#include <Arduino.h>
 #include <Wire.h>
-#include <driver/i2s.h>
-#include <BLE2902.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLEUtils.h>
+#include <ESP_I2S.h>
+#include <NimBLEDevice.h>
 
-namespace Pins {
-constexpr int MaxSda = 1;
-constexpr int MaxScl = 2;
-constexpr int MicSck = 6;
-constexpr int MicWs = 7;
-constexpr int MicSd = 8;
-}
+// =====================================================
+// PINS
+// =====================================================
 
-namespace BleContract {
-constexpr const char* DeviceName = "WearableHealthMonitor";
-constexpr const char* ServiceUuid = "9f2d7a10-9c1b-4f3d-8a6e-7b35e2a10000";
-constexpr const char* TelemetryCharacteristicUuid = "9f2d7a11-9c1b-4f3d-8a6e-7b35e2a10000";
-}
+// MAX30100
+#define SDA_PIN 1
+#define SCL_PIN 2
 
-namespace Max30100 {
-constexpr uint8_t Address = 0x57;
-constexpr uint8_t RegInterruptStatus = 0x00;
-constexpr uint8_t RegFifoWritePointer = 0x02;
-constexpr uint8_t RegOverflowCounter = 0x03;
-constexpr uint8_t RegFifoReadPointer = 0x04;
-constexpr uint8_t RegFifoData = 0x05;
-constexpr uint8_t RegModeConfig = 0x06;
-constexpr uint8_t RegSpo2Config = 0x07;
-constexpr uint8_t RegLedConfig = 0x09;
-constexpr uint8_t RegPartId = 0xFF;
-}
+// INMP441
+#define I2S_SCK 6
+#define I2S_WS  7
+#define I2S_SD  8
 
-struct Telemetry {
-  uint32_t timestampMs = 0;
-  uint32_t ir = 0;
-  uint32_t red = 0;
-  uint32_t noiseAverage = 0;
-  uint32_t noisePeak = 0;
-  int statusFlags = 0;
+// =====================================================
+// MAX30100 REGISTERS
+// =====================================================
+
+#define MAX30100_ADDR       0x57
+#define REG_FIFO_WR_PTR     0x02
+#define REG_OVF_COUNTER     0x03
+#define REG_FIFO_RD_PTR     0x04
+#define REG_FIFO_DATA       0x05
+#define REG_MODE_CONFIG     0x06
+#define REG_SPO2_CONFIG     0x07
+#define REG_LED_CONFIG      0x09
+#define REG_PART_ID         0xFF
+
+// =====================================================
+// BLE UUIDs
+// =====================================================
+
+#define SERVICE_UUID        "7c69f001-7f70-4b0a-9c91-93d7f91b1001"
+#define TELEMETRY_UUID      "7c69f002-7f70-4b0a-9c91-93d7f91b1001"
+
+// =====================================================
+// GLOBALS
+// =====================================================
+
+I2SClass I2S;
+
+NimBLEServer* bleServer = nullptr;
+NimBLECharacteristic* telemetryCharacteristic = nullptr;
+
+bool bleConnected = false;
+
+uint16_t latestIR = 0;
+uint16_t latestRED = 0;
+
+long latestNoiseAvg = 0;
+long latestNoisePeak = 0;
+
+unsigned long lastSerialPrint = 0;
+unsigned long lastBleSend = 0;
+
+// =====================================================
+// BLE CALLBACKS
+// =====================================================
+
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo) override {
+    bleConnected = true;
+    Serial.println("BLE connected");
+  }
+
+  void onDisconnect(NimBLEServer* pServer, NimBLEConnInfo& connInfo, int reason) override {
+    bleConnected = false;
+    Serial.println("BLE disconnected");
+    NimBLEDevice::startAdvertising();
+  }
 };
 
-BLEServer* bleServer = nullptr;
-BLECharacteristic* telemetryCharacteristic = nullptr;
-bool phoneConnected = false;
-bool previousPhoneConnected = false;
-Telemetry latestTelemetry;
+// =====================================================
+// MAX30100 HELPERS
+// =====================================================
 
-constexpr uint32_t PpgSampleIntervalMs = 10;
-constexpr uint32_t NoiseSampleIntervalMs = 40;
-constexpr uint32_t BleNotifyIntervalMs = 200;
-constexpr int I2sSampleRateHz = 16000;
-constexpr int I2sReadSamples = 128;
-constexpr i2s_port_t I2sPort = I2S_NUM_0;
-
-uint32_t lastPpgSampleAt = 0;
-uint32_t lastNoiseSampleAt = 0;
-uint32_t lastBleNotifyAt = 0;
-uint32_t lastSerialPrintAt = 0;
-
-bool writeRegister(uint8_t reg, uint8_t value) {
-  Wire.beginTransmission(Max30100::Address);
+void writeMAX(byte reg, byte value) {
+  Wire.beginTransmission(MAX30100_ADDR);
   Wire.write(reg);
   Wire.write(value);
-  return Wire.endTransmission() == 0;
+  Wire.endTransmission();
 }
 
-bool readRegister(uint8_t reg, uint8_t& value) {
-  Wire.beginTransmission(Max30100::Address);
+byte readMAX(byte reg) {
+  Wire.beginTransmission(MAX30100_ADDR);
   Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(Max30100::Address, static_cast<uint8_t>(1)) != 1) return false;
-  value = Wire.read();
-  return true;
+
+  if (Wire.endTransmission(false) != 0) {
+    return 0;
+  }
+
+  Wire.requestFrom(MAX30100_ADDR, (uint8_t)1);
+
+  if (Wire.available()) {
+    return Wire.read();
+  }
+
+  return 0;
 }
 
-bool readBurst(uint8_t reg, uint8_t* buffer, size_t length) {
-  Wire.beginTransmission(Max30100::Address);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(Max30100::Address, static_cast<uint8_t>(length)) != length) return false;
-  for (size_t i = 0; i < length; i++) {
-    buffer[i] = Wire.read();
-  }
-  return true;
-}
+// =====================================================
+// SETUP MAX30100
+// =====================================================
 
-bool initMax30100() {
-  Wire.begin(Pins::MaxSda, Pins::MaxScl);
-  Wire.setClock(400000);
-  delay(50);
+void setupMAX30100() {
+  Wire.begin(SDA_PIN, SCL_PIN);
+  Wire.setClock(100000);
 
-  uint8_t partId = 0;
-  if (!readRegister(Max30100::RegPartId, partId)) {
-    Serial.println("MAX30100: Part ID read failed");
-    return false;
+  byte partID = readMAX(REG_PART_ID);
+
+  Serial.print("MAX30100 Part ID: 0x");
+  Serial.println(partID, HEX);
+
+  if (partID == 0x11) {
+    Serial.println("MAX30100 detected OK");
+  } else {
+    Serial.println("WARNING: MAX30100 not detected correctly");
   }
 
-  Serial.printf("MAX30100: Part ID 0x%02X\n", partId);
-  if (partId != 0x11) {
-    Serial.println("MAX30100: Unexpected Part ID; continuing because wiring may still be correct");
-  }
-
-  writeRegister(Max30100::RegModeConfig, 0x40);
+  // Reset
+  writeMAX(REG_MODE_CONFIG, 0x40);
   delay(100);
-  writeRegister(Max30100::RegFifoWritePointer, 0x00);
-  writeRegister(Max30100::RegOverflowCounter, 0x00);
-  writeRegister(Max30100::RegFifoReadPointer, 0x00);
-  writeRegister(Max30100::RegSpo2Config, 0x47);
-  writeRegister(Max30100::RegLedConfig, 0x5F);
-  writeRegister(Max30100::RegModeConfig, 0x03);
 
-  uint8_t ignored = 0;
-  readRegister(Max30100::RegInterruptStatus, ignored);
-  Serial.println("MAX30100: initialized on SDA GPIO1 / SCL GPIO2");
-  return true;
+  // Clear FIFO
+  writeMAX(REG_FIFO_WR_PTR, 0x00);
+  writeMAX(REG_OVF_COUNTER, 0x00);
+  writeMAX(REG_FIFO_RD_PTR, 0x00);
+
+  // 100 samples/sec, high resolution
+  writeMAX(REG_SPO2_CONFIG, 0x47);
+
+  // IMPORTANT:
+  // Reduced LED current for battery stability test.
+  writeMAX(REG_LED_CONFIG, 0x55);
+
+  // SpO2 mode = RED + IR
+  writeMAX(REG_MODE_CONFIG, 0x03);
+
+  Serial.println("MAX30100 configured with LED current 0x55");
 }
 
-bool readMax30100Sample(uint32_t& ir, uint32_t& red) {
-  uint8_t bytes[4] = {0};
-  if (!readBurst(Max30100::RegFifoData, bytes, sizeof(bytes))) {
-    return false;
-  }
+// =====================================================
+// SETUP INMP441
+// =====================================================
 
-  ir = (static_cast<uint16_t>(bytes[0]) << 8) | bytes[1];
-  red = (static_cast<uint16_t>(bytes[2]) << 8) | bytes[3];
-  return true;
-}
-
-bool initInmp441() {
-  i2s_config_t i2sConfig = {
-    .mode = static_cast<i2s_mode_t>(I2S_MODE_MASTER | I2S_MODE_RX),
-    .sample_rate = I2sSampleRateHz,
-    .bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT,
-    .channel_format = I2S_CHANNEL_FMT_ONLY_LEFT,
-    .communication_format = I2S_COMM_FORMAT_STAND_I2S,
-    .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-    .dma_buf_count = 4,
-    .dma_buf_len = 256,
-    .use_apll = false,
-    .tx_desc_auto_clear = false,
-    .fixed_mclk = 0
-  };
-
-  i2s_pin_config_t pinConfig = {
-    .bck_io_num = Pins::MicSck,
-    .ws_io_num = Pins::MicWs,
-    .data_out_num = I2S_PIN_NO_CHANGE,
-    .data_in_num = Pins::MicSd
-  };
-
-  esp_err_t result = i2s_driver_install(I2sPort, &i2sConfig, 0, nullptr);
-  if (result != ESP_OK) {
-    Serial.printf("INMP441: i2s_driver_install failed: %d\n", result);
-    return false;
-  }
-
-  result = i2s_set_pin(I2sPort, &pinConfig);
-  if (result != ESP_OK) {
-    Serial.printf("INMP441: i2s_set_pin failed: %d\n", result);
-    return false;
-  }
-
-  i2s_zero_dma_buffer(I2sPort);
-  Serial.println("INMP441: initialized LEFT channel on SCK GPIO6 / WS GPIO7 / SD GPIO8");
-  return true;
-}
-
-void readNoiseWindow(uint32_t& average, uint32_t& peak) {
-  int32_t samples[I2sReadSamples];
-  size_t bytesRead = 0;
-  esp_err_t result = i2s_read(I2sPort, samples, sizeof(samples), &bytesRead, 2 / portTICK_PERIOD_MS);
-  if (result != ESP_OK || bytesRead == 0) {
-    return;
-  }
-
-  const int count = bytesRead / sizeof(int32_t);
-  uint64_t sum = 0;
-  uint32_t maxValue = 0;
-  for (int i = 0; i < count; i++) {
-    int32_t sample = samples[i] >> 8;
-    uint32_t magnitude = abs(sample);
-    sum += magnitude;
-    if (magnitude > maxValue) maxValue = magnitude;
-  }
-
-  average = static_cast<uint32_t>(sum / count);
-  peak = maxValue;
-}
-
-class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* server) override {
-    phoneConnected = true;
-    Serial.println("BLE: phone connected");
-  }
-
-  void onDisconnect(BLEServer* server) override {
-    phoneConnected = false;
-    Serial.println("BLE: phone disconnected");
-  }
-};
-
-void initBle() {
-  BLEDevice::init(BleContract::DeviceName);
-  BLEDevice::setMTU(185);
-  bleServer = BLEDevice::createServer();
-  bleServer->setCallbacks(new ServerCallbacks());
-
-  BLEService* service = bleServer->createService(BleContract::ServiceUuid);
-  telemetryCharacteristic = service->createCharacteristic(
-    BleContract::TelemetryCharacteristicUuid,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY
+void setupMicrophone() {
+  I2S.setPins(
+    I2S_SCK,
+    I2S_WS,
+    -1,
+    I2S_SD
   );
-  telemetryCharacteristic->addDescriptor(new BLE2902());
-  service->start();
 
-  BLEAdvertising* advertising = BLEDevice::getAdvertising();
-  advertising->addServiceUUID(BleContract::ServiceUuid);
-  advertising->setScanResponse(true);
-  advertising->setMinPreferred(0x06);
-  advertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
-  Serial.printf("BLE: advertising as %s\n", BleContract::DeviceName);
-}
-
-String buildTelemetryJson(const Telemetry& telemetry) {
-  char buffer[176];
-  snprintf(
-    buffer,
-    sizeof(buffer),
-    "{\"t\":%lu,\"ir\":%lu,\"red\":%lu,\"hr\":null,\"rr\":null,\"spo2\":null,\"nAvg\":%lu,\"nPeak\":%lu,\"temp\":null,\"bat\":null,\"flags\":%d}",
-    static_cast<unsigned long>(telemetry.timestampMs),
-    static_cast<unsigned long>(telemetry.ir),
-    static_cast<unsigned long>(telemetry.red),
-    static_cast<unsigned long>(telemetry.noiseAverage),
-    static_cast<unsigned long>(telemetry.noisePeak),
-    telemetry.statusFlags
+  bool micOK = I2S.begin(
+    I2S_MODE_STD,
+    16000,
+    I2S_DATA_BIT_WIDTH_32BIT,
+    I2S_SLOT_MODE_STEREO
   );
-  return String(buffer);
-}
 
-void notifyTelemetry() {
-  if (!phoneConnected || telemetryCharacteristic == nullptr) return;
-
-  String payload = buildTelemetryJson(latestTelemetry);
-  telemetryCharacteristic->setValue(payload.c_str());
-  telemetryCharacteristic->notify();
-}
-
-void setup() {
-  Serial.begin(115200);
-  delay(500);
-  Serial.println();
-  Serial.println("WearableHealthMonitor ESP32-S3 Mini starting");
-
-  bool maxReady = initMax30100();
-  bool micReady = initInmp441();
-  latestTelemetry.statusFlags = (maxReady ? 0 : 1) | (micReady ? 0 : 2);
-
-  initBle();
-}
-
-void loop() {
-  uint32_t now = millis();
-
-  if (now - lastPpgSampleAt >= PpgSampleIntervalMs) {
-    lastPpgSampleAt = now;
-    uint32_t ir = 0;
-    uint32_t red = 0;
-    if (readMax30100Sample(ir, red)) {
-      latestTelemetry.timestampMs = now;
-      latestTelemetry.ir = ir;
-      latestTelemetry.red = red;
-      latestTelemetry.statusFlags &= ~1;
-    } else {
-      latestTelemetry.statusFlags |= 1;
+  if (!micOK) {
+    Serial.println("INMP441 failed to start");
+    while (1) {
+      delay(1000);
     }
   }
 
-  if (now - lastNoiseSampleAt >= NoiseSampleIntervalMs) {
-    lastNoiseSampleAt = now;
-    uint32_t average = latestTelemetry.noiseAverage;
-    uint32_t peak = latestTelemetry.noisePeak;
-    readNoiseWindow(average, peak);
-    latestTelemetry.noiseAverage = average;
-    latestTelemetry.noisePeak = peak;
+  Serial.println("INMP441 started OK");
+}
+
+// =====================================================
+// SETUP BLE
+// =====================================================
+
+void setupBLE() {
+  NimBLEDevice::init("WearableHealthMonitor");
+
+  bleServer = NimBLEDevice::createServer();
+  bleServer->setCallbacks(new ServerCallbacks());
+
+  NimBLEService* service =
+    bleServer->createService(SERVICE_UUID);
+
+  telemetryCharacteristic =
+    service->createCharacteristic(
+      TELEMETRY_UUID,
+      NIMBLE_PROPERTY::READ |
+      NIMBLE_PROPERTY::NOTIFY
+    );
+
+  telemetryCharacteristic->setValue(
+    "{\"status\":\"ready\"}"
+  );
+
+  service->start();
+
+  NimBLEAdvertising* advertising =
+    NimBLEDevice::getAdvertising();
+
+  advertising->addServiceUUID(SERVICE_UUID);
+  advertising->setName("WearableHealthMonitor");
+
+  advertising->start();
+
+  Serial.println("BLE advertising started");
+}
+
+// =====================================================
+// READ MAX30100
+// =====================================================
+
+void readMAX30100() {
+  byte writePointer = readMAX(REG_FIFO_WR_PTR);
+  byte readPointer  = readMAX(REG_FIFO_RD_PTR);
+
+  int samplesAvailable =
+    (writePointer - readPointer) & 0x0F;
+
+  while (samplesAvailable > 0) {
+    Wire.beginTransmission(MAX30100_ADDR);
+    Wire.write(REG_FIFO_DATA);
+    Wire.endTransmission(false);
+
+    Wire.requestFrom(
+      MAX30100_ADDR,
+      (uint8_t)4
+    );
+
+    if (Wire.available() >= 4) {
+      latestIR =
+        ((uint16_t)Wire.read() << 8) |
+        Wire.read();
+
+      latestRED =
+        ((uint16_t)Wire.read() << 8) |
+        Wire.read();
+    }
+
+    samplesAvailable--;
+  }
+}
+
+// =====================================================
+// READ INMP441
+// =====================================================
+
+void readMicrophone() {
+  int32_t audioSamples[256];
+
+  size_t bytesRead =
+    I2S.readBytes(
+      (char*)audioSamples,
+      sizeof(audioSamples)
+    );
+
+  int sampleCount =
+    bytesRead / sizeof(int32_t);
+
+  int64_t totalLeft = 0;
+  int32_t peak = 0;
+  int leftCount = 0;
+
+  for (int i = 0; i + 1 < sampleCount; i += 2) {
+    int32_t leftSample =
+      audioSamples[i] >> 8;
+
+    int64_t absValue = leftSample;
+
+    if (absValue < 0) {
+      absValue = -absValue;
+    }
+
+    totalLeft += absValue;
+    leftCount++;
+
+    if (absValue > peak) {
+      peak = absValue;
+    }
   }
 
-  if (now - lastBleNotifyAt >= BleNotifyIntervalMs) {
-    lastBleNotifyAt = now;
-    notifyTelemetry();
+  latestNoiseAvg =
+    leftCount > 0
+      ? totalLeft / leftCount
+      : 0;
+
+  latestNoisePeak = peak;
+}
+
+// =====================================================
+// SEND BLE TELEMETRY
+// =====================================================
+
+void sendBLETelemetry() {
+  if (!bleConnected) {
+    return;
   }
 
-  if (!phoneConnected && previousPhoneConnected) {
-    delay(100);
-    BLEDevice::startAdvertising();
-    Serial.println("BLE: advertising resumed");
-  }
-  previousPhoneConnected = phoneConnected;
+  char payload[160];
 
-  if (now - lastSerialPrintAt >= 1000) {
-    lastSerialPrintAt = now;
-    Serial.printf(
-      "IR: %lu | RED: %lu | NOISE AVG: %lu | NOISE PEAK: %lu | BLE: %s | FLAGS: %d\n",
-      static_cast<unsigned long>(latestTelemetry.ir),
-      static_cast<unsigned long>(latestTelemetry.red),
-      static_cast<unsigned long>(latestTelemetry.noiseAverage),
-      static_cast<unsigned long>(latestTelemetry.noisePeak),
-      phoneConnected ? "connected" : "advertising",
-      latestTelemetry.statusFlags
+  snprintf(
+    payload,
+    sizeof(payload),
+    "{\"ir\":%u,\"red\":%u,\"noiseAvg\":%ld,\"noisePeak\":%ld}",
+    latestIR,
+    latestRED,
+    latestNoiseAvg,
+    latestNoisePeak
+  );
+
+  telemetryCharacteristic->setValue(payload);
+  telemetryCharacteristic->notify();
+}
+
+// =====================================================
+// SETUP
+// =====================================================
+
+void setup() {
+  Serial.begin(115200);
+  delay(2000);
+
+  Serial.println();
+  Serial.println("======================================");
+  Serial.println("BATTERY STABILITY + BLE SENSOR TEST");
+  Serial.println("======================================");
+
+  setupMAX30100();
+  setupMicrophone();
+  setupBLE();
+
+  Serial.println();
+  Serial.println("System ready");
+  Serial.println("MAX30100 LED current = 0x55");
+  Serial.println();
+}
+
+// =====================================================
+// LOOP
+// =====================================================
+
+void loop() {
+  readMAX30100();
+  readMicrophone();
+
+  // BLE telemetry every 200 ms
+  if (millis() - lastBleSend >= 200) {
+    lastBleSend = millis();
+    sendBLETelemetry();
+  }
+
+  // Serial debug every 500 ms
+  if (millis() - lastSerialPrint >= 500) {
+    lastSerialPrint = millis();
+
+    Serial.print("IR: ");
+    Serial.print(latestIR);
+
+    Serial.print(" | RED: ");
+    Serial.print(latestRED);
+
+    Serial.print(" | NOISE AVG: ");
+    Serial.print(latestNoiseAvg);
+
+    Serial.print(" | NOISE PEAK: ");
+    Serial.print(latestNoisePeak);
+
+    Serial.print(" | BLE: ");
+    Serial.println(
+      bleConnected ? "CONNECTED" : "WAITING"
     );
   }
+
+  delay(5);
 }
