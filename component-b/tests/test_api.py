@@ -8,8 +8,10 @@ that assumes `level` is always present breaks on a merged band.
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from server.main import app
+from server.schemas.messages import PPGBatch
 from server.state import latest
 
 POINT = {
@@ -70,6 +72,75 @@ def client():
 
 def test_health(client):
     assert client.get("/health").json() == {"status": "ok"}
+
+
+def test_ingest_contract_accepts_exact_component_b_frame():
+    frame = PPGBatch(
+        timestamp=1787282838.4,
+        sample_rate=64.0,
+        ppg=[1834.2] * 960,
+        temperature=33.7,
+    )
+
+    assert len(frame.ppg) == 960
+    assert frame.temperature == 33.7
+
+
+@pytest.mark.parametrize(
+    ("patch", "field"),
+    [
+        ({"ppg": [1834.2] * 959}, "ppg"),
+        ({"ppg": [1834.2] * 961}, "ppg"),
+        ({"sample_rate": 100.0}, "sample_rate"),
+        ({"timestamp": float("nan")}, "timestamp"),
+        ({"temperature": float("inf")}, "temperature"),
+    ],
+)
+def test_ingest_contract_rejects_malformed_frames(patch, field):
+    payload = {
+        "timestamp": 1787282838.4,
+        "sample_rate": 64.0,
+        "ppg": [1834.2] * 960,
+        "temperature": None,
+        **patch,
+    }
+
+    with pytest.raises(ValidationError) as exc:
+        PPGBatch.model_validate(payload)
+
+    assert any(error["loc"] == (field,) for error in exc.value.errors())
+
+
+def test_ingest_socket_rejects_bad_frame_then_accepts_next(client, monkeypatch):
+    monkeypatch.setattr("server.main.new_stream", lambda: None)
+    monkeypatch.setattr("server.main.unavailable_reason", lambda: "test model unavailable")
+    monkeypatch.setattr("server.main.ppg_to_rr", lambda _ppg, _rate: (None, None, None))
+
+    with client.websocket_connect("/ingest") as websocket:
+        assert websocket.receive_json()["status"] == "model_unavailable"
+
+        websocket.send_json({
+            "timestamp": 1787282838.4,
+            "sample_rate": 64.0,
+            "ppg": [1834.2] * 20,
+            "temperature": 33.7,
+        })
+        assert websocket.receive_json()["status"] == "invalid_batch"
+
+        websocket.send_json({
+            "timestamp": 1787282838.4,
+            "sample_rate": 64.0,
+            "ppg": [1834.2] * 960,
+            "temperature": None,
+        })
+        accepted = websocket.receive_json()
+        assert accepted == {
+            "status": "accepted",
+            "timestamp": 1787282838.4,
+            "samples": 960,
+        }
+        waiting = websocket.receive_json()
+        assert waiting["status"] == "waiting_for_temperature"
 
 
 def test_latest_is_503_before_first_window(client):

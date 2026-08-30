@@ -50,10 +50,44 @@ export interface WearableTelemetry {
   receivedAt: number;
 }
 
+export interface RawPpgSample {
+  timestampMs: number;
+  irValue: number;
+}
+
+export interface RawPpgBatch {
+  samples: RawPpgSample[];
+  receivedAtMs: number;
+}
+
 export interface BleIngestionState {
   isStreaming: boolean;
   telemetry: WearableTelemetry | null;
   telemetryCount: number;
+  lastError: string | null;
+  logs: string[];
+}
+
+export type ComponentBConnectionState = 'idle' | 'connecting' | 'connected' | 'reconnecting' | 'error';
+
+export interface ComponentBFrame {
+  timestamp: number;
+  sample_rate: 64.0;
+  ppg: number[];
+  temperature: number | null;
+}
+
+export interface ComponentBPipelineState {
+  endpoint: string;
+  connectionState: ComponentBConnectionState;
+  rawCharacteristicAvailable: boolean;
+  rawSamplesReceived: number;
+  frameSamplesBuffered: number;
+  framesQueued: number;
+  framesSent: number;
+  framesAcknowledged: number;
+  lastFrameTimestamp: number | null;
+  lastBackendMessage: string | null;
   lastError: string | null;
   logs: string[];
 }

@@ -115,17 +115,30 @@ The app matches the firmware in:
 - Device name: `WearableHealthMonitor`
 - Service: `7c69f001-7f70-4b0a-9c91-93d7f91b1001`
 - Telemetry characteristic: `7c69f002-7f70-4b0a-9c91-93d7f91b1001`
+- Raw PPG characteristic: `7c69f003-7f70-4b0a-9c91-93d7f91b1001`
 - Properties: read and notify
-- Update rate: approximately 5 Hz
-- Encoding: UTF-8 JSON inside the BLE notification value
+- UI telemetry rate: approximately 5 Hz
+- Raw PPG rate: five timestamped samples per binary notification, approximately 20 notifications/s at the MAX30100's 100 Hz acquisition rate
 
 Current packet:
 
 ```json
-{"ir":24500,"red":43000,"noiseAvg":85000,"noisePeak":180000}
+{"t":1097073,"ir":24500,"red":43000,"noiseAvg":85000,"noisePeak":180000,"temp":33.7,"flags":7}
 ```
 
-The parser also accepts future compact fields: `t`, `hr`, `rr`, `spo2`, `temp`, `bat`, and `flags`. Missing future measurements remain `null`; the app does not invent BPM, RR, SpO2, temperature, or battery values.
+`temp` is a TMP117 reading in degrees Celsius. It is `null` when the sensor is absent or has not produced a valid reading. The parser also accepts future compact fields `hr`, `rr`, `spo2`, and `bat`. Missing measurements remain `null`; the app does not invent BPM, RR, SpO2, temperature, or battery values.
+
+The firmware expects the Component B TMP117 at I2C address `0x48`, sharing the existing bus: SDA to GPIO1, SCL to GPIO2, VIN to 3V3, and GND to GND. A different temperature-sensor model requires a matching firmware driver; do not relabel another sensor's bytes as TMP117 data.
+
+The raw PPG characteristic is fixed-width, binary, and little-endian. Its 41-byte packet layout is:
+
+| Offset | Size | Field |
+| --- | ---: | --- |
+| 0 | 1 | Valid sample count, 1 through 5 |
+| 1 + n*8 | 4 | Sample `n` ESP32 uptime in milliseconds, unsigned 32-bit |
+| 5 + n*8 | 4 | Sample `n` raw IR amplitude, unsigned 32-bit |
+
+Only the first `sample_count` slots are valid. Remaining slots are zero-filled and ignored. The app requests MTU 185 before subscribing, validates all packets, handles the ESP32 uptime rollover, and discards partial research frames when acquisition gaps are detected.
 
 Android scanning is intentionally unfiltered at the scanner level. Some phones omit the ESP32 name and service UUID from scan callbacks. Verified advertisements are ranked first; strong anonymous candidates can be selected, but the app reports Connected only after discovering the exact service and notifiable telemetry characteristic.
 
@@ -140,6 +153,49 @@ cd ios
 bundle install
 bundle exec pod install
 ```
+
+## Component B Live Pipeline
+
+Component B already exposes the `/ingest` WebSocket and remains the only process that derives RR intervals, HRV, and stress. The mobile app performs transport framing only:
+
+```text
+MAX30100 100 Hz FIFO
+  -> raw PPG BLE batches
+  -> safe little-endian parser
+  -> timestamp-aware linear resampling to 64 Hz
+  -> 960-sample / 15-second frame
+  -> Component B ws://<host>:8000/ingest
+```
+
+The outbound shape is shown below with the PPG array abbreviated:
+
+```json
+{"timestamp":1787282838.4,"sample_rate":64.0,"ppg":[1834.2,1836.1],"temperature":33.7}
+```
+
+The real `ppg` array always contains exactly 960 finite amplitudes. `timestamp` is the frame start in POSIX seconds. `temperature` is the latest real TMP117 value or `null`. The app never fills missing source data by repeating the latest UI telemetry value; a raw-sample discontinuity resets the partial frame.
+
+Start Component B from the repository root:
+
+```bash
+cd component-b
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+# macOS only
+brew install libomp
+PYTHONPATH=src uvicorn server.main:app --host 0.0.0.0 --port 8000
+```
+
+For a USB-connected Android phone, keep the default endpoint and forward the port:
+
+```bash
+adb reverse tcp:8000 tcp:8000
+```
+
+For a standalone phone on Wi-Fi, open Wearable detail and set the Component B endpoint to `ws://<laptop-LAN-IP>:8000/ingest`. The phone and backend must be on the same network and the laptop firewall must permit TCP port 8000. Internal Android research builds allow local cleartext WebSockets; production distribution must use `wss://` and disable cleartext traffic.
+
+The wearable detail screen reports raw samples buffered, frames sent, backend acknowledgements, reconnect state, and backend errors separately. Component B responds with `accepted`, `invalid_batch`, or `model_unavailable`; an invalid frame does not close the socket.
 
 ## Component D
 
@@ -173,6 +229,9 @@ Physical BLE test:
 4. Open Wearable, grant Bluetooth permissions, and scan.
 5. Select `WearableHealthMonitor`, or the strongest anonymous candidate when Android hides its advertisement.
 6. Confirm Connected and live IR, RED, noise average, and noise peak values.
-7. Power off the wearable and confirm graceful disconnection/reconnect behavior.
+7. Confirm temperature changes from `Unavailable` to a real TMP117 reading when that sensor is attached.
+8. Confirm Raw BLE stream is Available and the Component B frame counter advances to 960.
+9. After about 15 seconds, confirm Frames sent and Accepted both increase.
+10. Power off the wearable and confirm graceful BLE and Component B reset/reconnect behavior.
 
 `npm audit` currently reports advisories through React Native's Metro `image-size` build dependency. The automatic forced fix proposes downgrading core React Native and is therefore not applied. Recheck this when the matching React Native/Metro patch release is available.

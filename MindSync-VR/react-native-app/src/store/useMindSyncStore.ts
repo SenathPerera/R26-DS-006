@@ -2,11 +2,14 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {create} from 'zustand';
 import {createJSONStorage, persist} from 'zustand/middleware';
 import {demoSessions, demoUser, questionnaireTemplates} from '../constants/mockData';
+import {environment} from '../config/environment';
 import {componentDService} from '../services/api/componentDService';
 import {WEARABLE_DEVICE_NAME, wearableBleService} from '../services/ble/wearableBleService';
+import {componentBPipelineService} from '../services/componentB/componentBPipelineService';
 import {unityBridge} from '../services/unity/unityBridge';
 import {
   BleIngestionState,
+  ComponentBPipelineState,
   ConnectionState,
   MeditationSession,
   OnboardingProfile,
@@ -28,6 +31,21 @@ const emptyBle: BleIngestionState = {
   isStreaming: false, telemetry: null, telemetryCount: 0, lastError: null, logs: [],
 };
 
+const emptyComponentB: ComponentBPipelineState = {
+  endpoint: environment.componentBIngestUrl,
+  connectionState: 'idle',
+  rawCharacteristicAvailable: false,
+  rawSamplesReceived: 0,
+  frameSamplesBuffered: 0,
+  framesQueued: 0,
+  framesSent: 0,
+  framesAcknowledged: 0,
+  lastFrameTimestamp: null,
+  lastBackendMessage: null,
+  lastError: null,
+  logs: [],
+};
+
 const emptyVoice: VoiceCheckInState = {
   stage: 'intro', backendHealthy: null, personName: '', language: 'english', sessionId: null, busy: false, error: null,
 };
@@ -40,6 +58,7 @@ type MindSyncStore = {
   selectedWearable: WearableDevice | null;
   wearableState: ConnectionState;
   ble: BleIngestionState;
+  componentB: ComponentBPipelineState;
   vrStatus: VrStatus;
   pairingCode: string | null;
   sessions: MeditationSession[];
@@ -57,6 +76,7 @@ type MindSyncStore = {
   scanWearables: () => Promise<void>;
   connectWearable: (device: WearableDevice) => Promise<void>;
   disconnectWearable: () => Promise<void>;
+  setComponentBEndpoint: (endpoint: string) => void;
   pairVr: () => void;
   createSession: () => MeditationSession;
   setSessionStatus: (status: MindSyncStore['sessionStatus']) => void;
@@ -76,6 +96,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
       selectedWearable: null,
       wearableState: 'idle',
       ble: emptyBle,
+      componentB: emptyComponentB,
       vrStatus: 'not-paired',
       pairingCode: null,
       sessions: demoSessions,
@@ -96,6 +117,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
         try { await wearableBleService.connect(device.id); } catch { /* state is reported by callbacks */ }
       },
       disconnectWearable: async () => { await wearableBleService.disconnect(); },
+      setComponentBEndpoint: endpoint => componentBPipelineService.setEndpoint(endpoint),
       pairVr: () => set({vrStatus: 'ready', pairingCode: `MSVR-${Math.floor(1000 + Math.random() * 9000)}`}),
       createSession: () => {
         const session: MeditationSession = {
@@ -130,8 +152,11 @@ export const useMindSyncStore = create<MindSyncStore>()(
     {
       name: 'mindsync-rn-state-v1',
       storage: createJSONStorage(() => AsyncStorage),
-      partialize: state => ({user: state.user, onboarding: state.onboarding, sessions: state.sessions, questionnaireSubmissions: state.questionnaireSubmissions, pendingValidationCount: state.pendingValidationCount}),
-      onRehydrateStorage: () => state => state?.setHydrated(true),
+      partialize: state => ({user: state.user, onboarding: state.onboarding, sessions: state.sessions, questionnaireSubmissions: state.questionnaireSubmissions, pendingValidationCount: state.pendingValidationCount, componentB: {...emptyComponentB, endpoint: state.componentB.endpoint}}),
+      onRehydrateStorage: () => state => {
+        state?.setHydrated(true);
+        componentBPipelineService.setEndpoint(state?.componentB.endpoint ?? environment.componentBIngestUrl);
+      },
     },
   ),
 );
@@ -139,6 +164,11 @@ export const useMindSyncStore = create<MindSyncStore>()(
 function appendLog(message: string) {
   const line = `${new Date().toLocaleTimeString()}  ${message}`;
   useMindSyncStore.setState(state => ({ble: {...state.ble, logs: [line, ...state.ble.logs].slice(0, 40)}}));
+}
+
+function appendComponentBLog(message: string) {
+  const line = `${new Date().toLocaleTimeString()}  ${message}`;
+  useMindSyncStore.setState(state => ({componentB: {...state.componentB, logs: [line, ...state.componentB.logs].slice(0, 40)}}));
 }
 
 wearableBleService.configure({
@@ -152,10 +182,25 @@ wearableBleService.configure({
   onDevices: wearableDevices => useMindSyncStore.setState({wearableDevices}),
   onTelemetry: (telemetry: WearableTelemetry) => {
     useMindSyncStore.setState(state => ({ble: {...state.ble, telemetry, telemetryCount: state.ble.telemetryCount + 1, isStreaming: true, lastError: null}}));
+    componentBPipelineService.acceptTelemetry(telemetry);
     void unityBridge.sendTelemetry(telemetry);
   },
+  onRawPpg: batch => componentBPipelineService.acceptRawPpg(batch),
+  onRawPpgAvailability: available => componentBPipelineService.setRawCharacteristicAvailable(available),
   onError: lastError => useMindSyncStore.setState(state => ({ble: {...state.ble, lastError}})),
   onLog: appendLog,
+});
+
+componentBPipelineService.configure({
+  onState: patch => useMindSyncStore.setState(state => ({componentB: {...state.componentB, ...patch}})),
+  onLog: appendComponentBLog,
+});
+componentBPipelineService.setEndpoint(useMindSyncStore.getState().componentB.endpoint);
+
+useMindSyncStore.subscribe((state, previousState) => {
+  if (state.wearableState === previousState.wearableState) return;
+  if (state.wearableState === 'connected') componentBPipelineService.start();
+  if (state.wearableState === 'disconnected' || state.wearableState === 'error') componentBPipelineService.stop();
 });
 
 export {questionnaireTemplates};

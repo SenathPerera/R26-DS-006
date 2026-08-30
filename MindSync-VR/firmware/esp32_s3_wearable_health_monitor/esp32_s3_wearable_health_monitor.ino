@@ -29,12 +29,23 @@
 #define REG_LED_CONFIG      0x09
 #define REG_PART_ID         0xFF
 
+// TMP117 shares the MAX30100 I2C bus.
+#define TMP117_ADDR         0x48
+#define TMP117_TEMP_RESULT  0x00
+#define TMP117_DEVICE_ID    0x0F
+#define TMP117_EXPECTED_ID  0x0117
+
 // =====================================================
 // BLE UUIDs
 // =====================================================
 
 #define SERVICE_UUID        "7c69f001-7f70-4b0a-9c91-93d7f91b1001"
 #define TELEMETRY_UUID      "7c69f002-7f70-4b0a-9c91-93d7f91b1001"
+#define RAW_PPG_UUID        "7c69f003-7f70-4b0a-9c91-93d7f91b1001"
+
+#define RAW_PPG_SAMPLES_PER_PACKET 5
+#define RAW_PPG_PACKET_BYTES (1 + RAW_PPG_SAMPLES_PER_PACKET * 8)
+#define PPG_SAMPLE_INTERVAL_MS 10
 
 // =====================================================
 // GLOBALS
@@ -44,17 +55,26 @@ I2SClass I2S;
 
 NimBLEServer* bleServer = nullptr;
 NimBLECharacteristic* telemetryCharacteristic = nullptr;
+NimBLECharacteristic* rawPpgCharacteristic = nullptr;
 
-bool bleConnected = false;
+volatile bool bleConnected = false;
 
 uint16_t latestIR = 0;
 uint16_t latestRED = 0;
 
 long latestNoiseAvg = 0;
 long latestNoisePeak = 0;
+float latestTemperatureC = NAN;
+bool temperatureAvailable = false;
+
+uint32_t rawPpgTimestamps[RAW_PPG_SAMPLES_PER_PACKET] = {0};
+uint32_t rawPpgValues[RAW_PPG_SAMPLES_PER_PACKET] = {0};
+uint8_t rawPpgSampleCount = 0;
+uint32_t rawPpgPacketsSent = 0;
 
 unsigned long lastSerialPrint = 0;
 unsigned long lastBleSend = 0;
+unsigned long lastTemperatureRead = 0;
 
 // =====================================================
 // BLE CALLBACKS
@@ -101,6 +121,21 @@ byte readMAX(byte reg) {
   return 0;
 }
 
+bool readI2CRegister16(uint8_t address, uint8_t reg, uint16_t& value) {
+  Wire.beginTransmission(address);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) {
+    return false;
+  }
+
+  if (Wire.requestFrom(address, (uint8_t)2) != 2 || Wire.available() < 2) {
+    return false;
+  }
+
+  value = ((uint16_t)Wire.read() << 8) | Wire.read();
+  return true;
+}
+
 // =====================================================
 // SETUP MAX30100
 // =====================================================
@@ -143,6 +178,48 @@ void setupMAX30100() {
 }
 
 // =====================================================
+// SETUP / READ TMP117
+// =====================================================
+
+void setupTemperatureSensor() {
+  uint16_t deviceId = 0;
+  temperatureAvailable = readI2CRegister16(
+    TMP117_ADDR,
+    TMP117_DEVICE_ID,
+    deviceId
+  );
+
+  if (!temperatureAvailable) {
+    Serial.println("TMP117: not detected; temperature will be null");
+    return;
+  }
+
+  Serial.print("TMP117: device ID 0x");
+  Serial.println(deviceId, HEX);
+  if (deviceId != TMP117_EXPECTED_ID) {
+    Serial.println("TMP117: unexpected device ID; verify the sensor module");
+    temperatureAvailable = false;
+  } else {
+    Serial.println("TMP117: initialized on shared SDA GPIO1 / SCL GPIO2");
+  }
+}
+
+void readTemperatureSensor() {
+  if (!temperatureAvailable || millis() - lastTemperatureRead < 250) {
+    return;
+  }
+  lastTemperatureRead = millis();
+
+  uint16_t rawValue = 0;
+  if (!readI2CRegister16(TMP117_ADDR, TMP117_TEMP_RESULT, rawValue)) {
+    latestTemperatureC = NAN;
+    return;
+  }
+
+  latestTemperatureC = (int16_t)rawValue * 0.0078125f;
+}
+
+// =====================================================
 // SETUP INMP441
 // =====================================================
 
@@ -177,6 +254,7 @@ void setupMicrophone() {
 
 void setupBLE() {
   NimBLEDevice::init("WearableHealthMonitor");
+  NimBLEDevice::setMTU(185);
 
   bleServer = NimBLEDevice::createServer();
   bleServer->setCallbacks(new ServerCallbacks());
@@ -195,6 +273,12 @@ void setupBLE() {
     "{\"status\":\"ready\"}"
   );
 
+  rawPpgCharacteristic =
+    service->createCharacteristic(
+      RAW_PPG_UUID,
+      NIMBLE_PROPERTY::NOTIFY
+    );
+
   service->start();
 
   NimBLEAdvertising* advertising =
@@ -206,6 +290,55 @@ void setupBLE() {
   advertising->start();
 
   Serial.println("BLE advertising started");
+  Serial.print("BLE raw PPG characteristic: ");
+  Serial.println(RAW_PPG_UUID);
+}
+
+// =====================================================
+// RAW PPG BLE BATCHING
+// =====================================================
+
+void writeLittleEndianU32(uint8_t* output, uint32_t value) {
+  output[0] = value & 0xFF;
+  output[1] = (value >> 8) & 0xFF;
+  output[2] = (value >> 16) & 0xFF;
+  output[3] = (value >> 24) & 0xFF;
+}
+
+void notifyRawPpgBatch() {
+  if (!bleConnected || rawPpgSampleCount == 0) {
+    rawPpgSampleCount = 0;
+    return;
+  }
+
+  uint8_t packet[RAW_PPG_PACKET_BYTES] = {0};
+  packet[0] = rawPpgSampleCount;
+
+  for (uint8_t index = 0; index < rawPpgSampleCount; index++) {
+    const size_t offset = 1 + index * 8;
+    writeLittleEndianU32(packet + offset, rawPpgTimestamps[index]);
+    writeLittleEndianU32(packet + offset + 4, rawPpgValues[index]);
+  }
+
+  rawPpgCharacteristic->setValue(packet, sizeof(packet));
+  rawPpgCharacteristic->notify();
+  rawPpgPacketsSent++;
+  rawPpgSampleCount = 0;
+}
+
+void queueRawPpgSample(uint32_t timestampMs, uint32_t irValue) {
+  if (!bleConnected) {
+    rawPpgSampleCount = 0;
+    return;
+  }
+
+  rawPpgTimestamps[rawPpgSampleCount] = timestampMs;
+  rawPpgValues[rawPpgSampleCount] = irValue;
+  rawPpgSampleCount++;
+
+  if (rawPpgSampleCount == RAW_PPG_SAMPLES_PER_PACKET) {
+    notifyRawPpgBatch();
+  }
 }
 
 // =====================================================
@@ -218,6 +351,8 @@ void readMAX30100() {
 
   int samplesAvailable =
     (writePointer - readPointer) & 0x0F;
+
+  const uint32_t newestSampleTimestamp = millis();
 
   while (samplesAvailable > 0) {
     Wire.beginTransmission(MAX30100_ADDR);
@@ -237,6 +372,10 @@ void readMAX30100() {
       latestRED =
         ((uint16_t)Wire.read() << 8) |
         Wire.read();
+
+      const uint32_t sampleTimestamp = newestSampleTimestamp -
+        (uint32_t)(samplesAvailable - 1) * PPG_SAMPLE_INTERVAL_MS;
+      queueRawPpgSample(sampleTimestamp, latestIR);
     }
 
     samplesAvailable--;
@@ -298,16 +437,30 @@ void sendBLETelemetry() {
     return;
   }
 
-  char payload[160];
+  char payload[180];
+  char temperature[16];
+  if (temperatureAvailable && isfinite(latestTemperatureC)) {
+    snprintf(temperature, sizeof(temperature), "%.3f", latestTemperatureC);
+  } else {
+    snprintf(temperature, sizeof(temperature), "null");
+  }
+
+  const uint8_t statusFlags =
+    (latestIR > 0 ? 1 : 0) |
+    (latestNoisePeak > 0 ? 2 : 0) |
+    (temperatureAvailable && isfinite(latestTemperatureC) ? 4 : 0);
 
   snprintf(
     payload,
     sizeof(payload),
-    "{\"ir\":%u,\"red\":%u,\"noiseAvg\":%ld,\"noisePeak\":%ld}",
+    "{\"t\":%lu,\"ir\":%u,\"red\":%u,\"noiseAvg\":%ld,\"noisePeak\":%ld,\"temp\":%s,\"flags\":%u}",
+    millis(),
     latestIR,
     latestRED,
     latestNoiseAvg,
-    latestNoisePeak
+    latestNoisePeak,
+    temperature,
+    statusFlags
   );
 
   telemetryCharacteristic->setValue(payload);
@@ -328,6 +481,7 @@ void setup() {
   Serial.println("======================================");
 
   setupMAX30100();
+  setupTemperatureSensor();
   setupMicrophone();
   setupBLE();
 
@@ -343,6 +497,7 @@ void setup() {
 
 void loop() {
   readMAX30100();
+  readTemperatureSensor();
   readMicrophone();
 
   // BLE telemetry every 200 ms
@@ -366,6 +521,16 @@ void loop() {
 
     Serial.print(" | NOISE PEAK: ");
     Serial.print(latestNoisePeak);
+
+    Serial.print(" | TEMP C: ");
+    if (temperatureAvailable && isfinite(latestTemperatureC)) {
+      Serial.print(latestTemperatureC, 3);
+    } else {
+      Serial.print("N/A");
+    }
+
+    Serial.print(" | RAW PACKETS: ");
+    Serial.print(rawPpgPacketsSent);
 
     Serial.print(" | BLE: ");
     Serial.println(

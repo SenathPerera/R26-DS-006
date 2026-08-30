@@ -39,13 +39,29 @@ python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-# verify streaming matches batch before anything else
-pytest tests/test_parity.py -v
+# macOS only: XGBoost requires the OpenMP runtime
+brew install libomp
 
-uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
+# verify streaming matches batch before anything else
+PYTHONPATH=src:. pytest tests/test_parity.py -v
+
+PYTHONPATH=src uvicorn server.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Clients connect to `ws://<laptop-ip>:8000/stream`.
+
+The mobile ingest client connects to `ws://<laptop-ip>:8000/ingest` and sends one exact 15-second frame at a time:
+
+```json
+{
+  "timestamp": 1787282838.4,
+  "sample_rate": 64.0,
+  "ppg": [1834.2, 1836.1],
+  "temperature": 33.7
+}
+```
+
+On the wire, `ppg` must contain exactly 960 finite numeric amplitudes; the shortened array above is illustrative only. `timestamp` is the frame-start POSIX time in seconds, `sample_rate` must be `64.0`, and `temperature` is degrees Celsius or `null`. A valid frame receives `{"status":"accepted","timestamp":...,"samples":960}`. Invalid JSON or schema data receives `{"status":"invalid_batch","detail":...}` without closing the WebSocket. The validated model requires temperature, so inference reports `waiting_for_temperature` until the first real TMP117 value arrives; a later `null` carries forward that last real value. If model artifacts are unavailable, the server reports `model_unavailable` while continuing to validate and accept incoming physiology.
 
 ## Model in production
 
