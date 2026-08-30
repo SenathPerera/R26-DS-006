@@ -65,3 +65,15 @@ Thumbs.db
 
 /unity/.utmp/
 /debug.log
+
+# Component E backend and training artifacts
+/services/lyria_backend/.venv/
+/services/lyria_backend/.venv_runtime/
+/services/lyria_backend/generated/
+/services/lyria_backend/__pycache__/
+/services/lyria_backend/.env
+/tools/rl_training/logs/
+/tools/rl_training/data/
+/tools/rl_training/plots/
+/tools/rl_training/results/
+/tools/rl_training/**/__pycache__/

@@ -1,0 +1,10 @@
+{
+  "userId": "U001",
+  "preferredInstruments": ["piano", "flute"],
+  "mood": "calm",
+  "tempoPreference": "slow",
+  "preferredAmbience": "forest",
+  "audioIntensity": 0.3,
+  "noveltyTolerance": 0.2,
+  "avoidDissonance": true
+}
