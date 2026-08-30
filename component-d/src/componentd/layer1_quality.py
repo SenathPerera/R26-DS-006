@@ -188,15 +188,19 @@ def check_ambient(audio: np.ndarray, sr: int = SAMPLE_RATE,
         if not ok and reason:
             reasons.append(reason)
 
+    # Steady background noise only BLOCKS when it's genuinely loud (above
+    # floor_too_noisy); a fan/AC in the "usable" band passes and is compensated
+    # for at Layer 2. Human speech + clipping below remain hard fails.
+    floor_ok = floor_dbfs <= AMBIENT["floor_too_noisy"]
     add("noise_floor", "Background noise", floor_dbfs, "dBFS",
-        floor_dbfs <= AMBIENT["floor_dbfs_max"], "fail",
-        _floor_message(noise_type, floor_dbfs <= AMBIENT["floor_dbfs_max"]),
-        f"too_noisy: noise floor {floor_dbfs:.1f} dBFS > {AMBIENT['floor_dbfs_max']:.0f} dBFS")
+        floor_ok, "fail",
+        _floor_message(noise_type, floor_ok),
+        f"too_noisy: noise floor {floor_dbfs:.1f} dBFS > {AMBIENT['floor_too_noisy']:.0f} dBFS")
+    # A single door/clatter shouldn't ruin 30s of speech: transients are advisory.
     add("peaks", "Sudden sounds", peak_dbfs, "dBFS",
-        peak_dbfs <= AMBIENT["peak_dbfs_max"], "fail",
+        peak_dbfs <= AMBIENT["peak_dbfs_max"], "warn",
         ("A few sudden sounds came through — let's wait for things to settle."
-         if peak_dbfs > AMBIENT["peak_dbfs_max"] else "No sudden sounds — good."),
-        f"peaks: loudest moment {peak_dbfs:.1f} dBFS > {AMBIENT['peak_dbfs_max']:.0f} dBFS")
+         if peak_dbfs > AMBIENT["peak_dbfs_max"] else "No sudden sounds — good."))
     add("voices", "Nearby speech", metrics["speech_seconds"], "s",
         metrics["speech_seconds"] <= AMBIENT["max_speech_sec"], "fail",
         ("I can hear someone talking nearby — somewhere more private would help."
@@ -218,10 +222,28 @@ def check_ambient(audio: np.ndarray, sr: int = SAMPLE_RATE,
          if duration < AMBIENT["min_duration_sec"] else "Enough audio to judge — good."),
         f"too_short: {duration:.2f}s < {AMBIENT['min_duration_sec']}s")
 
+    # Coherent three-state verdict, so the number and the outcome always agree
+    # (BUG-C: no more "90/100" shown next to a FAIL). Order: contamination we
+    # cannot compensate for (voices, clipping) first, then steady-noise banding.
+    speech_ok = metrics["speech_seconds"] <= AMBIENT["max_speech_sec"]
+    clip_ok = clip <= AMBIENT["max_clip_ratio"]
+    if not speech_ok:
+        verdict = "voices"
+    elif not clip_ok:
+        verdict = "clipping"
+    elif floor_dbfs > AMBIENT["floor_too_noisy"]:
+        verdict = "too_noisy"
+    elif floor_dbfs > AMBIENT["floor_good_max"]:
+        verdict = "usable"
+    else:
+        verdict = "good"
+
     ok = all(c["pass"] for c in checks if c["severity"] == "fail")
     score = _ambient_score(metrics)
+    if not ok:
+        score = min(score, 40)   # a blocked room must never display a passing score
 
-    return {"ok": ok, "score": score, "noise_type": noise_type,
+    return {"ok": ok, "score": score, "noise_type": noise_type, "verdict": verdict,
             "reasons": reasons, "checks": checks, "metrics": metrics}
 
 

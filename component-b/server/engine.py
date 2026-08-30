@@ -39,7 +39,7 @@ def _load_once():
         }
         w_xgb, w_cnn = _artifacts["weights"]
         log.info("models loaded; blend w_xgb=%.2f w_cnn=%.2f", w_xgb, w_cnn)
-    except (FileNotFoundError, KeyError, ValueError, OSError) as exc:
+    except (FileNotFoundError, ImportError, KeyError, ValueError, OSError) as exc:
         _reason = str(exc)
         log.warning("running without a model: %s", _reason)
     return _artifacts
