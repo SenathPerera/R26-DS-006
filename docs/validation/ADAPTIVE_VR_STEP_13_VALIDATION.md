@@ -56,9 +56,9 @@ Open **Window → General → Test Runner → PlayMode**, run
 | `NetworkAndStalePhysiology_FreezeNewDecisions` | Passed | User-reported PlayMode run, 2026-08-29 |
 | `BootstrapPolicySelection_CreatesAllStudyPolicies` | Passed | User-reported PlayMode run, 2026-08-29 |
 | `SceneAdapterIntegration_AppliesSmoothTransitionPerFrame` | Passed | User-reported PlayMode run, 2026-08-29 |
-| `TemplePondSceneAdapter_AppliesAllFiveMappings` | Not run | Production Temple adapter maps all five normalized dimensions through calibrated endpoints |
-| `ApplicationBootstrap_RegistersSceneAndStaticPolicy` | Not run | Production composition root validates bindings and applies the safe initial state |
-| `ProductionSessionCoordinatorPlayModeTests.Coordinator_CollectsBaselineAndRunsDecisionCycle` | Not run | Production orchestration collects acclimatization baseline windows and opens a policy decision through the shared safety/reward pipeline |
+| `TemplePondSceneAdapter_AppliesAllFiveMappings` | Passed | Full PlayMode suite reported passing on 2026-08-30 |
+| `ApplicationBootstrap_RegistersSceneAndStaticPolicy` | Passed | Full PlayMode suite reported passing on 2026-08-30 |
+| `ProductionSessionCoordinatorPlayModeTests.Coordinator_CollectsBaselineAndRunsDecisionCycle` | Passed | Full PlayMode suite reported passing on 2026-08-30 after correcting the synthetic physiology-window precision boundary |
 
 The first six tests use an isolated GameObject adapter. The two additional
 tests exercise the production Temple adapter and initial application composition
@@ -111,8 +111,12 @@ Record for every run:
 
 - Forest Lake is not available.
 - The production coordinator is implemented but is not yet wired into the
-  serialized Temple scene. Approved timing, physiology, reward, stabilization,
-  telemetry, and coordinator profile assets must be created before runtime use.
+  serialized Temple scene. The approved development timing profile now reserves
+  30 seconds of external initialization followed by 120 seconds of
+  acclimatization, 900 seconds of adaptation, and 150 seconds of stabilization,
+  with 75-second decision opportunities. Physiology, reward, stabilization,
+  telemetry, and coordinator profile assets must still be created before
+  runtime use.
 - Component B's expected 60-second output cadence is configurable and validated
   against decision, staleness, and minimum reward-wait timing. Final study
   timing and the number of effective action/reward cycles remain research
