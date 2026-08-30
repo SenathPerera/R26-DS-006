@@ -1,16 +1,26 @@
 """Wire format between clients and backend."""
 
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, FiniteFloat
+
+
+COMPONENT_B_SAMPLE_RATE_HZ = 64.0
+COMPONENT_B_FRAME_SAMPLES = 960
+
+PpgFrame = Annotated[
+    list[FiniteFloat],
+    Field(min_length=COMPONENT_B_FRAME_SAMPLES,
+          max_length=COMPONENT_B_FRAME_SAMPLES),
+]
 
 
 class PPGBatch(BaseModel):
-    """Mobile -> backend."""
-    timestamp: float
-    sample_rate: float = 64.0
-    ppg: list[float]
-    temperature: Optional[float] = None
+    """Mobile -> backend, one 15-second Empatica-compatible frame."""
+    timestamp: Annotated[FiniteFloat, Field(gt=0)]
+    sample_rate: Literal[64.0] = COMPONENT_B_SAMPLE_RATE_HZ
+    ppg: PpgFrame
+    temperature: Optional[FiniteFloat] = None
 
 
 class StressBlock(BaseModel):

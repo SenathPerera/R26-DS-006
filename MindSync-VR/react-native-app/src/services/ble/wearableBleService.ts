@@ -7,17 +7,21 @@ import {
   State,
   Subscription,
 } from 'react-native-ble-plx';
-import {ConnectionState, WearableDevice, WearableTelemetry} from '../../types/domain';
+import {ConnectionState, RawPpgBatch, WearableDevice, WearableTelemetry} from '../../types/domain';
+import {parseBase64RawPpgPacket} from './rawPpgParser';
 import {parseBase64Telemetry} from './telemetryParser';
 
 export const WEARABLE_DEVICE_NAME = 'WearableHealthMonitor';
 export const WEARABLE_SERVICE_UUID = '7c69f001-7f70-4b0a-9c91-93d7f91b1001';
 export const WEARABLE_TELEMETRY_UUID = '7c69f002-7f70-4b0a-9c91-93d7f91b1001';
+export const WEARABLE_RAW_PPG_UUID = '7c69f003-7f70-4b0a-9c91-93d7f91b1001';
 
 type Callbacks = {
   onState: (state: ConnectionState) => void;
   onDevices: (devices: WearableDevice[]) => void;
   onTelemetry: (telemetry: WearableTelemetry) => void;
+  onRawPpg: (batch: RawPpgBatch) => void;
+  onRawPpgAvailability: (available: boolean) => void;
   onError: (message: string | null) => void;
   onLog: (message: string) => void;
 };
@@ -36,7 +40,8 @@ function errorMessage(error: unknown): string {
 
 export class WearableBleService {
   private readonly manager = new BleManager();
-  private monitor: Subscription | null = null;
+  private telemetryMonitor: Subscription | null = null;
+  private rawPpgMonitor: Subscription | null = null;
   private disconnectMonitor: Subscription | null = null;
   private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private connected: Device | null = null;
@@ -154,7 +159,8 @@ export class WearableBleService {
       this.callbacks?.onState('connecting');
       this.log(`${isReconnect ? 'Reconnecting' : 'Connecting'} to ${deviceId}`);
 
-      this.monitor?.remove();
+      this.telemetryMonitor?.remove();
+      this.rawPpgMonitor?.remove();
       this.disconnectMonitor?.remove();
       const connected = await this.manager.connectToDevice(deviceId, {autoConnect: false, timeout: 12000});
       this.connected = connected;
@@ -165,12 +171,13 @@ export class WearableBleService {
         this.log(`MTU request was not accepted; continuing with default MTU (${errorMessage(error)})`);
       }
       const discovered = await connected.discoverAllServicesAndCharacteristics();
-      await this.verifyWearableGatt(discovered);
-      this.startMonitoring(discovered);
+      const rawPpgAvailable = await this.verifyWearableGatt(discovered);
+      this.startMonitoring(discovered, rawPpgAvailable);
+      this.callbacks?.onRawPpgAvailability(rawPpgAvailable);
       this.watchDisconnect(discovered.id);
       this.reconnectAttempt = 0;
       this.callbacks?.onState('connected');
-      this.log('Wearable connected; telemetry notifications subscribed');
+      this.log(`Wearable connected; telemetry subscribed${rawPpgAvailable ? ' with raw PPG' : ' (raw PPG unavailable)'}`);
     } catch (error) {
       const message = errorMessage(error);
       this.connected = null;
@@ -192,10 +199,16 @@ export class WearableBleService {
       this.log(`Wearable characteristics: ${characteristics.map(item => item.uuid).join(', ') || '<none>'}`);
       throw new Error('Wearable telemetry characteristic was not found or is not notifiable');
     }
+    const rawPpg = characteristics.find(item => normalizeUuid(item.uuid) === WEARABLE_RAW_PPG_UUID);
+    if (!rawPpg || !rawPpg.isNotifiable) {
+      this.log('Raw PPG characteristic not found; update the ESP32 firmware to enable Component B relay');
+      return false;
+    }
+    return true;
   }
 
-  private startMonitoring(device: Device) {
-    this.monitor = device.monitorCharacteristicForService(
+  private startMonitoring(device: Device, rawPpgAvailable: boolean) {
+    this.telemetryMonitor = device.monitorCharacteristicForService(
       WEARABLE_SERVICE_UUID,
       WEARABLE_TELEMETRY_UUID,
       (error: BleError | null, characteristic: Characteristic | null) => {
@@ -214,13 +227,34 @@ export class WearableBleService {
         }
       },
     );
+
+    if (rawPpgAvailable) {
+      this.rawPpgMonitor = device.monitorCharacteristicForService(
+        WEARABLE_SERVICE_UUID,
+        WEARABLE_RAW_PPG_UUID,
+        (error: BleError | null, characteristic: Characteristic | null) => {
+          if (error) {
+            this.log(`Raw PPG subscription error: ${error.message}`);
+            return;
+          }
+          try {
+            this.callbacks?.onRawPpg(parseBase64RawPpgPacket(characteristic?.value ?? null));
+          } catch (parseError) {
+            this.log(`Ignored malformed raw PPG notification: ${errorMessage(parseError)}`);
+          }
+        },
+      );
+    }
   }
 
   private watchDisconnect(deviceId: string) {
     this.disconnectMonitor = this.manager.onDeviceDisconnected(deviceId, error => {
-      this.monitor?.remove();
-      this.monitor = null;
+      this.telemetryMonitor?.remove();
+      this.telemetryMonitor = null;
+      this.rawPpgMonitor?.remove();
+      this.rawPpgMonitor = null;
       this.connected = null;
+      this.callbacks?.onRawPpgAvailability(false);
       this.callbacks?.onState('disconnected');
       this.log(error ? `Wearable disconnected: ${error.message}` : 'Wearable disconnected');
       if (this.reconnectEnabled && !this.destroyed) void this.reconnect(deviceId);
@@ -248,10 +282,12 @@ export class WearableBleService {
     this.reconnectEnabled = false;
     this.reconnectAttempt = 0;
     this.stopScan();
-    this.monitor?.remove();
+    this.telemetryMonitor?.remove();
+    this.rawPpgMonitor?.remove();
     this.disconnectMonitor?.remove();
     const current = this.connected;
     this.connected = null;
+    this.callbacks?.onRawPpgAvailability(false);
     if (current) {
       try {
         await this.manager.cancelDeviceConnection(current.id);
@@ -267,7 +303,8 @@ export class WearableBleService {
     this.destroyed = true;
     this.reconnectEnabled = false;
     this.stopScan();
-    this.monitor?.remove();
+    this.telemetryMonitor?.remove();
+    this.rawPpgMonitor?.remove();
     this.disconnectMonitor?.remove();
     this.manager.destroy();
   }
