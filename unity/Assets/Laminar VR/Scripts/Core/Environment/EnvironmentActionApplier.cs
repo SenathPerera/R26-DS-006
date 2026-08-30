@@ -7,10 +7,13 @@ namespace LaminarVR.AdaptiveMeditation.Environment
         public static EnvironmentState Apply(
             EnvironmentState current,
             EnvironmentAction action,
-            float actionStep)
+            EnvironmentActionStepConfiguration actionSteps)
         {
             ValidateAction(action);
-            ValidateActionStep(actionStep);
+            if (actionSteps == null)
+            {
+                throw new ArgumentNullException(nameof(actionSteps));
+            }
 
             if (!current.IsNormalized)
             {
@@ -19,6 +22,7 @@ namespace LaminarVR.AdaptiveMeditation.Environment
                     nameof(current));
             }
 
+            var actionStep = actionSteps.GetForAction(action);
             switch (action)
             {
                 case EnvironmentAction.NoChange:
@@ -108,20 +112,6 @@ namespace LaminarVR.AdaptiveMeditation.Environment
                     nameof(action),
                     action,
                     "The environment action is not supported.");
-            }
-        }
-
-        private static void ValidateActionStep(float actionStep)
-        {
-            if (float.IsNaN(actionStep)
-                || float.IsInfinity(actionStep)
-                || actionStep <= 0f
-                || actionStep > 1f)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(actionStep),
-                    actionStep,
-                    "Action step must be finite and greater than 0 and no greater than 1.");
             }
         }
 

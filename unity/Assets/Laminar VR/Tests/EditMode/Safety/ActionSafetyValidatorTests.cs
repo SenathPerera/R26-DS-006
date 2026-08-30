@@ -194,7 +194,32 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Safety
             Assert.That(result.ReasonCode, Is.EqualTo(ActionValidationReasonCode.ConfigurationError));
         }
 
-        private static SceneEnvironmentProfile CreateProfile()
+        [Test]
+        public void Validate_UsesTheStepForTheProposedDimension()
+        {
+            var actionSteps = new EnvironmentActionStepConfiguration(
+                0.1f,
+                0.25f,
+                0.3f,
+                0.2f,
+                0.2f);
+
+            var result = validator.Validate(
+                EnvironmentAction.IncreaseAtmosphericSoftness,
+                CreateState(),
+                CreateProfile(actionSteps),
+                SafetyRuntimeState.Ready,
+                CreateSafetyLimits());
+
+            Assert.That(result.Accepted, Is.True);
+            Assert.That(result.SafeTarget.AtmosphericSoftness,
+                Is.EqualTo(0.8f).Within(1e-6f));
+            Assert.That(result.AppliedVariation,
+                Is.EqualTo(0.3d).Within(1e-6d));
+        }
+
+        private static SceneEnvironmentProfile CreateProfile(
+            EnvironmentActionStepConfiguration actionSteps = null)
         {
             var range = new NormalizedRange(0.2f, 0.8f);
             var limits = new EnvironmentStateLimits(range, range, range, range, range);
@@ -203,7 +228,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Safety
                 "Test Scene",
                 CreateState(),
                 limits,
-                0.1f,
+                actionSteps ?? new EnvironmentActionStepConfiguration(
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f),
                 2f,
                 5f);
         }

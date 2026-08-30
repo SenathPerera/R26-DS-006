@@ -17,14 +17,18 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
                 "Temple Pond",
                 safeDefault,
                 limits,
-                0.1f,
+                CreateActionSteps(),
                 2f,
                 5f);
 
             Assert.That(profile.SceneId, Is.EqualTo("temple-pond"));
             Assert.That(profile.DisplayName, Is.EqualTo("Temple Pond"));
             Assert.That(profile.SafeDefault, Is.EqualTo(safeDefault));
-            Assert.That(profile.ActionStep, Is.EqualTo(0.1f));
+            Assert.That(profile.ActionSteps.Illumination, Is.EqualTo(0.1f));
+            Assert.That(profile.ActionSteps.Warmth, Is.EqualTo(0.25f));
+            Assert.That(profile.ActionSteps.AtmosphericSoftness, Is.EqualTo(0.3f));
+            Assert.That(profile.ActionSteps.ColorRichness, Is.EqualTo(0.2f));
+            Assert.That(profile.ActionSteps.AmbientMotion, Is.EqualTo(0.2f));
             Assert.That(profile.TransitionDurationSeconds, Is.EqualTo(2f));
             Assert.That(profile.MinimumSecondsBetweenActions, Is.EqualTo(5f));
         }
@@ -40,7 +44,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
                     "Temple Pond",
                     outsideLimits,
                     CreateLimits(),
-                    0.1f,
+                    CreateActionSteps(),
                     2f,
                     5f));
         }
@@ -57,7 +61,16 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
                     "Temple Pond",
                     safeDefault,
                     limits,
-                    0.1f,
+                    CreateActionSteps(),
+                    2f,
+                    5f));
+            Assert.Throws<ArgumentNullException>(
+                () => new SceneEnvironmentProfile(
+                    "temple-pond",
+                    "Temple Pond",
+                    safeDefault,
+                    limits,
+                    null,
                     2f,
                     5f));
             Assert.Throws<ArgumentOutOfRangeException>(
@@ -66,16 +79,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
                     "Temple Pond",
                     safeDefault,
                     limits,
-                    0f,
-                    2f,
-                    5f));
-            Assert.Throws<ArgumentOutOfRangeException>(
-                () => new SceneEnvironmentProfile(
-                    "temple-pond",
-                    "Temple Pond",
-                    safeDefault,
-                    limits,
-                    0.1f,
+                    CreateActionSteps(),
                     0f,
                     5f));
             Assert.Throws<ArgumentOutOfRangeException>(
@@ -84,7 +88,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
                     "Temple Pond",
                     safeDefault,
                     limits,
-                    0.1f,
+                    CreateActionSteps(),
                     2f,
                     -1f));
         }
@@ -93,6 +97,16 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
         {
             var range = new NormalizedRange(0.2f, 0.8f);
             return new EnvironmentStateLimits(range, range, range, range, range);
+        }
+
+        private static EnvironmentActionStepConfiguration CreateActionSteps()
+        {
+            return new EnvironmentActionStepConfiguration(
+                0.1f,
+                0.25f,
+                0.3f,
+                0.2f,
+                0.2f);
         }
     }
 }

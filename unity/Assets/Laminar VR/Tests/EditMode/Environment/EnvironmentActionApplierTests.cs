@@ -6,7 +6,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
 {
     public sealed class EnvironmentActionApplierTests
     {
-        private const float ActionStep = 0.1f;
+        private static readonly EnvironmentActionStepConfiguration ActionSteps =
+            new EnvironmentActionStepConfiguration(
+                0.1f,
+                0.25f,
+                0.3f,
+                0.2f,
+                0.2f);
 
         [Test]
         public void ActionSpace_ContainsExpectedElevenActions()
@@ -22,21 +28,21 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
             var result = EnvironmentActionApplier.Apply(
                 current,
                 EnvironmentAction.NoChange,
-                ActionStep);
+                ActionSteps);
 
             Assert.That(result, Is.EqualTo(current));
         }
 
         [TestCase(EnvironmentAction.IncreaseIllumination, 0.6f, 0.5f, 0.5f, 0.5f, 0.5f)]
         [TestCase(EnvironmentAction.DecreaseIllumination, 0.4f, 0.5f, 0.5f, 0.5f, 0.5f)]
-        [TestCase(EnvironmentAction.IncreaseWarmth, 0.5f, 0.6f, 0.5f, 0.5f, 0.5f)]
-        [TestCase(EnvironmentAction.DecreaseWarmth, 0.5f, 0.4f, 0.5f, 0.5f, 0.5f)]
-        [TestCase(EnvironmentAction.IncreaseAtmosphericSoftness, 0.5f, 0.5f, 0.6f, 0.5f, 0.5f)]
-        [TestCase(EnvironmentAction.DecreaseAtmosphericSoftness, 0.5f, 0.5f, 0.4f, 0.5f, 0.5f)]
-        [TestCase(EnvironmentAction.IncreaseColorRichness, 0.5f, 0.5f, 0.5f, 0.6f, 0.5f)]
-        [TestCase(EnvironmentAction.DecreaseColorRichness, 0.5f, 0.5f, 0.5f, 0.4f, 0.5f)]
-        [TestCase(EnvironmentAction.IncreaseAmbientMotion, 0.5f, 0.5f, 0.5f, 0.5f, 0.6f)]
-        [TestCase(EnvironmentAction.DecreaseAmbientMotion, 0.5f, 0.5f, 0.5f, 0.5f, 0.4f)]
+        [TestCase(EnvironmentAction.IncreaseWarmth, 0.5f, 0.75f, 0.5f, 0.5f, 0.5f)]
+        [TestCase(EnvironmentAction.DecreaseWarmth, 0.5f, 0.25f, 0.5f, 0.5f, 0.5f)]
+        [TestCase(EnvironmentAction.IncreaseAtmosphericSoftness, 0.5f, 0.5f, 0.8f, 0.5f, 0.5f)]
+        [TestCase(EnvironmentAction.DecreaseAtmosphericSoftness, 0.5f, 0.5f, 0.2f, 0.5f, 0.5f)]
+        [TestCase(EnvironmentAction.IncreaseColorRichness, 0.5f, 0.5f, 0.5f, 0.7f, 0.5f)]
+        [TestCase(EnvironmentAction.DecreaseColorRichness, 0.5f, 0.5f, 0.5f, 0.3f, 0.5f)]
+        [TestCase(EnvironmentAction.IncreaseAmbientMotion, 0.5f, 0.5f, 0.5f, 0.5f, 0.7f)]
+        [TestCase(EnvironmentAction.DecreaseAmbientMotion, 0.5f, 0.5f, 0.5f, 0.5f, 0.3f)]
         public void Apply_ChangesOnlyTheActionDimension(
             EnvironmentAction action,
             float expectedIllumination,
@@ -48,7 +54,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
             var result = EnvironmentActionApplier.Apply(
                 CreateNeutralState(),
                 action,
-                ActionStep);
+                ActionSteps);
 
             var expected = new EnvironmentState(
                 expectedIllumination,
@@ -68,11 +74,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
             var increased = EnvironmentActionApplier.Apply(
                 nearBounds,
                 EnvironmentAction.IncreaseIllumination,
-                ActionStep);
+                ActionSteps);
             var decreased = EnvironmentActionApplier.Apply(
                 nearBounds,
                 EnvironmentAction.DecreaseWarmth,
-                ActionStep);
+                ActionSteps);
 
             Assert.That(increased.Illumination, Is.EqualTo(1f));
             Assert.That(decreased.Warmth, Is.EqualTo(0f));
@@ -87,20 +93,45 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
                 () => EnvironmentActionApplier.Apply(
                     unnormalized,
                     EnvironmentAction.NoChange,
-                    ActionStep));
+                    ActionSteps));
         }
 
         [Test]
-        public void Apply_RejectsInvalidActionSteps()
+        public void Apply_RejectsMissingActionSteps()
         {
             var current = CreateNeutralState();
 
+            Assert.Throws<ArgumentNullException>(
+                () => EnvironmentActionApplier.Apply(
+                    current,
+                    EnvironmentAction.NoChange,
+                    null));
+        }
+
+        [Test]
+        public void ActionStepConfiguration_RejectsInvalidDimensionSteps()
+        {
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => EnvironmentActionApplier.Apply(current, EnvironmentAction.NoChange, 0f));
+                () => new EnvironmentActionStepConfiguration(
+                    0f, 0.1f, 0.1f, 0.1f, 0.1f));
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => EnvironmentActionApplier.Apply(current, EnvironmentAction.NoChange, 1.01f));
+                () => new EnvironmentActionStepConfiguration(
+                    0.1f, 0f, 0.1f, 0.1f, 0.1f));
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => EnvironmentActionApplier.Apply(current, EnvironmentAction.NoChange, float.NaN));
+                () => new EnvironmentActionStepConfiguration(
+                    0.1f, 0.1f, 0f, 0.1f, 0.1f));
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => new EnvironmentActionStepConfiguration(
+                    0.1f, 0.1f, 0.1f, 0f, 0.1f));
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => new EnvironmentActionStepConfiguration(
+                    0.1f, 0.1f, 0.1f, 0.1f, 0f));
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => new EnvironmentActionStepConfiguration(
+                    float.NaN, 0.1f, 0.1f, 0.1f, 0.1f));
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => new EnvironmentActionStepConfiguration(
+                    1.01f, 0.1f, 0.1f, 0.1f, 0.1f));
         }
 
         [Test]
@@ -110,7 +141,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
                 () => EnvironmentActionApplier.Apply(
                     CreateNeutralState(),
                     (EnvironmentAction)99,
-                    ActionStep));
+                    ActionSteps));
         }
 
         private static EnvironmentState CreateNeutralState()

@@ -682,7 +682,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                     range,
                     range,
                     range),
-                0.1f,
+                new EnvironmentActionStepConfiguration(
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f),
                 2f,
                 0f);
         }

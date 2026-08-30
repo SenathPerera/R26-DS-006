@@ -25,6 +25,10 @@ MonoBehaviour:
   atmosphericSoftnessRange: {x: 0, y: 1}
   colorRichnessRange: {x: 0, y: 1}
   ambientMotionRange: {x: 0, y: 1}
-  actionStep: 0
+  illuminationActionStep: 0.1
+  warmthActionStep: 0.25
+  atmosphericSoftnessActionStep: 0.3
+  colorRichnessActionStep: 0.2
+  ambientMotionActionStep: 0.2
   transitionDurationSeconds: 0
   minimumSecondsBetweenActions: 0

@@ -176,7 +176,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Preferences
                 "Test Scene",
                 new EnvironmentState(0.5f, 0.5f, 0.5f, 0.5f, 0.5f),
                 CreateUniformLimits(0.2f, 0.8f),
-                0.05f,
+                new EnvironmentActionStepConfiguration(
+                    0.05f,
+                    0.05f,
+                    0.05f,
+                    0.05f,
+                    0.05f),
                 5f,
                 30f);
         }

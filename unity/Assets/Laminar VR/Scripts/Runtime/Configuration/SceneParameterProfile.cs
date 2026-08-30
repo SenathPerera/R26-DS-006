@@ -17,7 +17,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private string displayName = string.Empty;
 
         [Tooltip(
-            "Enable only after the scene ranges, action step, and timings have "
+            "Enable only after the scene ranges, action steps, and timings have "
             + "been approved for the active pilot or study configuration.")]
         [SerializeField]
         private bool researchConfigurationApproved = false;
@@ -57,9 +57,22 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private Vector2 ambientMotionRange = new Vector2(0f, 1f);
 
         [Header("Action and Transition Limits")]
-        // TODO(RESEARCH_DECISION): Zero keeps a new profile invalid until explicitly configured.
+        // TODO(RESEARCH_DECISION): Zero keeps a new profile invalid until each
+        // dimension has been deliberately calibrated.
         [SerializeField, Range(0f, 1f)]
-        private float actionStep = 0f;
+        private float illuminationActionStep = 0f;
+
+        [SerializeField, Range(0f, 1f)]
+        private float warmthActionStep = 0f;
+
+        [SerializeField, Range(0f, 1f)]
+        private float atmosphericSoftnessActionStep = 0f;
+
+        [SerializeField, Range(0f, 1f)]
+        private float colorRichnessActionStep = 0f;
+
+        [SerializeField, Range(0f, 1f)]
+        private float ambientMotionActionStep = 0f;
 
         [SerializeField, Min(0f)]
         private float transitionDurationSeconds = 0f;
@@ -100,13 +113,19 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
                     CreateRange(atmosphericSoftnessRange),
                     CreateRange(colorRichnessRange),
                     CreateRange(ambientMotionRange));
+                var actionSteps = new EnvironmentActionStepConfiguration(
+                    illuminationActionStep,
+                    warmthActionStep,
+                    atmosphericSoftnessActionStep,
+                    colorRichnessActionStep,
+                    ambientMotionActionStep);
 
                 profile = new SceneEnvironmentProfile(
                     sceneId,
                     displayName,
                     safeDefault,
                     limits,
-                    actionStep,
+                    actionSteps,
                     transitionDurationSeconds,
                     minimumSecondsBetweenActions);
                 validationError = string.Empty;

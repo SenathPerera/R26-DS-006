@@ -74,7 +74,7 @@ namespace LaminarVR.AdaptiveMeditation.Safety
             var requestedTarget = EnvironmentActionApplier.Apply(
                 currentState,
                 proposedAction,
-                sceneProfile.ActionStep);
+                sceneProfile.ActionSteps);
             var safeTarget = sceneProfile.Limits.Clamp(requestedTarget);
 
             if (safeTarget == currentState)

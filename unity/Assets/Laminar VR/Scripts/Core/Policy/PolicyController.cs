@@ -1376,7 +1376,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 sceneProfile.DisplayName,
                 limits.Clamp(sceneProfile.SafeDefault),
                 limits,
-                sceneProfile.ActionStep,
+                sceneProfile.ActionSteps,
                 sceneProfile.TransitionDurationSeconds,
                 sceneProfile.MinimumSecondsBetweenActions);
         }

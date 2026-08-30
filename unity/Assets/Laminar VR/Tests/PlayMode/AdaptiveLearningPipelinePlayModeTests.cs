@@ -550,7 +550,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 ""atmosphericSoftnessRange"": { ""x"": 0.2, ""y"": 0.8 },
                 ""colorRichnessRange"": { ""x"": 0.2, ""y"": 0.8 },
                 ""ambientMotionRange"": { ""x"": 0.2, ""y"": 0.8 },
-                ""actionStep"": 0.1,
+                ""illuminationActionStep"": 0.1,
+                ""warmthActionStep"": 0.1,
+                ""atmosphericSoftnessActionStep"": 0.1,
+                ""colorRichnessActionStep"": 0.1,
+                ""ambientMotionActionStep"": 0.1,
                 ""transitionDurationSeconds"": 2.0,
                 ""minimumSecondsBetweenActions"": 5.0
             }";
@@ -642,7 +646,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     range,
                     range,
                     range),
-                0.1f,
+                new EnvironmentActionStepConfiguration(
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f),
                 2f,
                 0f);
         }

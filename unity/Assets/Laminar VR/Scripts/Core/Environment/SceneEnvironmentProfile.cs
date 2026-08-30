@@ -9,7 +9,7 @@ namespace LaminarVR.AdaptiveMeditation.Environment
             string displayName,
             EnvironmentState safeDefault,
             EnvironmentStateLimits limits,
-            float actionStep,
+            EnvironmentActionStepConfiguration actionSteps,
             float transitionDurationSeconds,
             float minimumSecondsBetweenActions)
         {
@@ -37,7 +37,11 @@ namespace LaminarVR.AdaptiveMeditation.Environment
                     nameof(safeDefault));
             }
 
-            ValidateActionStep(actionStep);
+            if (actionSteps == null)
+            {
+                throw new ArgumentNullException(nameof(actionSteps));
+            }
+
             ValidatePositiveDuration(
                 transitionDurationSeconds,
                 nameof(transitionDurationSeconds));
@@ -49,7 +53,7 @@ namespace LaminarVR.AdaptiveMeditation.Environment
             DisplayName = displayName.Trim();
             SafeDefault = safeDefault;
             Limits = limits;
-            ActionStep = actionStep;
+            ActionSteps = actionSteps;
             TransitionDurationSeconds = transitionDurationSeconds;
             MinimumSecondsBetweenActions = minimumSecondsBetweenActions;
         }
@@ -62,22 +66,11 @@ namespace LaminarVR.AdaptiveMeditation.Environment
 
         public EnvironmentStateLimits Limits { get; }
 
-        public float ActionStep { get; }
+        public EnvironmentActionStepConfiguration ActionSteps { get; }
 
         public float TransitionDurationSeconds { get; }
 
         public float MinimumSecondsBetweenActions { get; }
-
-        private static void ValidateActionStep(float actionStep)
-        {
-            if (!IsFinite(actionStep) || actionStep <= 0f || actionStep > 1f)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(actionStep),
-                    actionStep,
-                    "Action step must be finite and greater than 0 and no greater than 1.");
-            }
-        }
 
         private static void ValidatePositiveDuration(float durationSeconds, string parameterName)
         {
