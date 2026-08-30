@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c9469cd09e6b4edea5d5a45f0f09b496, type: 3}
   m_Name: TemplePondEnvironmentMappingProfile
   m_EditorClassIdentifier: 
-  configurationId: temple-pond-mapping-dev-v3
+  configurationId: temple-pond-mapping-pilot-v3
   configurationVersion: 3
-  researchConfigurationApproved: 0
+  researchConfigurationApproved: 1
   directionalLightIntensityRange: {x: 0.6, y: 9}
   coolDirectionalLightColor: {r: 0.8666667, g: 0.9254902, b: 1, a: 1}
   neutralDirectionalLightColor: {r: 1, g: 0.91485906, b: 0.8584906, a: 1}

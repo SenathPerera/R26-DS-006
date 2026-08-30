@@ -124,10 +124,12 @@ Record for every run:
   telemetry-logging profile is approved for pilot runtime use under ADR-007.
   The provisional production coordinator profile is approved for pilot runtime
   use under ADR-008. The visual-only LinUCB policy profile is approved for
-  pilot runtime use under ADR-009. The Temple scene's calibrated scene and
-  mapping profiles still require provisional approval before the production
-  composition root can initialize. The teammate-owned audio RL agent remains
-  a separate component and must not be wired through this visual policy.
+  pilot runtime use under ADR-009. The Temple scene's calibrated normalized
+  scene profile and raw Unity mapping profile are approved for provisional
+  pilot runtime use under ADR-010 without changing their calibrated visual
+  values. The production composition root is not yet wired into the serialized
+  scene. The teammate-owned audio RL agent remains a separate component and
+  must not be wired through this visual policy.
 - The agreed mobile-to-Quest forwarding cadence is 60 seconds, while Component
   B's current internal inference cadence is beat-based and more frequent. The
   forwarding cadence must be validated against decision, staleness, and minimum
