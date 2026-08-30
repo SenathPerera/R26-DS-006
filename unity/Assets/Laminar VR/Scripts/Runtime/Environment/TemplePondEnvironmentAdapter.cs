@@ -176,10 +176,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                 mapping.DirectionalLightIntensityRange.x,
                 mapping.DirectionalLightIntensityRange.y,
                 state.Illumination);
-            mainDirectionalLight.color = Color.Lerp(
-                mapping.CoolDirectionalLightColor,
-                mapping.WarmDirectionalLightColor,
-                state.Warmth);
+            mainDirectionalLight.color =
+                mapping.MapDirectionalLightColor(state.Warmth);
 
             RenderSettings.fog = true;
             RenderSettings.fogDensity = Mathf.Lerp(

@@ -27,9 +27,15 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         private Vector2 directionalLightIntensityRange = Vector2.zero;
 
         [Header("Color Warmth")]
-        // TODO(RESEARCH_DECISION): Calibrate plausible cool and warm endpoints.
+        // TODO(RESEARCH_DECISION): Verify all three warmth anchors on Quest 2.
         [SerializeField]
         private Color coolDirectionalLightColor = Color.white;
+
+        [Tooltip(
+            "Directional-light color at normalized warmth 0.5. This preserves "
+            + "the scene's calibrated neutral appearance.")]
+        [SerializeField]
+        private Color neutralDirectionalLightColor = Color.white;
 
         [SerializeField]
         private Color warmDirectionalLightColor = Color.white;
@@ -109,6 +115,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
             }
 
             if (!IsNormalizedColor(coolDirectionalLightColor)
+                || !IsNormalizedColor(neutralDirectionalLightColor)
                 || !IsNormalizedColor(warmDirectionalLightColor)
                 || !IsNormalizedColor(clearFogColor)
                 || !IsNormalizedColor(softFogColor)
@@ -133,6 +140,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                 configurationVersion,
                 directionalLightIntensityRange,
                 coolDirectionalLightColor,
+                neutralDirectionalLightColor,
                 warmDirectionalLightColor,
                 fogDensityRange,
                 clearFogColor,
@@ -191,6 +199,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
             int configurationVersion,
             Vector2 directionalLightIntensityRange,
             Color coolDirectionalLightColor,
+            Color neutralDirectionalLightColor,
             Color warmDirectionalLightColor,
             Vector2 fogDensityRange,
             Color clearFogColor,
@@ -205,6 +214,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
             ConfigurationVersion = configurationVersion;
             DirectionalLightIntensityRange = directionalLightIntensityRange;
             CoolDirectionalLightColor = coolDirectionalLightColor;
+            NeutralDirectionalLightColor = neutralDirectionalLightColor;
             WarmDirectionalLightColor = warmDirectionalLightColor;
             FogDensityRange = fogDensityRange;
             ClearFogColor = clearFogColor;
@@ -224,6 +234,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
 
         public Color CoolDirectionalLightColor { get; }
 
+        public Color NeutralDirectionalLightColor { get; }
+
         public Color WarmDirectionalLightColor { get; }
 
         public Vector2 FogDensityRange { get; }
@@ -241,5 +253,32 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         public string WaterMotionProperty { get; }
 
         public Vector2 WaterMotionRange { get; }
+
+        public Color MapDirectionalLightColor(float normalizedWarmth)
+        {
+            if (float.IsNaN(normalizedWarmth)
+                || float.IsInfinity(normalizedWarmth)
+                || normalizedWarmth < 0f
+                || normalizedWarmth > 1f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(normalizedWarmth),
+                    normalizedWarmth,
+                    "Normalized warmth must be finite and in [0, 1].");
+            }
+
+            if (normalizedWarmth <= 0.5f)
+            {
+                return Color.Lerp(
+                    CoolDirectionalLightColor,
+                    NeutralDirectionalLightColor,
+                    normalizedWarmth * 2f);
+            }
+
+            return Color.Lerp(
+                NeutralDirectionalLightColor,
+                WarmDirectionalLightColor,
+                (normalizedWarmth - 0.5f) * 2f);
+        }
     }
 }

@@ -45,6 +45,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 Assert.That(mapping.ConfigurationVersion, Is.EqualTo(1));
                 Assert.That(mapping.DirectionalLightIntensityRange,
                     Is.EqualTo(new Vector2(1f, 3f)));
+                AssertColor(
+                    mapping.NeutralDirectionalLightColor,
+                    new Color(0.9f, 0.9f, 0.9f, 1f));
                 Assert.That(mapping.FogDensityRange,
                     Is.EqualTo(new Vector2(0.001f, 0.01f)));
                 Assert.That(mapping.WaterColorProperty,
@@ -53,6 +56,97 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                     Is.EqualTo("_RippleMotion"));
                 Assert.That(mapping.WaterMotionRange,
                     Is.EqualTo(new Vector2(0.1f, 0.4f)));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void RuntimeMapping_PreservesCoolNeutralAndWarmAnchors()
+        {
+            var profile = CreateApprovedProfile();
+
+            try
+            {
+                Assert.That(profile.TryCreateRuntimeMapping(
+                    out var mapping,
+                    out var validationError),
+                    Is.True,
+                    validationError);
+
+                AssertColor(
+                    mapping.MapDirectionalLightColor(0f),
+                    new Color(0.7f, 0.8f, 1f, 1f));
+                AssertColor(
+                    mapping.MapDirectionalLightColor(0.5f),
+                    new Color(0.9f, 0.9f, 0.9f, 1f));
+                AssertColor(
+                    mapping.MapDirectionalLightColor(1f),
+                    new Color(1f, 0.8f, 0.6f, 1f));
+                AssertColor(
+                    mapping.MapDirectionalLightColor(0.25f),
+                    new Color(0.8f, 0.85f, 0.95f, 1f));
+                AssertColor(
+                    mapping.MapDirectionalLightColor(0.75f),
+                    new Color(0.95f, 0.85f, 0.75f, 1f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [TestCase(-0.01f)]
+        [TestCase(1.01f)]
+        [TestCase(float.NaN)]
+        public void RuntimeMapping_RejectsWarmthOutsideNormalizedDomain(
+            float normalizedWarmth)
+        {
+            var profile = CreateApprovedProfile();
+
+            try
+            {
+                Assert.That(profile.TryCreateRuntimeMapping(
+                    out var mapping,
+                    out var validationError),
+                    Is.True,
+                    validationError);
+
+                Assert.Throws<System.ArgumentOutOfRangeException>(
+                    () => mapping.MapDirectionalLightColor(normalizedWarmth));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
+        [Test]
+        public void ApprovedProfile_RejectsInvalidNeutralWarmthAnchor()
+        {
+            var profile = CreateApprovedProfile();
+
+            try
+            {
+                const string invalidNeutral = @"{
+                    ""neutralDirectionalLightColor"": {
+                        ""r"": 1.1,
+                        ""g"": 0.9,
+                        ""b"": 0.9,
+                        ""a"": 1.0
+                    }
+                }";
+                JsonUtility.FromJsonOverwrite(invalidNeutral, profile);
+
+                var created = profile.TryCreateRuntimeMapping(
+                    out var mapping,
+                    out var validationError);
+
+                Assert.That(created, Is.False);
+                Assert.That(mapping, Is.Null);
+                Assert.That(validationError, Does.Contain("colors"));
             }
             finally
             {
@@ -69,6 +163,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 ""researchConfigurationApproved"": true,
                 ""directionalLightIntensityRange"": { ""x"": 1.0, ""y"": 3.0 },
                 ""coolDirectionalLightColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 1.0, ""a"": 1.0 },
+                ""neutralDirectionalLightColor"": { ""r"": 0.9, ""g"": 0.9, ""b"": 0.9, ""a"": 1.0 },
                 ""warmDirectionalLightColor"": { ""r"": 1.0, ""g"": 0.8, ""b"": 0.6, ""a"": 1.0 },
                 ""fogDensityRange"": { ""x"": 0.001, ""y"": 0.01 },
                 ""clearFogColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 0.9, ""a"": 1.0 },
@@ -83,6 +178,14 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 TemplePondEnvironmentMappingProfile>();
             JsonUtility.FromJsonOverwrite(json, profile);
             return profile;
+        }
+
+        private static void AssertColor(Color actual, Color expected)
+        {
+            Assert.That(actual.r, Is.EqualTo(expected.r).Within(1e-6f));
+            Assert.That(actual.g, Is.EqualTo(expected.g).Within(1e-6f));
+            Assert.That(actual.b, Is.EqualTo(expected.b).Within(1e-6f));
+            Assert.That(actual.a, Is.EqualTo(expected.a).Within(1e-6f));
         }
     }
 }

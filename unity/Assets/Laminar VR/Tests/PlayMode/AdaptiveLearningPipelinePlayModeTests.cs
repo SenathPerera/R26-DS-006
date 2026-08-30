@@ -332,7 +332,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 Assert.That(setup.Light.intensity,
                     Is.EqualTo(1.5f).Within(1e-6f));
                 Assert.That(setup.Light.color.r,
-                    Is.EqualTo(0.85f).Within(1e-6f));
+                    Is.EqualTo(0.9f).Within(1e-6f));
                 Assert.That(RenderSettings.fog, Is.True);
                 Assert.That(RenderSettings.fogDensity,
                     Is.EqualTo(0.00775f).Within(1e-6f));
@@ -504,6 +504,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 ""researchConfigurationApproved"": true,
                 ""directionalLightIntensityRange"": { ""x"": 1.0, ""y"": 3.0 },
                 ""coolDirectionalLightColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 1.0, ""a"": 1.0 },
+                ""neutralDirectionalLightColor"": { ""r"": 0.9, ""g"": 0.9, ""b"": 0.9, ""a"": 1.0 },
                 ""warmDirectionalLightColor"": { ""r"": 1.0, ""g"": 0.8, ""b"": 0.6, ""a"": 1.0 },
                 ""fogDensityRange"": { ""x"": 0.001, ""y"": 0.01 },
                 ""clearFogColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 0.9, ""a"": 1.0 },
