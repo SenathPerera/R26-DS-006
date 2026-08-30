@@ -24,7 +24,7 @@
 | XR provider | OpenXR `1.16.1` |
 | Target | Android / ARM64 / IL2CPP |
 | Enabled build scene | `JapaneseTemplePondGarden.unity` |
-| Forest Lake | Not yet implemented |
+| Study scene scope | Japanese Temple Pond Garden only (ADR-004) |
 | Android package ID | Placeholder Unity template ID; must be finalized before a release build |
 
 ## EditMode validation
@@ -109,7 +109,8 @@ Record for every run:
 
 ## Current limitations
 
-- Forest Lake is not available.
+- Step 13 validation covers only Japanese Temple Pond Garden. Forest Lake is
+  explicitly outside the MVP study scope under ADR-004.
 - The production coordinator is implemented but is not yet wired into the
   serialized Temple scene. The approved development timing profile now reserves
   30 seconds of external initialization followed by 120 seconds of
