@@ -45,12 +45,12 @@ Material:
     - _Opacity: 0.7
     - _QueueControl: 0
     - _QueueOffset: 0
-    - _RippleMotion: 0.45
+    - _RippleMotion: 0.3875
     - _RippleSpeed: 0.01
     - _RippleStrength: 0.312
     - _Smoothness: 1
     m_Colors:
-    - _BaseColor: {r: 0, g: 0.28592545, b: 0.335849, a: 0}
+    - _BaseColor: {r: 0, g: 0.1764706, b: 0.20392157, a: 0}
     - _RippleDirectionA: {r: 1, g: 0, b: 0, a: 0}
     - _RippleDirectionB: {r: 0, g: 1, b: 0, a: 0}
     - _RippleTiling: {r: 2, g: 2, b: 0, a: 0}

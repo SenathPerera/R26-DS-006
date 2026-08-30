@@ -50,8 +50,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                     new Color(0.9f, 0.9f, 0.9f, 1f));
                 Assert.That(mapping.FogDensityRange,
                     Is.EqualTo(new Vector2(0.001f, 0.01f)));
-                Assert.That(mapping.WaterColorProperty,
-                    Is.EqualTo("_BaseColor"));
+                Assert.That(mapping.SaturationRange,
+                    Is.EqualTo(new Vector2(-20f, 20f)));
                 Assert.That(mapping.WaterMotionProperty,
                     Is.EqualTo("_RippleMotion"));
                 Assert.That(mapping.WaterMotionRange,
@@ -154,6 +154,41 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
             }
         }
 
+        [TestCase(-101f, 10f)]
+        [TestCase(-10f, 101f)]
+        [TestCase(0f, 0f)]
+        [TestCase(10f, -10f)]
+        public void ApprovedProfile_RejectsInvalidSaturationRange(
+            float minimum,
+            float maximum)
+        {
+            var profile = CreateApprovedProfile();
+
+            try
+            {
+                var json = "{\"saturationRange\":{\"x\":"
+                    + minimum.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture)
+                    + ",\"y\":"
+                    + maximum.ToString(
+                        System.Globalization.CultureInfo.InvariantCulture)
+                    + "}}";
+                JsonUtility.FromJsonOverwrite(json, profile);
+
+                var created = profile.TryCreateRuntimeMapping(
+                    out var mapping,
+                    out var validationError);
+
+                Assert.That(created, Is.False);
+                Assert.That(mapping, Is.Null);
+                Assert.That(validationError, Does.Contain("saturation"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(profile);
+            }
+        }
+
         private static TemplePondEnvironmentMappingProfile
             CreateApprovedProfile()
         {
@@ -168,9 +203,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 ""fogDensityRange"": { ""x"": 0.001, ""y"": 0.01 },
                 ""clearFogColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 0.9, ""a"": 1.0 },
                 ""softFogColor"": { ""r"": 0.8, ""g"": 0.8, ""b"": 0.8, ""a"": 1.0 },
-                ""waterColorProperty"": ""_BaseColor"",
-                ""mutedWaterColor"": { ""r"": 0.1, ""g"": 0.2, ""b"": 0.2, ""a"": 1.0 },
-                ""richWaterColor"": { ""r"": 0.0, ""g"": 0.4, ""b"": 0.6, ""a"": 1.0 },
+                ""saturationRange"": { ""x"": -20.0, ""y"": 20.0 },
                 ""waterMotionProperty"": ""_RippleMotion"",
                 ""waterMotionRange"": { ""x"": 0.1, ""y"": 0.4 }
             }";

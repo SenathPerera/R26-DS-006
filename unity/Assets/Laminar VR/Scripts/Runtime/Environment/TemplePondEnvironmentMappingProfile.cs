@@ -52,15 +52,13 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         private Color softFogColor = Color.white;
 
         [Header("Color Richness")]
+        [Tooltip(
+            "URP Color Adjustments saturation values mapped from normalized "
+            + "color richness. Supported values are [-100, 100].")]
+        // TODO(RESEARCH_DECISION): Calibrate a restrained scene-wide saturation
+        // range on Quest 2 before approving this mapping for research use.
         [SerializeField]
-        private string waterColorProperty = "_BaseColor";
-
-        // TODO(RESEARCH_DECISION): Calibrate muted and rich water colors.
-        [SerializeField]
-        private Color mutedWaterColor = Color.white;
-
-        [SerializeField]
-        private Color richWaterColor = Color.white;
+        private Vector2 saturationRange = Vector2.zero;
 
         [Header("Ambient Motion")]
         [Tooltip(
@@ -106,6 +104,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                     fogDensityRange,
                     "fog density",
                     out validationError)
+                || !TryValidateSaturationRange(
+                    saturationRange,
+                    out validationError)
                 || !TryValidateIncreasingNonNegativeRange(
                     waterMotionRange,
                     "water motion",
@@ -118,20 +119,17 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                 || !IsNormalizedColor(neutralDirectionalLightColor)
                 || !IsNormalizedColor(warmDirectionalLightColor)
                 || !IsNormalizedColor(clearFogColor)
-                || !IsNormalizedColor(softFogColor)
-                || !IsNormalizedColor(mutedWaterColor)
-                || !IsNormalizedColor(richWaterColor))
+                || !IsNormalizedColor(softFogColor))
             {
                 validationError =
                     "Temple mapping colors must contain finite components in [0, 1].";
                 return false;
             }
 
-            if (string.IsNullOrWhiteSpace(waterColorProperty)
-                || string.IsNullOrWhiteSpace(waterMotionProperty))
+            if (string.IsNullOrWhiteSpace(waterMotionProperty))
             {
                 validationError =
-                    "Water color and motion shader property names are required.";
+                    "A water motion shader property name is required.";
                 return false;
             }
 
@@ -145,11 +143,29 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                 fogDensityRange,
                 clearFogColor,
                 softFogColor,
-                waterColorProperty.Trim(),
-                mutedWaterColor,
-                richWaterColor,
+                saturationRange,
                 waterMotionProperty.Trim(),
                 waterMotionRange);
+            validationError = string.Empty;
+            return true;
+        }
+
+        private static bool TryValidateSaturationRange(
+            Vector2 range,
+            out string validationError)
+        {
+            if (!IsFinite(range.x)
+                || !IsFinite(range.y)
+                || range.x < -100f
+                || range.y > 100f
+                || range.y <= range.x)
+            {
+                validationError =
+                    "saturation range must be finite, strictly increasing, "
+                    + "and contained within [-100, 100].";
+                return false;
+            }
+
             validationError = string.Empty;
             return true;
         }
@@ -204,9 +220,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
             Vector2 fogDensityRange,
             Color clearFogColor,
             Color softFogColor,
-            string waterColorProperty,
-            Color mutedWaterColor,
-            Color richWaterColor,
+            Vector2 saturationRange,
             string waterMotionProperty,
             Vector2 waterMotionRange)
         {
@@ -219,9 +233,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
             FogDensityRange = fogDensityRange;
             ClearFogColor = clearFogColor;
             SoftFogColor = softFogColor;
-            WaterColorProperty = waterColorProperty;
-            MutedWaterColor = mutedWaterColor;
-            RichWaterColor = richWaterColor;
+            SaturationRange = saturationRange;
             WaterMotionProperty = waterMotionProperty;
             WaterMotionRange = waterMotionRange;
         }
@@ -244,11 +256,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
 
         public Color SoftFogColor { get; }
 
-        public string WaterColorProperty { get; }
-
-        public Color MutedWaterColor { get; }
-
-        public Color RichWaterColor { get; }
+        public Vector2 SaturationRange { get; }
 
         public string WaterMotionProperty { get; }
 

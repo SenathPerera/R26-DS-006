@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c9469cd09e6b4edea5d5a45f0f09b496, type: 3}
   m_Name: TemplePondEnvironmentMappingProfile
   m_EditorClassIdentifier: 
-  configurationId: temple-pond-mapping-dev-v2
-  configurationVersion: 2
+  configurationId: temple-pond-mapping-dev-v3
+  configurationVersion: 3
   researchConfigurationApproved: 0
   directionalLightIntensityRange: {x: 0.6, y: 9}
   coolDirectionalLightColor: {r: 0.8666667, g: 0.9254902, b: 1, a: 1}
@@ -22,8 +22,6 @@ MonoBehaviour:
   fogDensityRange: {x: 0, y: 0.015}
   clearFogColor: {r: 0.63529414, g: 0.74509805, b: 0.77254903, a: 1}
   softFogColor: {r: 0.63529414, g: 0.74509805, b: 0.77254903, a: 1}
-  waterColorProperty: _BaseColor
-  mutedWaterColor: {r: 0, g: 0.13725491, b: 0.16078432, a: 1}
-  richWaterColor: {r: 0, g: 0.28627452, b: 0.3372549, a: 1}
+  saturationRange: {x: 0, y: 0}
   waterMotionProperty: _RippleMotion
   waterMotionRange: {x: 0.2, y: 0.45}

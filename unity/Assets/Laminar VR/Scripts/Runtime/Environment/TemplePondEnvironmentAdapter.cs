@@ -1,6 +1,8 @@
 using System;
 using LaminarVR.AdaptiveMeditation.Environment;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
 {
@@ -26,9 +28,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         [SerializeField]
         private Renderer pondWaterRenderer = null;
 
+        [SerializeField]
+        private Volume globalColorVolume = null;
+
         private TemplePondEnvironmentMapping mapping;
+        private ColorAdjustments colorAdjustments;
         private MaterialPropertyBlock waterPropertyBlock;
-        private int waterColorPropertyId;
         private int waterMotionPropertyId;
 
         public string SceneId => sceneId == null ? string.Empty : sceneId.Trim();
@@ -42,7 +47,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         public void Configure(
             TemplePondEnvironmentMappingProfile profile,
             Light directionalLight,
-            Renderer waterRenderer)
+            Renderer waterRenderer,
+            Volume colorVolume)
         {
             if (IsInitialized)
             {
@@ -53,6 +59,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
             mappingProfile = profile;
             mainDirectionalLight = directionalLight;
             pondWaterRenderer = waterRenderer;
+            globalColorVolume = colorVolume;
         }
 
         public SceneBindingValidation ValidateBindings()
@@ -102,16 +109,39 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                     "Assign a pond-water Renderer with a shared material.");
             }
 
-            var material = pondWaterRenderer.sharedMaterial;
-            if (!material.HasProperty(candidateMapping.WaterColorProperty))
+            if (globalColorVolume == null)
             {
                 return SceneBindingValidation.Failed(
-                    SceneBindingValidationCode.ShaderPropertyMissing,
-                    "The pond-water material does not expose color property '"
-                    + candidateMapping.WaterColorProperty
-                    + "'.");
+                    SceneBindingValidationCode.RequiredReferenceMissing,
+                    "Assign the scene's global color-adjustment Volume.");
             }
 
+            if (!globalColorVolume.isGlobal)
+            {
+                return SceneBindingValidation.Failed(
+                    SceneBindingValidationCode.RequiredReferenceMissing,
+                    "The color-adjustment Volume must be global.");
+            }
+
+            var sharedVolumeProfile = globalColorVolume.sharedProfile;
+            if (sharedVolumeProfile == null
+                || !sharedVolumeProfile.TryGet<ColorAdjustments>(
+                    out var sharedColorAdjustments))
+            {
+                return SceneBindingValidation.Failed(
+                    SceneBindingValidationCode.RequiredReferenceMissing,
+                    "The global Volume profile must contain Color Adjustments.");
+            }
+
+            if (!sharedColorAdjustments.active
+                || !sharedColorAdjustments.saturation.overrideState)
+            {
+                return SceneBindingValidation.Failed(
+                    SceneBindingValidationCode.ConfigurationInvalid,
+                    "Color Adjustments must be active with Saturation overridden.");
+            }
+
+            var material = pondWaterRenderer.sharedMaterial;
             if (!material.HasProperty(candidateMapping.WaterMotionProperty))
             {
                 return SceneBindingValidation.Failed(
@@ -148,8 +178,15 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                 return false;
             }
 
-            waterColorPropertyId = Shader.PropertyToID(
-                mapping.WaterColorProperty);
+            var runtimeVolumeProfile = globalColorVolume.profile;
+            if (!runtimeVolumeProfile.TryGet(out colorAdjustments))
+            {
+                validationError =
+                    "The runtime Volume profile does not contain Color Adjustments.";
+                mapping = null;
+                return false;
+            }
+
             waterMotionPropertyId = Shader.PropertyToID(
                 mapping.WaterMotionProperty);
             waterPropertyBlock = new MaterialPropertyBlock();
@@ -189,13 +226,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                 mapping.SoftFogColor,
                 state.AtmosphericSoftness);
 
+            colorAdjustments.saturation.value = Mathf.Lerp(
+                mapping.SaturationRange.x,
+                mapping.SaturationRange.y,
+                state.ColorRichness);
+
             pondWaterRenderer.GetPropertyBlock(waterPropertyBlock);
-            waterPropertyBlock.SetColor(
-                waterColorPropertyId,
-                Color.Lerp(
-                    mapping.MutedWaterColor,
-                    mapping.RichWaterColor,
-                    state.ColorRichness));
             waterPropertyBlock.SetFloat(
                 waterMotionPropertyId,
                 Mathf.Lerp(

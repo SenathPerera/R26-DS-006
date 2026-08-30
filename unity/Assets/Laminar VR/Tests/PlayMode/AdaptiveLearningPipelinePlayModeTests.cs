@@ -17,6 +17,8 @@ using LaminarVR.AdaptiveMeditation.Session;
 using LaminarVR.AdaptiveMeditation.Telemetry;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 using UnityEngine.TestTools;
 
 namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
@@ -337,12 +339,15 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 Assert.That(RenderSettings.fogDensity,
                     Is.EqualTo(0.00775f).Within(1e-6f));
 
+                Assert.That(
+                    setup.Volume.profile.TryGet<ColorAdjustments>(
+                        out var colorAdjustments),
+                    Is.True);
+                Assert.That(colorAdjustments.saturation.value,
+                    Is.EqualTo(-4f).Within(1e-6f));
+
                 var propertyBlock = new MaterialPropertyBlock();
                 setup.WaterRenderer.GetPropertyBlock(propertyBlock);
-                var waterColor = propertyBlock.GetColor(
-                    Shader.PropertyToID("_BaseColor"));
-                Assert.That(waterColor.g,
-                    Is.EqualTo(0.28f).Within(1e-6f));
                 Assert.That(
                     propertyBlock.GetFloat(
                         Shader.PropertyToID("_RippleMotion")),
@@ -485,14 +490,23 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(material.HasProperty("_BaseColor"), Is.True);
             Assert.That(material.HasProperty("_RippleMotion"), Is.True);
 
+            var volumeProfile = ScriptableObject.CreateInstance<VolumeProfile>();
+            createdAssets.Add(volumeProfile);
+            var colorAdjustments = volumeProfile.Add<ColorAdjustments>(true);
+            colorAdjustments.saturation.overrideState = true;
+            var volume = root.AddComponent<Volume>();
+            volume.isGlobal = true;
+            volume.sharedProfile = volumeProfile;
+
             var mappingProfile = CreateApprovedTempleMappingProfile();
             var adapter = root.AddComponent<TemplePondEnvironmentAdapter>();
-            adapter.Configure(mappingProfile, light, waterRenderer);
+            adapter.Configure(mappingProfile, light, waterRenderer, volume);
             return new TempleAdapterSetup(
                 root,
                 adapter,
                 light,
-                waterRenderer);
+                waterRenderer,
+                volume);
         }
 
         private TemplePondEnvironmentMappingProfile
@@ -509,9 +523,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 ""fogDensityRange"": { ""x"": 0.001, ""y"": 0.01 },
                 ""clearFogColor"": { ""r"": 0.7, ""g"": 0.8, ""b"": 0.9, ""a"": 1.0 },
                 ""softFogColor"": { ""r"": 0.8, ""g"": 0.8, ""b"": 0.8, ""a"": 1.0 },
-                ""waterColorProperty"": ""_BaseColor"",
-                ""mutedWaterColor"": { ""r"": 0.1, ""g"": 0.2, ""b"": 0.2, ""a"": 1.0 },
-                ""richWaterColor"": { ""r"": 0.0, ""g"": 0.4, ""b"": 0.6, ""a"": 1.0 },
+                ""saturationRange"": { ""x"": -20.0, ""y"": 20.0 },
                 ""waterMotionProperty"": ""_RippleMotion"",
                 ""waterMotionRange"": { ""x"": 0.1, ""y"": 0.4 }
             }";
@@ -740,12 +752,14 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 GameObject root,
                 TemplePondEnvironmentAdapter adapter,
                 Light light,
-                Renderer waterRenderer)
+                Renderer waterRenderer,
+                Volume volume)
             {
                 Root = root;
                 Adapter = adapter;
                 Light = light;
                 WaterRenderer = waterRenderer;
+                Volume = volume;
             }
 
             public GameObject Root { get; }
@@ -755,6 +769,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             public Light Light { get; }
 
             public Renderer WaterRenderer { get; }
+
+            public Volume Volume { get; }
         }
 
         private sealed class RecordingSink : ITelemetryEventSink

@@ -2,7 +2,9 @@
     "name": "LaminarVR.AdaptiveMeditation.Runtime",
     "rootNamespace": "LaminarVR.AdaptiveMeditation",
     "references": [
-        "LaminarVR.AdaptiveMeditation.Core"
+        "LaminarVR.AdaptiveMeditation.Core",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
