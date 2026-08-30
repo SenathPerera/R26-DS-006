@@ -352,11 +352,67 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     environmentManager.CurrentState);
             }
 
-            var progress = environmentManager.AdvanceTransition(
+            var progress = AdvanceTransitionFrame(
                 currentMonotonicTimeSeconds);
             if (progress.Status != EnvironmentTransitionStatus.Completed)
             {
                 return progress;
+            }
+
+            return await CompleteTransitionAsync(
+                progress,
+                currentMonotonicTimeSeconds,
+                utcTimestampUnixSeconds,
+                sessionElapsedSeconds,
+                phase,
+                networkConnected,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        public EnvironmentTransitionProgress AdvanceTransitionFrame(
+            double currentMonotonicTimeSeconds)
+        {
+            ValidateFiniteNonNegative(
+                currentMonotonicTimeSeconds,
+                nameof(currentMonotonicTimeSeconds));
+            return environmentManager.AdvanceTransition(
+                currentMonotonicTimeSeconds);
+        }
+
+        public async Task<EnvironmentTransitionProgress>
+            CompleteTransitionAsync(
+                EnvironmentTransitionProgress progress,
+                double currentMonotonicTimeSeconds,
+                double utcTimestampUnixSeconds,
+                double sessionElapsedSeconds,
+                VrSessionPhase phase,
+                bool networkConnected,
+                CancellationToken cancellationToken)
+        {
+            ValidateTimes(
+                currentMonotonicTimeSeconds,
+                utcTimestampUnixSeconds,
+                sessionElapsedSeconds);
+            if (progress.Status != EnvironmentTransitionStatus.Completed
+                || !progress.CompletedMonotonicTimeSeconds.HasValue
+                || string.IsNullOrWhiteSpace(progress.TransitionId))
+            {
+                throw new ArgumentException(
+                    "A completed transition progress value is required.",
+                    nameof(progress));
+            }
+
+            if (phase != VrSessionPhase.Adaptive || !networkConnected)
+            {
+                throw new InvalidOperationException(
+                    "A completed adaptive transition can only be finalized "
+                    + "while the adaptive session is connected.");
+            }
+
+            if (pendingDecision == null)
+            {
+                throw new InvalidOperationException(
+                    "A completed transition has no pending policy decision.");
             }
 
             var completedAt = progress.CompletedMonotonicTimeSeconds.Value;

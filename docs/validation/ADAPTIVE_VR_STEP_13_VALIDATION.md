@@ -58,6 +58,7 @@ Open **Window → General → Test Runner → PlayMode**, run
 | `SceneAdapterIntegration_AppliesSmoothTransitionPerFrame` | Passed | User-reported PlayMode run, 2026-08-29 |
 | `TemplePondSceneAdapter_AppliesAllFiveMappings` | Not run | Production Temple adapter maps all five normalized dimensions through calibrated endpoints |
 | `ApplicationBootstrap_RegistersSceneAndStaticPolicy` | Not run | Production composition root validates bindings and applies the safe initial state |
+| `ProductionSessionCoordinatorPlayModeTests.Coordinator_CollectsBaselineAndRunsDecisionCycle` | Not run | Production orchestration collects acclimatization baseline windows and opens a policy decision through the shared safety/reward pipeline |
 
 The first six tests use an isolated GameObject adapter. The two additional
 tests exercise the production Temple adapter and initial application composition
@@ -109,10 +110,12 @@ Record for every run:
 ## Current limitations
 
 - Forest Lake is not available.
-- The production Temple adapter and initial application composition root now
-  exist but are not wired into the serialized Temple scene.
-- The current Temple pond material does not expose a genuine ambient-motion
-  shader property. Binding validation intentionally rejects it until the water
-  implementation provides a restrained ripple-motion control.
+- The production coordinator is implemented but is not yet wired into the
+  serialized Temple scene. Approved timing, physiology, reward, stabilization,
+  telemetry, and coordinator profile assets must be created before runtime use.
+- Component B's expected 60-second output cadence is configurable and validated
+  against decision, staleness, and minimum reward-wait timing. Final study
+  timing and the number of effective action/reward cycles remain research
+  decisions.
 - No Android artifact or Quest 2 evidence has been produced in this step yet.
 - The final Quest performance threshold is an unresolved research decision.
