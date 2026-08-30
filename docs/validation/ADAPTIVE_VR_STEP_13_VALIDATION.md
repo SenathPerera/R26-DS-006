@@ -62,8 +62,13 @@ Open **Window → General → Test Runner → PlayMode**, run
 
 The first six tests use an isolated GameObject adapter. The two additional
 tests exercise the production Temple adapter and initial application composition
-root with isolated, explicitly approved test-only profiles. Validation against
-the serialized Temple scene remains pending.
+root with isolated, explicitly approved test-only profiles. The serialized
+Temple scene now contains the production bootstrap and coordinator with
+explicit references to the approved pilot profiles. Unity import and Inspector
+reference verification succeeded, and Play Mode initialized the serialized
+scene with `scene_id=temple-pond` and `policy_id=ContextualBanditPolicy`
+without Console errors. The complete EditMode and PlayMode suites were also
+reported passing on 2026-08-30.
 
 ## Android build validation
 
@@ -127,9 +132,11 @@ Record for every run:
   pilot runtime use under ADR-009. The Temple scene's calibrated normalized
   scene profile and raw Unity mapping profile are approved for provisional
   pilot runtime use under ADR-010 without changing their calibrated visual
-  values. The production composition root is not yet wired into the serialized
-  scene. The teammate-owned audio RL agent remains a separate component and
-  must not be wired through this visual policy.
+  values. The production composition root is wired into the serialized scene
+  for the visual LinUCB condition. It remains safely idle until a production
+  session boundary supplies real session context and inputs; that boundary is
+  not yet connected. The teammate-owned audio RL agent remains a separate
+  component and must not be wired through this visual policy.
 - The agreed mobile-to-Quest forwarding cadence is 60 seconds, while Component
   B's current internal inference cadence is beat-based and more frequent. The
   forwarding cadence must be validated against decision, staleness, and minimum
