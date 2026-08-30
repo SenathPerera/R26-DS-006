@@ -24,10 +24,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
 
         [Header("Component B Output Cadence")]
         [Tooltip(
-            "Expected seconds between Component B stress outputs. This is "
-            + "separate from frame-based visual interpolation.")]
-        // Component B currently emits one output every 60 seconds. Keep this
-        // configurable so a future contract revision does not require code changes.
+            "Expected seconds between physiology outputs delivered to Quest. "
+            + "This is separate from Component B's internal inference cadence "
+            + "and frame-based visual interpolation.")]
+        // The active transport currently forwards one output every 60 seconds.
+        // Keep this configurable so a contract revision does not require code changes.
         [SerializeField, Min(0f)]
         private float expectedPhysiologyOutputIntervalSeconds = 60f;
 
