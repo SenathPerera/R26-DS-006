@@ -42,18 +42,18 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
-    - _Opacity: 0.479
+    - _Opacity: 1
     - _QueueControl: 0
     - _QueueOffset: 0
     - _RippleMotion: 1
-    - _RippleSpeed: 0.02
-    - _RippleStrength: 0.385
+    - _RippleSpeed: 0.05
+    - _RippleStrength: 0.312
     - _Smoothness: 0.938
     m_Colors:
     - _BaseColor: {r: 0, g: 0.20784314, b: 0.26666668, a: 0}
     - _RippleDirectionA: {r: 1, g: 0, b: 0, a: 0}
     - _RippleDirectionB: {r: 0, g: 1, b: 0, a: 0}
-    - _RippleTiling: {r: 3, g: 3, b: 0, a: 0}
+    - _RippleTiling: {r: 2, g: 2, b: 0, a: 0}
   m_BuildTextureStacks: []
   m_AllowLocking: 1
 --- !u!114 &652554522414914353

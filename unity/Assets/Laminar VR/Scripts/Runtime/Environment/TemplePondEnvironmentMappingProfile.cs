@@ -47,7 +47,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
 
         [Header("Color Richness")]
         [SerializeField]
-        private string waterColorProperty = string.Empty;
+        private string waterColorProperty = "_BaseColor";
 
         // TODO(RESEARCH_DECISION): Calibrate muted and rich water colors.
         [SerializeField]
@@ -61,7 +61,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
             "Shader property that controls restrained pond ripple motion. "
             + "The current Temple water shader must expose this explicitly.")]
         [SerializeField]
-        private string waterMotionProperty = string.Empty;
+        private string waterMotionProperty = "_RippleMotion";
 
         // TODO(RESEARCH_DECISION): Calibrate the permitted ripple-motion range.
         [SerializeField]

@@ -50,7 +50,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 Assert.That(mapping.WaterColorProperty,
                     Is.EqualTo("_BaseColor"));
                 Assert.That(mapping.WaterMotionProperty,
-                    Is.EqualTo("_Smoothness"));
+                    Is.EqualTo("_RippleMotion"));
                 Assert.That(mapping.WaterMotionRange,
                     Is.EqualTo(new Vector2(0.1f, 0.4f)));
             }
@@ -76,7 +76,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 ""waterColorProperty"": ""_BaseColor"",
                 ""mutedWaterColor"": { ""r"": 0.1, ""g"": 0.2, ""b"": 0.2, ""a"": 1.0 },
                 ""richWaterColor"": { ""r"": 0.0, ""g"": 0.4, ""b"": 0.6, ""a"": 1.0 },
-                ""waterMotionProperty"": ""_Smoothness"",
+                ""waterMotionProperty"": ""_RippleMotion"",
                 ""waterMotionRange"": { ""x"": 0.1, ""y"": 0.4 }
             }";
             var profile = ScriptableObject.CreateInstance<

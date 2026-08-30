@@ -345,7 +345,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     Is.EqualTo(0.28f).Within(1e-6f));
                 Assert.That(
                     propertyBlock.GetFloat(
-                        Shader.PropertyToID("_Smoothness")),
+                        Shader.PropertyToID("_RippleMotion")),
                     Is.EqualTo(0.25f).Within(1e-6f));
                 yield return null;
             }
@@ -476,14 +476,14 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             var light = root.AddComponent<Light>();
             light.type = LightType.Directional;
             var waterRenderer = root.AddComponent<MeshRenderer>();
-            var shader = Shader.Find("Universal Render Pipeline/Lit");
+            var shader = Shader.Find("Shader Graphs/SG_TemplePondWater");
             Assert.That(shader, Is.Not.Null,
-                "The active URP project must provide the URP Lit shader.");
+                "The Temple water Shader Graph must be imported.");
             var material = new Material(shader);
             createdAssets.Add(material);
             waterRenderer.sharedMaterial = material;
             Assert.That(material.HasProperty("_BaseColor"), Is.True);
-            Assert.That(material.HasProperty("_Smoothness"), Is.True);
+            Assert.That(material.HasProperty("_RippleMotion"), Is.True);
 
             var mappingProfile = CreateApprovedTempleMappingProfile();
             var adapter = root.AddComponent<TemplePondEnvironmentAdapter>();
@@ -511,7 +511,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 ""waterColorProperty"": ""_BaseColor"",
                 ""mutedWaterColor"": { ""r"": 0.1, ""g"": 0.2, ""b"": 0.2, ""a"": 1.0 },
                 ""richWaterColor"": { ""r"": 0.0, ""g"": 0.4, ""b"": 0.6, ""a"": 1.0 },
-                ""waterMotionProperty"": ""_Smoothness"",
+                ""waterMotionProperty"": ""_RippleMotion"",
                 ""waterMotionRange"": { ""x"": 0.1, ""y"": 0.4 }
             }";
             var profile = ScriptableObject.CreateInstance<
