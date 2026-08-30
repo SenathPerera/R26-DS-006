@@ -30,5 +30,5 @@ MonoBehaviour:
   atmosphericSoftnessActionStep: 0.3
   colorRichnessActionStep: 0.2
   ambientMotionActionStep: 0.2
-  transitionDurationSeconds: 0
+  transitionDurationSeconds: 4.12
   minimumSecondsBetweenActions: 0
