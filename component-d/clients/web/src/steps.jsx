@@ -98,7 +98,7 @@ export function RoomCheck({ ambient, busy, onCheck, onContinue }) {
         <div className="eyebrow">Layer 1 · Quality gate</div>
         <h3 className="h-lead">First, let's check your room is quiet enough.</h3>
         <p className="lead-sub">Stay silent for a few seconds while the app listens to the background — or upload a sample of the room. A noisy space is caught here so it can't distort your reading.</p>
-        <AudioInput withTranscript={false} duration={6} busy={busy} onSubmit={(f) => onCheck(f)} ctaLabel="Check my room" />
+        <AudioInput withTranscript={false} duration={8} busy={busy} onSubmit={(f) => onCheck(f)} ctaLabel="Check my room" />
         {ambient && (
           <>
             <QualityBar ambient={ambient} />

@@ -23,7 +23,7 @@ export const questionnaireTemplates: QuestionnaireTemplate[] = [
     ],
   },
   {
-    id: 'pre-session-v1', title: 'Pre-session check-in', description: 'A private baseline for this session.', component: 'B', version: '1.0.0',
+    id: 'pre-session-v1', title: 'Pre-session check-in', description: 'A private baseline for this session.', component: 'D', version: '1.0.0',
     questions: [
       {id: 'stress', prompt: 'How activated or stressed do you feel?', type: 'slider', required: true, min: 0, max: 10},
       {id: 'mood', prompt: 'How would you describe your mood?', type: 'single', required: true, options: ['Low', 'Uneasy', 'Neutral', 'Steady', 'Positive']},

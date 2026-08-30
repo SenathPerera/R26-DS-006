@@ -52,8 +52,14 @@ QUALITY = {
 # web client / existing callers. UNCALIBRATED starting guesses — run
 # scripts/calibrate_ambient.py on real Galaxy-A9 clips before trusting them.
 AMBIENT = {
-    "floor_dbfs_max":       -50.0,  # steady background ceiling (20th-pct frame RMS)
-    "peak_dbfs_max":        -38.0,  # transient ceiling (95th-pct frame RMS)
+    # Steady background noise is graded in THREE states, not pass/fail: a fan or
+    # AC (which raises the floor but doesn't contaminate the voice, and is
+    # compensated for at Layer 2) must NOT block a session — only a genuinely
+    # loud room does. Human speech + clipping stay hard fails (see check_ambient).
+    "floor_good_max":       -45.0,  # at/below this the room reads as "quiet/good"
+    "floor_too_noisy":      -30.0,  # ABOVE this we block; between = "usable"
+    "floor_dbfs_max":       -42.0,  # legacy scoring target (web client / _ambient_score)
+    "peak_dbfs_max":        -30.0,  # transient ceiling (now advisory, not a gate)
     "max_speech_sec":         0.3,  # nearby voices tolerance (unchanged)
     "max_clip_ratio":        0.01,  # mic overload (unchanged)
     "min_duration_sec":       6.0,  # we now listen ~8s; a short sample is rejected
