@@ -1,0 +1,34 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39322464e7064db4b00c1a48bb993397, type: 3}
+  m_Name: TemplePondSceneParameterProfile
+  m_EditorClassIdentifier: 
+  sceneId: temple-pond
+  displayName: Japanese Temple Pond Garden
+  researchConfigurationApproved: 1
+  defaultIllumination: 0.319
+  defaultWarmth: 0.5
+  defaultAtmosphericSoftness: 0
+  defaultColorRichness: 0.5
+  defaultAmbientMotion: 0.75
+  illuminationRange: {x: 0, y: 1}
+  warmthRange: {x: 0, y: 1}
+  atmosphericSoftnessRange: {x: 0, y: 1}
+  colorRichnessRange: {x: 0, y: 1}
+  ambientMotionRange: {x: 0, y: 1}
+  illuminationActionStep: 0.1
+  warmthActionStep: 0.25
+  atmosphericSoftnessActionStep: 0.3
+  colorRichnessActionStep: 0.2
+  ambientMotionActionStep: 0.2
+  transitionDurationSeconds: 4.12
+  minimumSecondsBetweenActions: 0
