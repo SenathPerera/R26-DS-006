@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed for time-constrained pilot review. The serialized profile remains
-unapproved until the project team explicitly accepts these values.
+Accepted as a provisional pilot configuration. This approval permits runtime
+use for the time-constrained MVP; it does not establish that the reward weights
+or normalization parameters are scientifically optimal.
 
 ## Context
 
@@ -18,7 +19,7 @@ starting when only two forwarded samples arrive during acclimatization.
 Reward attribution must also wait long enough for a physiology window that is
 fully after the visual transition and settling period.
 
-## Proposed pilot values
+## Provisional pilot values
 
 | Setting | Candidate | Basis |
 |---|---:|---|
@@ -38,8 +39,8 @@ fully after the visual transition and settling period.
 
 ## Decision
 
-Create `AdaptiveVrRewardPipelineProfile` with the candidate values and leave
-`Research Configuration Approved` disabled. Invalid, stale, reused, or
+Version the profile as `adaptive-vr-reward-pilot-v1` and enable its runtime
+approval gate using the values above. Invalid, stale, reused, or
 transition-overlapping physiology continues to produce no model update rather
 than a fabricated negative reward.
 

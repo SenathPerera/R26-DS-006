@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   configurationId: adaptive-vr-reward-pilot-v1
   configurationVersion: 1
-  researchConfigurationApproved: 0
+  researchConfigurationApproved: 1
   baselineStandardDeviationMethod: 0
   minimumBaselineSamples: 2
   minimumBaselineStandardDeviation: 0.01
