@@ -18,7 +18,7 @@ MonoBehaviour:
   defaultIllumination: 0.319
   defaultWarmth: 0.5
   defaultAtmosphericSoftness: 0
-  defaultColorRichness: 0.25
+  defaultColorRichness: 0.5
   defaultAmbientMotion: 0.75
   illuminationRange: {x: 0, y: 1}
   warmthRange: {x: 0, y: 1}
