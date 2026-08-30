@@ -1,0 +1,22 @@
+{
+    "name": "LaminarVR.AdaptiveMeditation.EditModeTests",
+    "rootNamespace": "LaminarVR.AdaptiveMeditation.Tests.EditMode",
+    "references": [
+        "LaminarVR.AdaptiveMeditation.Core",
+        "LaminarVR.AdaptiveMeditation.Runtime"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "noEngineReferences": false
+}
