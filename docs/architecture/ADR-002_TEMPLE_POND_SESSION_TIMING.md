@@ -8,10 +8,11 @@ to Step 14 freeze and Quest 2 validation.
 ## Context
 
 The experience reserves 20 minutes from initialization through stabilization.
-Component B currently produces a physiology output every 60 seconds. Scheduling
-decisions at exactly the same cadence would leave no margin for transport and
-processing jitter and would not guarantee that a valid post-transition reward
-window is available.
+The agreed mobile-to-Quest forwarding cadence is one physiology output every
+60 seconds. Component B may infer more frequently internally. Scheduling
+decisions at exactly the forwarding cadence would leave no margin for transport
+and processing jitter and would not guarantee that a valid post-transition
+reward window is available.
 
 The session state machine times acclimatization, adaptation, and stabilization.
 Scene loading and safety initialization occur before the `Start` command and

@@ -114,12 +114,14 @@ Record for every run:
   serialized Temple scene. The approved development timing profile now reserves
   30 seconds of external initialization followed by 120 seconds of
   acclimatization, 900 seconds of adaptation, and 150 seconds of stabilization,
-  with 75-second decision opportunities. Physiology, reward, stabilization,
-  telemetry, and coordinator profile assets must still be created before
-  runtime use.
-- Component B's expected 60-second output cadence is configurable and validated
-  against decision, staleness, and minimum reward-wait timing. Final study
-  timing and the number of effective action/reward cycles remain research
-  decisions.
+  with 75-second decision opportunities. A candidate Component B physiology
+  validation profile now exists but remains deliberately unapproved pending
+  cross-component review. Reward, stabilization, telemetry, and coordinator
+  profile assets must still be created before runtime use.
+- The agreed mobile-to-Quest forwarding cadence is 60 seconds, while Component
+  B's current internal inference cadence is beat-based and more frequent. The
+  forwarding cadence must be validated against decision, staleness, and minimum
+  reward-wait timing. Final study timing and the number of effective
+  action/reward cycles remain research decisions.
 - No Android artifact or Quest 2 evidence has been produced in this step yet.
 - The final Quest performance threshold is an unresolved research decision.
