@@ -1,0 +1,9 @@
+{
+  "preference_match_weight": 1.25,
+  "calmness_weight": 0.65,
+  "stability_weight": 0.45,
+  "abrupt_change_penalty_weight": 0.55,
+  "low_confidence_overreaction_penalty_weight": 0.70,
+  "excessive_novelty_penalty_weight": 0.35,
+  "unnecessary_intervention_penalty_weight": 0.20
+}
