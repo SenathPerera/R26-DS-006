@@ -12,14 +12,14 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0fdf6d05fdee46bd94761bdc51173fc3, type: 3}
   m_Name: ComponentBPhysiologyValidationProfile
   m_EditorClassIdentifier: 
-  configurationId: component-b-physiology-dev-v1
+  configurationId: component-b-physiology-pilot-v1
   configurationVersion: 1
-  researchConfigurationApproved: 0
+  researchConfigurationApproved: 1
   staleAfterSeconds: 90
   minimumWindowDurationSeconds: 30
   maximumFutureClockSkewSeconds: 2
   sourceTimestampToleranceSeconds: 0.001
   probabilitySumTolerance: 0.005
-  minimumDecisionSignalQuality: 0.8
-  minimumRewardSignalQuality: 0.8
+  minimumDecisionSignalQuality: 0.5
+  minimumRewardSignalQuality: 0.5
   maximumBufferedWindows: 8

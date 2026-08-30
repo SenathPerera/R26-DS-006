@@ -115,10 +115,11 @@ Record for every run:
   serialized Temple scene. The approved development timing profile now reserves
   30 seconds of external initialization followed by 120 seconds of
   acclimatization, 900 seconds of adaptation, and 150 seconds of stabilization,
-  with 75-second decision opportunities. A candidate Component B physiology
-  validation profile now exists but remains deliberately unapproved pending
-  cross-component review. Reward, stabilization, telemetry, and coordinator
-  profile assets must still be created before runtime use.
+  with 75-second decision opportunities. The provisional Component B
+  physiology profile is approved for pilot runtime use with decision and
+  reward signal-quality gates of `0.50`; this is not a claim of scientific
+  optimality. Reward, stabilization, telemetry, and coordinator profile assets
+  must still be created before runtime use.
 - The agreed mobile-to-Quest forwarding cadence is 60 seconds, while Component
   B's current internal inference cadence is beat-based and more frequent. The
   forwarding cadence must be validated against decision, staleness, and minimum
