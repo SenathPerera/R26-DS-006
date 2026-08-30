@@ -2,8 +2,9 @@
 
 ## Status
 
-Proposed for time-constrained pilot review. The serialized profile remains
-unapproved until the project team explicitly accepts these values.
+Accepted as a provisional pilot configuration. This approval permits runtime
+use for the time-constrained MVP; it does not establish that the selection
+weights are scientifically optimal.
 
 ## Context
 
@@ -17,7 +18,7 @@ The blueprint suggests considering the last three to five valid outcomes,
 weighting reward by recency, and penalizing distance from the explicit user
 preference.
 
-## Proposed pilot values
+## Provisional pilot values
 
 | Setting | Candidate | Meaning |
 |---|---:|---|
@@ -30,9 +31,9 @@ For four retained outcomes, the reward multipliers from newest to oldest are
 
 ## Decision
 
-Create `AdaptiveVrStabilizationSelectionProfile` with the candidate values and
-leave `Research Configuration Approved` disabled. The fallback, exclusions,
-and normalized scene-limit checks remain deterministic and are not bypassed by
+Version the profile as `adaptive-vr-stabilization-pilot-v1` and enable its
+runtime approval gate using the values above. The fallback, exclusions, and
+normalized scene-limit checks remain deterministic and are not bypassed by
 this configuration.
 
 ## Limitations
