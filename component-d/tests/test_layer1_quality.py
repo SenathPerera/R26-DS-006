@@ -103,28 +103,31 @@ def test_ambient_too_short_fails():
 
 # ---- new: real acoustic analysis (WP1 / PROBLEM 1) -------------------
 def test_ambient_names_a_tonal_hum():
-    # A 120 Hz fan/AC tone must fail AND be classified as a hum, so the
-    # companion can suggest turning off the fan rather than just "it's noisy".
+    # A fan/AC hum in the usable band must NOT block the session (it raises the
+    # floor but doesn't contaminate the voice, and is compensated at Layer 2) -
+    # but it must still be NAMED a hum so the companion can mention the fan.
     r = check_ambient(tonal_hum(), vad_fn=vad_none)
-    assert not r["ok"]
+    assert r["ok"], r["reasons"]
     assert r["noise_type"] == "hum", r["metrics"]
-    assert any("too_noisy" in x for x in r["reasons"])
+    assert r["verdict"] in ("good", "usable")
 
 
 def test_ambient_names_broadband_noise():
-    # White/broadband noise at ~-40 dBFS must fail and read as broadband.
+    # Broadband noise (traffic/rain) in the usable band passes but is named, so
+    # the companion can suggest closing a window rather than blocking outright.
     r = check_ambient(broadband_noise(), vad_fn=vad_none)
-    assert not r["ok"]
+    assert r["ok"], r["reasons"]
     assert r["noise_type"] == "broadband", r["metrics"]
 
 
-def test_ambient_fails_on_transient_peaks():
-    # Quiet floor but a burst of clatter -> the peaks check fails.
+def test_ambient_transient_peaks_are_advisory():
+    # A single burst of clatter (door, footsteps) must NOT block 30s of speech -
+    # the peaks check is advisory (severity "warn"), and the room stays usable.
     r = check_ambient(quiet_with_transient(), vad_fn=vad_none)
-    assert not r["ok"]
-    assert any("peaks" in x for x in r["reasons"])
     peaks = next(c for c in r["checks"] if c["id"] == "peaks")
-    assert not peaks["pass"]
+    assert peaks["severity"] == "warn"
+    assert not peaks["pass"]          # it did detect the transient
+    assert r["ok"], r["reasons"]      # but a lone transient no longer blocks
 
 
 def test_ambient_speech_is_one_check_among_several():

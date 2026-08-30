@@ -250,6 +250,26 @@ def health():
     }
 
 
+@app.post("/warmup")
+def warmup():
+    """Preload the heavy models (the emotion2vec voice encoder and the STT model)
+    so the FIRST real analysis isn't a multi-second cold start. The app fires
+    this the moment the check-in opens, before the user has spoken. Idempotent
+    and never fails the caller."""
+    warmed = {"scorer": False, "stt": False}
+    try:
+        if scorer is not None:
+            scorer.score_array(np.zeros(16000, dtype=np.float32))  # 1s silence forces the encoder to load
+            warmed["scorer"] = True
+    except Exception:                                # noqa: BLE001 - warmup must never fail
+        pass
+    try:
+        warmed["stt"] = bool(transcribe(np.zeros(16000, dtype=np.float32)) is not None)
+    except Exception:                                # noqa: BLE001
+        pass
+    return {"warmed": warmed}
+
+
 # ----------------------------------------------------------- layer 1
 @app.post("/ambient-check")
 async def ambient_check(file: UploadFile = File(...)):
@@ -529,6 +549,14 @@ _WHISPER_LANG = {"english": "en", "en": "en", "sinhala": "si", "si": "si"}
 # gently continue without polluting history with a fake utterance.
 _EMPTY_TURN = "(the person is here but has not said much yet)"
 
+# Warm canned lines used when the companion LLM (Ollama) is unreachable, so a
+# down chat model never fails the turn — the transcript + scoring still return
+# and the app can advance to the next phase / the report.
+_FALLBACK_REPLY = {
+    "pre": "Thank you for sharing that with me. Let's take a calm moment together next.",
+    "post": "Thank you for telling me how you're feeling now. Let's look at how things shifted.",
+}
+
 
 @app.post("/companion/voice-turn")
 async def companion_voice_turn(
@@ -593,7 +621,13 @@ async def companion_voice_turn(
     # instead of string-matching the reply. companion.reply() runs the same net
     # internally (returning CRISIS_REPLY), so the two always agree.
     crisis = is_crisis(transcript)
-    reply = companion.reply(sid, transcript or _EMPTY_TURN, phase)
+    try:
+        reply = companion.reply(sid, transcript or _EMPTY_TURN, phase)
+    except Exception:                       # noqa: BLE001 - LLM (Ollama) may be down
+        # The turn's real value — the transcript and Layer-2 scoring — is already
+        # computed and stored above, so a dead chat model must NOT fail the turn
+        # (that would 500 and block the app from advancing to post / the report).
+        reply = _FALLBACK_REPLY.get(phase, _FALLBACK_REPLY["pre"])
 
     if log:
         clip_path = session_logger.save_clip(sid, phase, audio)
