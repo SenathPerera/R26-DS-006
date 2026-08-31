@@ -177,12 +177,14 @@ outbound Quest-state/visual-telemetry serialization are implemented and covered
 by Unity EditMode tests. A runtime Unity bridge now validates the configured
 scene on the main thread, forwards relay inputs through `VisualSessionBoundary`,
 and publishes session-phase snapshots; its focused PlayMode tests are validated.
-The non-secret connection profile and runtime pairing entry point are now
-implemented and validated. Locally durable visual telemetry is now exposed to
-the bridge and published in configuration-sized relay batches; a failed batch
-is retained instead of being discarded. Relay-backend integration, runtime
-pairing UI, reconnect credential renewal, final delivery acknowledgement and
-offline-log recovery, and production scene wiring remain pending.
+The non-secret connection profile, controller-ray pairing UI, development
+relay, and production Temple Pond scene wiring are now implemented and
+validated. Locally durable visual telemetry is exposed to the bridge and
+published in configuration-sized relay batches; a failed batch is retained
+instead of being discarded. The relay forwards Quest readiness and waits the
+configured 30-second initialization period before issuing exactly one `start`
+command. Reconnect credential renewal, final delivery acknowledgement,
+offline-log recovery, and full pilot-length validation remain pending.
 
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
@@ -246,12 +248,13 @@ been agreed with the mobile/relay team.
 ### Slice E: hardening and Quest validation
 
 **Status:** In progress. A development FastAPI relay, React Native prepared-
-session flow, six-digit code display, Quest gaze keypad, pseudonymous Quest
+session flow, six-digit code display, Quest controller-ray keypad, pseudonymous Quest
 installation identity, relay bridge, telemetry acknowledgement, and durable
 relay-side visual log are implemented. A Unity editor command creates the
 development profile and wires the Temple Pond composition root without storing
-the one-time code. The current endpoint and limits are explicitly development
-configuration; they are not a frozen research deployment.
+the one-time code. Mobile-to-Quest pairing has passed on the standalone headset.
+The current endpoint and limits are explicitly development configuration; they
+are not a frozen research deployment.
 
 - Exercise disconnect/reconnect, stale payload, duplicate payload, second-client
   rejection, session rollover, completion, and abort paths.

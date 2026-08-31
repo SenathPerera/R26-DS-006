@@ -2,7 +2,7 @@
 
 **Last reviewed:** 2026-08-31  
 **Scene:** Japanese Temple Pond Garden only  
-**Overall status:** Development integration implemented; Unity/Quest validation pending
+**Overall status:** Development integration and on-device pairing validated; full pilot validation pending
 
 This checklist is the final hardening gate for Steps 13 and 14 of the adaptive
 VR implementation plan. Editor success is not treated as Quest 2 or end-to-end
@@ -36,6 +36,7 @@ clearly identified development values:
 - Local relay endpoint: `ws://172.20.10.4:8080/realtime?role=quest`.
 - Schema identifier: `mindsync-session-v1`.
 - Pairing-code lifetime: five minutes.
+- Readiness-to-start initialization delay: 30 seconds.
 - Maximum inbound message size: 65,536 bytes.
 - Maximum telemetry batch: 32 events.
 - Pseudonymous Quest identity: a locally persisted random `quest-<guid>` value.
@@ -74,7 +75,7 @@ serve Component B through TLS. Production relay communication must use WSS.
 4. Confirm that `SessionRelayBridge`, `SessionRelayPairingController`, and
    `QuestPairingRuntimePanel` appear on that object and that all references are
    assigned.
-5. Enter Play Mode and confirm the gaze keypad appears, the bootstrap still
+5. Enter Play Mode and confirm the controller-ray keypad appears, the bootstrap still
    initializes, and the Console has no errors before attempting live pairing.
 
 The installer creates only a non-secret connection profile. The one-time code
@@ -91,6 +92,8 @@ is entered at runtime and the pseudonymous Quest client ID is stored in
 - Verify that tapping `Start my session` prepares the relay session but does
   not begin the Quest timer or adaptive phase before code redemption.
 - Pair one mobile client and one Quest client to one session.
+- Verify Quest publishes `ready`, the relay waits 30 seconds, and exactly one
+  `start` command begins the session.
 - Reject wrong, expired, and reused pairing codes without leaking credentials.
 - Reject a second active client or participant binding.
 - Accept one valid configuration and reject wrong-scene, wrong-schema,

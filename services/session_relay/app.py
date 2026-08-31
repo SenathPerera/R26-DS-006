@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,10 @@ from .session_store import (
 
 SCHEMA_VERSION = "mindsync-session-v1"
 CODE_LIFETIME_SECONDS = float(os.getenv("SESSION_RELAY_CODE_LIFETIME_SECONDS", "300"))
+INITIALIZATION_DELAY_SECONDS = max(
+    0.0,
+    float(os.getenv("SESSION_RELAY_INITIALIZATION_DELAY_SECONDS", "30")),
+)
 DATA_DIRECTORY = Path(
     os.getenv("SESSION_RELAY_DATA_DIR", str(Path(__file__).parent / "data"))
 )
@@ -197,6 +202,7 @@ async def _mobile_connection(websocket: WebSocket) -> None:
 async def _quest_connection(websocket: WebSocket) -> None:
     await websocket.accept()
     session: PreparedSession | None = None
+    delayed_start: asyncio.Task[None] | None = None
     try:
         request = await asyncio.wait_for(websocket.receive_json(), timeout=20)
         if not _valid_pairing_request(request):
@@ -223,7 +229,6 @@ async def _quest_connection(websocket: WebSocket) -> None:
             )
         )
         await websocket.send_json(_configuration(session))
-        await websocket.send_json(_command(session.session_id, "start"))
 
         while True:
             message = await websocket.receive_json()
@@ -232,6 +237,14 @@ async def _quest_connection(websocket: WebSocket) -> None:
                 continue
             await _append_durable(session.session_id, message)
             await channels.send_to_mobile(session.session_id, message)
+            if (
+                message["messageType"] == "quest_state"
+                and message["payload"].get("phase") == "ready"
+                and delayed_start is None
+            ):
+                delayed_start = asyncio.create_task(
+                    _send_start_after_initialization(websocket, session.session_id)
+                )
             if message["messageType"] == "visual_telemetry_batch":
                 await websocket.send_json(
                     _envelope(
@@ -246,12 +259,27 @@ async def _quest_connection(websocket: WebSocket) -> None:
                 message["messageType"] == "quest_state"
                 and message["payload"].get("phase") in {"completed", "aborted"}
             ):
+                if delayed_start is not None and not delayed_start.done():
+                    delayed_start.cancel()
                 store.end(session.session_id)
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     finally:
+        if delayed_start is not None:
+            if not delayed_start.done():
+                delayed_start.cancel()
+            with suppress(asyncio.CancelledError, RuntimeError, WebSocketDisconnect):
+                await delayed_start
         if session is not None:
             await channels.detach(session.session_id, "quest", websocket)
+
+
+async def _send_start_after_initialization(
+    websocket: WebSocket,
+    session_id: str,
+) -> None:
+    await asyncio.sleep(INITIALIZATION_DELAY_SECONDS)
+    await websocket.send_json(_command(session_id, "start"))
 
 
 def _configuration(session: PreparedSession) -> dict:
