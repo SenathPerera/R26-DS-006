@@ -104,6 +104,8 @@ is entered at runtime and the pseudonymous Quest client ID is stored in
   publish.
 - Verify final delivery acknowledgement before local data is considered
   transferable or eligible for cleanup.
+- Force a stale final-log receipt and confirm the relay rejects it without
+  replacing the locally durable log.
 
 ### Component B and safety
 

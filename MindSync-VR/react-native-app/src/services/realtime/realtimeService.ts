@@ -22,6 +22,25 @@ export type RelayEnvelope = {
   payload: Record<string, unknown>;
 };
 
+export type VisualLogSnapshot = {
+  schemaVersion: string;
+  sessionId: string;
+  finalized: boolean;
+  completionPhase: 'completed' | 'aborted' | null;
+  deliveryAcknowledged: boolean;
+  messageCount: number;
+  lastMessageId: string | null;
+  messages: RelayEnvelope[];
+};
+
+export type VisualLogAcknowledgement = {
+  schemaVersion: string;
+  sessionId: string;
+  acknowledged: true;
+  messageCount: number;
+  lastMessageId: string;
+};
+
 export class RealtimeService {
   private socket: WebSocket | null = null;
   private activeSessionId: string | null = null;
@@ -62,15 +81,43 @@ export class RealtimeService {
     };
   }
 
-  async fetchVisualLog(session: PreparedVrSession): Promise<RelayEnvelope[]> {
+  async fetchVisualLog(session: PreparedVrSession): Promise<VisualLogSnapshot> {
     const url = `${environment.apiBaseUrl}/sessions/${encodeURIComponent(session.sessionId)}/visual-log?mobileToken=${encodeURIComponent(session.mobileToken)}`;
     const response = await fetch(url);
     const body = await response.json() as unknown;
-    if (!response.ok) throw new Error(`relay-log-http-${response.status}`);
-    if (!isRecord(body) || !Array.isArray(body.messages)) {
+    if (!response.ok) throw new Error(readRelayError(body, `relay-log-http-${response.status}`));
+    if (!isVisualLogSnapshot(body) || body.sessionId !== session.sessionId) {
       throw new Error('relay-log-response-invalid');
     }
-    return body.messages.filter(isRelayEnvelope);
+    return body;
+  }
+
+  async acknowledgeVisualLog(
+    session: PreparedVrSession,
+    snapshot: VisualLogSnapshot,
+  ): Promise<VisualLogAcknowledgement> {
+    if (
+      snapshot.sessionId !== session.sessionId
+      || !snapshot.finalized
+      || !snapshot.lastMessageId
+    ) {
+      throw new Error('relay-log-not-finalized');
+    }
+    const url = `${environment.apiBaseUrl}/sessions/${encodeURIComponent(session.sessionId)}/visual-log/acknowledgement?mobileToken=${encodeURIComponent(session.mobileToken)}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        messageCount: snapshot.messageCount,
+        lastMessageId: snapshot.lastMessageId,
+      }),
+    });
+    const body = await response.json() as unknown;
+    if (!response.ok) throw new Error(readRelayError(body, `relay-log-ack-http-${response.status}`));
+    if (!isVisualLogAcknowledgement(body)) {
+      throw new Error('relay-log-ack-response-invalid');
+    }
+    return body;
   }
 
   sendCommand(command: 'pause' | 'resume' | 'stop' | 'emergency_stop') {
@@ -109,8 +156,51 @@ export function isRelayEnvelope(value: unknown): value is RelayEnvelope {
     && isRecord(value.payload);
 }
 
+export function isVisualLogSnapshot(value: unknown): value is VisualLogSnapshot {
+  if (!isRecord(value)
+    || value.schemaVersion !== SESSION_RELAY_SCHEMA_VERSION
+    || typeof value.sessionId !== 'string'
+    || value.sessionId.length === 0
+    || typeof value.finalized !== 'boolean'
+    || (value.completionPhase !== null
+      && value.completionPhase !== 'completed'
+      && value.completionPhase !== 'aborted')
+    || typeof value.deliveryAcknowledged !== 'boolean'
+    || !Number.isInteger(value.messageCount)
+    || (value.messageCount as number) < 0
+    || (value.lastMessageId !== null && typeof value.lastMessageId !== 'string')
+    || !Array.isArray(value.messages)
+    || !value.messages.every(isRelayEnvelope)
+    || value.messages.length !== value.messageCount) {
+    return false;
+  }
+  if (value.finalized !== (value.completionPhase !== null)) return false;
+  if (value.deliveryAcknowledged && !value.finalized) return false;
+  if (value.messageCount === 0) return value.lastMessageId === null;
+  const lastMessage = value.messages[value.messages.length - 1];
+  return value.lastMessageId === lastMessage.messageId;
+}
+
+export function isVisualLogAcknowledgement(
+  value: unknown,
+): value is VisualLogAcknowledgement {
+  return isRecord(value)
+    && value.schemaVersion === SESSION_RELAY_SCHEMA_VERSION
+    && typeof value.sessionId === 'string'
+    && value.sessionId.length > 0
+    && value.acknowledged === true
+    && Number.isInteger(value.messageCount)
+    && (value.messageCount as number) > 0
+    && typeof value.lastMessageId === 'string'
+    && value.lastMessageId.length > 0;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readRelayError(value: unknown, fallback: string): string {
+  return isRecord(value) && typeof value.detail === 'string' ? value.detail : fallback;
 }
 
 function createMessageId(): string {

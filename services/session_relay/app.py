@@ -17,6 +17,7 @@ from .session_store import (
     PairingRejectedError,
     PreparedSession,
     SessionStore,
+    VisualLogAcknowledgementError,
 )
 
 
@@ -60,6 +61,13 @@ class CreateSessionResponse(BaseModel):
     pairing_code: str = Field(alias="pairingCode")
     expires_at: float = Field(alias="expiresAt")
     mobile_token: str = Field(alias="mobileToken")
+
+
+class VisualLogAcknowledgementRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    message_count: int = Field(alias="messageCount", ge=1)
+    last_message_id: str = Field(alias="lastMessageId", min_length=1, max_length=128)
 
 
 class SessionChannels:
@@ -145,7 +153,7 @@ async def get_visual_log(
     mobileToken: str,
 ) -> dict:
     try:
-        store.authenticate_mobile(
+        session = store.authenticate_mobile(
             session_id,
             mobileToken,
             allow_ended=True,
@@ -155,10 +163,61 @@ async def get_visual_log(
 
     path = DATA_DIRECTORY / f"{session_id}.jsonl"
     messages = await asyncio.to_thread(_read_messages, path)
+    last_message_id = _last_message_id(messages)
     return {
         "schemaVersion": SCHEMA_VERSION,
         "sessionId": session_id,
+        "finalized": session.completion_phase is not None,
+        "completionPhase": session.completion_phase,
+        "deliveryAcknowledged": session.visual_log_message_count is not None,
+        "messageCount": len(messages),
+        "lastMessageId": last_message_id,
         "messages": messages,
+    }
+
+
+@app.post("/sessions/{session_id}/visual-log/acknowledgement")
+async def acknowledge_visual_log(
+    session_id: str,
+    request: VisualLogAcknowledgementRequest,
+    mobileToken: str,
+) -> dict:
+    try:
+        session = store.authenticate_mobile(
+            session_id,
+            mobileToken,
+            allow_ended=True,
+        )
+    except MobileAuthenticationError as error:
+        raise HTTPException(status_code=401, detail=str(error)) from error
+
+    if session.completion_phase is None:
+        raise HTTPException(status_code=409, detail="visual-log-not-finalized")
+
+    path = DATA_DIRECTORY / f"{session_id}.jsonl"
+    messages = await asyncio.to_thread(_read_messages, path)
+    last_message_id = _last_message_id(messages)
+    if (
+        request.message_count != len(messages)
+        or request.last_message_id != last_message_id
+    ):
+        raise HTTPException(status_code=409, detail="visual-log-snapshot-mismatch")
+
+    try:
+        store.acknowledge_visual_log(
+            session_id,
+            request.message_count,
+            request.last_message_id,
+        )
+    except VisualLogAcknowledgementError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+    return {
+        "schemaVersion": SCHEMA_VERSION,
+        "sessionId": session_id,
+        "acknowledged": True,
+        "messageCount": request.message_count,
+        "lastMessageId": request.last_message_id,
     }
 
 
@@ -236,6 +295,16 @@ async def _quest_connection(websocket: WebSocket) -> None:
                 await websocket.send_json(_error("quest-message-invalid"))
                 continue
             await _append_durable(session.session_id, message)
+            terminal_phase = (
+                message["payload"].get("phase")
+                if message["messageType"] == "quest_state"
+                and message["payload"].get("phase") in {"completed", "aborted"}
+                else None
+            )
+            if terminal_phase is not None:
+                if delayed_start is not None and not delayed_start.done():
+                    delayed_start.cancel()
+                store.end(session.session_id, terminal_phase)
             await channels.send_to_mobile(session.session_id, message)
             if (
                 message["messageType"] == "quest_state"
@@ -255,13 +324,8 @@ async def _quest_connection(websocket: WebSocket) -> None:
                         },
                     )
                 )
-            if (
-                message["messageType"] == "quest_state"
-                and message["payload"].get("phase") in {"completed", "aborted"}
-            ):
-                if delayed_start is not None and not delayed_start.done():
-                    delayed_start.cancel()
-                store.end(session.session_id)
+            if terminal_phase is not None:
+                break
     except (WebSocketDisconnect, asyncio.TimeoutError):
         pass
     finally:
@@ -402,3 +466,10 @@ def _read_messages(path: Path) -> list[dict]:
             if isinstance(message, dict):
                 messages.append(message)
     return messages
+
+
+def _last_message_id(messages: list[dict]) -> str | None:
+    if not messages:
+        return None
+    message_id = messages[-1].get("messageId")
+    return message_id if isinstance(message_id, str) and message_id else None

@@ -10,6 +10,13 @@ The relay does not start a paired session immediately. It waits for Quest to
 publish its validated `ready` phase, then observes a 30-second initialization
 delay before sending the single `start` command.
 
+When Quest publishes `completed` or `aborted`, the relay finalizes that
+session's append-only visual log. Mobile downloads the snapshot from
+`GET /sessions/{sessionId}/visual-log` and confirms the exact message count and
+last message ID through
+`POST /sessions/{sessionId}/visual-log/acknowledgement`. Repeating the same
+acknowledgement is safe; a stale or mismatched snapshot is rejected.
+
 ## Run
 
 From the repository root:
@@ -43,4 +50,5 @@ python -m unittest services.session_relay.test_session_store services.session_re
 The integration suite covers the prepared-session HTTP endpoint, authenticated
 mobile WebSocket, one-time Quest pairing, configuration and start delivery,
 readiness-gated initialization, mobile command forwarding, Quest telemetry
-acknowledgement/forwarding, and durable visual-log recovery.
+acknowledgement/forwarding, terminal log finalization, idempotent mobile
+delivery acknowledgement, and durable visual-log recovery.

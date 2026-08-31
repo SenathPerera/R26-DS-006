@@ -3,6 +3,7 @@ export type ConnectionState = 'idle' | 'scanning' | 'connecting' | 'connected' |
 export type VrStatus = 'not-paired' | 'pairing' | 'ready' | 'waiting' | 'active' | 'disconnected';
 export type SessionStatus = 'ready' | 'active' | 'paused' | 'ending' | 'complete';
 export type SessionRelayConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
+export type VisualLogDeliveryStatus = 'idle' | 'downloading' | 'pending' | 'acknowledged' | 'error';
 export type QuestionType = 'single' | 'multiple' | 'likert' | 'text' | 'numeric' | 'slider' | 'voice';
 
 export interface UserProfile {
@@ -128,6 +129,8 @@ export interface SessionRelayState {
   preparedSession: PreparedVrSession | null;
   questPhase: string | null;
   visualTelemetryMessages: unknown[];
+  visualLogDeliveryStatus: VisualLogDeliveryStatus;
+  visualLogMessageCount: number;
   lastError: string | null;
 }
 

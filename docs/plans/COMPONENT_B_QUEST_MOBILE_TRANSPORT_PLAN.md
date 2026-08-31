@@ -183,12 +183,17 @@ validated. Locally durable visual telemetry is exposed to the bridge and
 published in configuration-sized relay batches; a failed batch is retained
 instead of being discarded. The relay forwards Quest readiness and waits the
 configured 30-second initialization period before issuing exactly one `start`
-command. Reconnect credential renewal, final delivery acknowledgement,
-offline-log recovery, and full pilot-length validation remain pending.
+command. Terminal visual logs are downloaded by mobile and acknowledged using
+an exact message-count/last-message receipt. Quest defers its terminal phase
+snapshot until every locally queued telemetry batch has a relay
+acknowledgement, preventing final critical events from falling outside the
+finalized log. Reconnect credential renewal, relay-restart recovery, Supabase
+handoff, and full pilot-length validation remain pending.
 
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
-  commands, readiness/status, and completed visual-log transfer.
+  commands, readiness/status, and completed visual-log transfer. The
+  development path is implemented; deployment hardening remains.
 - Make command handling idempotent and use stable message IDs.
 - Keep session control operational when Component B is temporarily unavailable.
 
@@ -248,13 +253,15 @@ been agreed with the mobile/relay team.
 ### Slice E: hardening and Quest validation
 
 **Status:** In progress. A development FastAPI relay, React Native prepared-
-session flow, six-digit code display, Quest controller-ray keypad, pseudonymous Quest
-installation identity, relay bridge, telemetry acknowledgement, and durable
-relay-side visual log are implemented. A Unity editor command creates the
-development profile and wires the Temple Pond composition root without storing
-the one-time code. Mobile-to-Quest pairing has passed on the standalone headset.
-The current endpoint and limits are explicitly development configuration; they
-are not a frozen research deployment.
+session flow, six-digit code display, Quest controller-ray keypad, pseudonymous
+Quest installation identity, relay bridge, telemetry acknowledgement, and
+durable relay-side visual log are implemented. Terminal log download,
+idempotent mobile acknowledgement, and an in-app retry state are also
+implemented. A Unity editor command creates the development profile and wires
+the Temple Pond composition root without storing the one-time code.
+Mobile-to-Quest pairing has passed on the standalone headset. The current
+endpoint and limits are explicitly development configuration; they are not a
+frozen research deployment.
 
 - Exercise disconnect/reconnect, stale payload, duplicate payload, second-client
   rejection, session rollover, completion, and abort paths.
@@ -281,6 +288,9 @@ Recommended pairing sequence:
 9. Quest publishes readiness and lifecycle state, then launches the local
    session only after configuration validation succeeds.
 10. Both sides receive explicit disconnect and session-ended state.
+11. Relay finalizes the append-only visual log on `completed` or `aborted`.
+12. Mobile downloads that snapshot and idempotently acknowledges its message
+    count and last message ID before treating the transfer as secured.
 
 The development implementation uses a local FastAPI/WebSocket relay so the
 whole system can be exercised before research values and production hosting are

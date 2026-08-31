@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Environment;
@@ -188,6 +189,58 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 Is.EqualTo("telemetry-publish-failed:InvalidOperationException"));
         }
 
+        [UnityTest]
+        public IEnumerator TerminalState_WaitsForAllTelemetryAcknowledgements()
+        {
+            var setup = CreateSetup();
+            var connectTask = setup.Bridge.ConnectAsync(
+                CreateConnectionInfo(),
+                CancellationToken.None);
+            yield return AwaitTask(connectTask);
+
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(setup.Transport.PublishedQuestStates, Has.Count.EqualTo(1));
+
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration("production-test-scene"));
+            setup.Bridge.ProcessPendingMessages();
+
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(1));
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(2));
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(3));
+            EmitPhaseChanged(
+                setup.Bridge,
+                new SessionPhaseTransition(
+                    VrSessionPhase.Stabilization,
+                    VrSessionPhase.Completed,
+                    SessionTransitionReason.StabilizationDurationElapsed,
+                    1200d,
+                    1170d));
+
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(
+                setup.Transport.PublishedTelemetryBatches,
+                Has.Count.EqualTo(1));
+            Assert.That(setup.Transport.PublishedQuestStates, Has.Count.EqualTo(1));
+
+            setup.Bridge.ProcessPendingMessages();
+            setup.Transport.EmitTelemetryAcknowledgement("batch-1");
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(
+                setup.Transport.PublishedTelemetryBatches,
+                Has.Count.EqualTo(2));
+            Assert.That(setup.Transport.PublishedQuestStates, Has.Count.EqualTo(1));
+
+            setup.Bridge.ProcessPendingMessages();
+            setup.Transport.EmitTelemetryAcknowledgement("batch-2");
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(setup.Bridge.PendingTelemetryEventCount, Is.Zero);
+            Assert.That(setup.Transport.PublishedQuestStates, Has.Count.EqualTo(2));
+            Assert.That(
+                setup.Transport.PublishedQuestStates[1].Phase,
+                Is.EqualTo(VrSessionPhase.Completed));
+        }
+
         private Setup CreateSetup()
         {
             var root = Track(new GameObject("SessionRelayBridgeHarness"));
@@ -245,6 +298,17 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             }
 
             task.GetAwaiter().GetResult();
+        }
+
+        private static void EmitPhaseChanged(
+            SessionRelayBridge bridge,
+            SessionPhaseTransition transition)
+        {
+            var handler = typeof(SessionRelayBridge).GetMethod(
+                "HandlePhaseChanged",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(handler, Is.Not.Null);
+            handler.Invoke(bridge, new object[] { transition });
         }
 
         private static SessionRelayConnectionInfo CreateConnectionInfo()

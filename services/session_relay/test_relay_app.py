@@ -134,15 +134,55 @@ class SessionRelayAppTests(unittest.TestCase):
                 )
                 self.assertEqual(telemetry, forwarded)
 
+                completed = self._envelope(
+                    "quest_state",
+                    {
+                        "sessionId": session_id,
+                        "phase": "completed",
+                        "timestamp": 1787284000.0,
+                    },
+                    "completed-message",
+                )
+                quest.send_json(completed)
+                self.assertEqual(completed, mobile.receive_json())
+
         visual_log = self.client.get(
             f"/sessions/{session_id}/visual-log",
             params={"mobileToken": session["mobileToken"]},
         )
         self.assertEqual(200, visual_log.status_code)
+        visual_log_body = visual_log.json()
+        self.assertTrue(visual_log_body["finalized"])
+        self.assertEqual("completed", visual_log_body["completionPhase"])
+        self.assertFalse(visual_log_body["deliveryAcknowledged"])
+        self.assertEqual(4, visual_log_body["messageCount"])
+        self.assertEqual("completed-message", visual_log_body["lastMessageId"])
         self.assertEqual(
-            [ready, duplicate_ready, telemetry],
-            visual_log.json()["messages"],
+            [ready, duplicate_ready, telemetry, completed],
+            visual_log_body["messages"],
         )
+
+        acknowledgement_path = (
+            f"/sessions/{session_id}/visual-log/acknowledgement"
+            f"?mobileToken={session['mobileToken']}"
+        )
+        receipt = {"messageCount": 4, "lastMessageId": "completed-message"}
+        acknowledgement = self.client.post(acknowledgement_path, json=receipt)
+        repeated = self.client.post(acknowledgement_path, json=receipt)
+        self.assertEqual(200, acknowledgement.status_code)
+        self.assertEqual(acknowledgement.json(), repeated.json())
+        self.assertTrue(acknowledgement.json()["acknowledged"])
+        acknowledged_log = self.client.get(
+            f"/sessions/{session_id}/visual-log",
+            params={"mobileToken": session["mobileToken"]},
+        )
+        self.assertTrue(acknowledged_log.json()["deliveryAcknowledged"])
+
+        stale_receipt = self.client.post(
+            acknowledgement_path,
+            json={"messageCount": 3, "lastMessageId": "telemetry-message"},
+        )
+        self.assertEqual(409, stale_receipt.status_code)
 
     @staticmethod
     def _envelope(message_type: str, payload: dict, message_id: str) -> dict:

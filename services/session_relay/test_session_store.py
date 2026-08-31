@@ -4,6 +4,7 @@ from services.session_relay.session_store import (
     ActiveSessionExistsError,
     PairingRejectedError,
     SessionStore,
+    VisualLogAcknowledgementError,
 )
 
 
@@ -54,6 +55,42 @@ class SessionStoreTests(unittest.TestCase):
             "request-2", "participant-1", "temple-pond", PREFERENCE
         )
         self.assertEqual("654321", replacement.pairing_code)
+
+    def test_visual_log_acknowledgement_requires_terminal_phase_and_is_idempotent(
+        self,
+    ) -> None:
+        session = self.store.create(
+            "request-1", "participant-1", "temple-pond", PREFERENCE
+        )
+        with self.assertRaisesRegex(
+            VisualLogAcknowledgementError,
+            "visual-log-not-finalized",
+        ):
+            self.store.acknowledge_visual_log(session.session_id, 3, "message-3")
+
+        self.store.end(session.session_id, "completed")
+        first = self.store.acknowledge_visual_log(
+            session.session_id,
+            3,
+            "message-3",
+        )
+        repeated = self.store.acknowledge_visual_log(
+            session.session_id,
+            3,
+            "message-3",
+        )
+        self.assertIs(first, repeated)
+        self.assertEqual(3, repeated.visual_log_message_count)
+
+        with self.assertRaisesRegex(
+            VisualLogAcknowledgementError,
+            "visual-log-acknowledgement-conflict",
+        ):
+            self.store.acknowledge_visual_log(
+                session.session_id,
+                4,
+                "message-4",
+            )
 
 
 if __name__ == "__main__":

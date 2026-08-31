@@ -54,7 +54,8 @@ const emptyVoice: VoiceCheckInState = {
 
 const emptyRelay: SessionRelayState = {
   connectionState: 'idle', preparedRequestId: null, preparedSession: null, questPhase: null,
-  visualTelemetryMessages: [], lastError: null,
+  visualTelemetryMessages: [], visualLogDeliveryStatus: 'idle', visualLogMessageCount: 0,
+  lastError: null,
 };
 
 const developmentTemplePreference = {
@@ -145,22 +146,25 @@ export const useMindSyncStore = create<MindSyncStore>()(
               relay: {...current.relay, connectionState, lastError: error ?? null},
               vrStatus: connectionState === 'error' ? 'disconnected' : current.vrStatus,
             })),
-            onMessage: message => set(current => {
+            onMessage: message => {
               if (message.messageType === 'quest_state') {
                 const phase = typeof message.payload.phase === 'string' ? message.payload.phase : null;
-                return {
+                const terminal = phase === 'completed' || phase === 'aborted';
+                set(current => ({
                   relay: {...current.relay, questPhase: phase},
                   vrStatus: phase === 'adaptive' ? 'active' : 'ready',
-                };
+                  sessionStatus: terminal ? 'complete' : current.sessionStatus,
+                }));
+                if (terminal) get().refreshVisualLog().catch(() => undefined);
+                return;
               }
               if (message.messageType === 'visual_telemetry_batch') {
-                return {relay: {
+                set(current => ({relay: {
                   ...current.relay,
                   visualTelemetryMessages: [...current.relay.visualTelemetryMessages, message].slice(-200),
-                }};
+                }}));
               }
-              return {};
-            }),
+            },
           });
         };
         const prepared = state.relay.preparedSession;
@@ -205,11 +209,39 @@ export const useMindSyncStore = create<MindSyncStore>()(
       refreshVisualLog: async () => {
         const prepared = get().relay.preparedSession;
         if (!prepared) return;
+        set(state => ({relay: {
+          ...state.relay,
+          visualLogDeliveryStatus: 'downloading',
+          lastError: null,
+        }}));
         try {
-          const visualTelemetryMessages = await realtimeService.fetchVisualLog(prepared);
-          set(state => ({relay: {...state.relay, visualTelemetryMessages, lastError: null}}));
+          const snapshot = await realtimeService.fetchVisualLog(prepared);
+          if (!snapshot.finalized || !snapshot.lastMessageId) {
+            set(state => ({relay: {
+              ...state.relay,
+              visualTelemetryMessages: snapshot.messages,
+              visualLogDeliveryStatus: 'pending',
+              visualLogMessageCount: snapshot.messageCount,
+              lastError: null,
+            }}));
+            return;
+          }
+          if (!snapshot.deliveryAcknowledged) {
+            await realtimeService.acknowledgeVisualLog(prepared, snapshot);
+          }
+          set(state => ({relay: {
+            ...state.relay,
+            visualTelemetryMessages: snapshot.messages,
+            visualLogDeliveryStatus: 'acknowledged',
+            visualLogMessageCount: snapshot.messageCount,
+            lastError: null,
+          }}));
         } catch (error) {
-          set(state => ({relay: {...state.relay, lastError: error instanceof Error ? error.message : 'relay-log-download-failed'}}));
+          set(state => ({relay: {
+            ...state.relay,
+            visualLogDeliveryStatus: 'error',
+            lastError: error instanceof Error ? error.message : 'relay-log-download-failed',
+          }}));
           throw error;
         }
       },
