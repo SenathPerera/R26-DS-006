@@ -29,33 +29,31 @@ type Stage = StageId; // intro | room | pre | vr | post | report
 type Phase = 'pre' | 'post';
 type Lang = 'english' | 'sinhala' | 'tamil';
 
-// Warm, open prompts. We keep a wider pool and shuffle per session so the
-// opener is never the same twice, and Sarah feels like she's actually talking
-// with you rather than reading one line. Nothing clinical, nothing leading —
-// just enough to get you speaking naturally (the score reads the audio, not the
-// words). We ask a few of these each time, combining every answer into one clip.
+// Simple, everyday prompts. The point is only to get the user talking naturally
+// for a little while — the stress score reads the AUDIO, not the words — so the
+// questions are kept easy and concrete: anyone can answer them without thinking
+// hard, which is exactly what keeps them speaking. We shuffle per session so the
+// opener varies, ask a few each time, and merge every answer into one clip.
 const QUESTION_POOL: Record<Phase, string[]> = {
   pre: [
-    'How has today actually been for you — not the polite version?',
-    "What's been sitting heaviest on your mind lately?",
-    "If you had to name what you're carrying right now, what would it be?",
-    "What's been draining you most this week?",
-    "Is there something you've been holding in that you haven't said out loud today?",
-    'When did you last feel properly at ease — and what was different then?',
-    "What's one thing you wish felt a little lighter right now?",
-    'How are you really doing, underneath everything?',
-    "What's been on your mind when things go quiet?",
+    'Tell me a little about how your day has been so far.',
+    'What did you do today before coming here?',
+    'What did you have for your last meal?',
+    'Tell me about one thing that happened today.',
+    'In simple words, how are you feeling right now?',
+    'What have you been up to this week?',
+    'Is there something small on your mind today?',
+    'What do you usually do to relax?',
   ],
   post: [
-    'How does your body feel compared with before?',
-    "What's different in your head right now, even slightly?",
-    'Is anything still sitting with you?',
-    'What feels a little lighter than when we started?',
-    'If you had to describe this moment in one word, what would it be?',
-    "What are you taking with you out of this session?",
-    'How are you leaving this — honestly?',
-    'Did anything shift while you were in there?',
-    'What do you notice in your breathing, or your shoulders, right now?',
+    'How do you feel now compared to before?',
+    'What did you notice while you were in there?',
+    'Tell me one word for how you feel right now.',
+    'Did anything feel more relaxed after the session?',
+    'What was the session like for you?',
+    'How is your body feeling right now?',
+    'Would you want to do this again? Why?',
+    'What are you going to do after this?',
   ],
 };
 const ACK = 'Thank you. Can I ask one more thing…';
@@ -143,8 +141,8 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
 function IntroStage({name, language, setLanguage, onReady, onBack}: {name: string; language: Lang; setLanguage: (l: Lang) => void; onReady: () => void; onBack: () => void}) {
   const sarah = useSarah();
   useEffect(() => {
-    const hi = name ? `Hi ${name}. I'm Sarah.` : "Hi, I'm Sarah.";
-    void sarah.say(`${hi} Before you put the headset on, I'd like to hear how you're doing — and again afterwards, so we can see what actually changed for you.`, language);
+    const hi = name ? `Hi ${name}. I'm Sarah, your AI wellbeing companion.` : "Hi, I'm Sarah, your AI wellbeing companion.";
+    void sarah.say(`${hi} For this VR session I'll ask you a few simple questions. I just want to hear your natural voice — that helps me sense how you're really feeling inside. There are no right or wrong answers. If you're okay with this, tap "I agree" and we'll begin.`, language);
     return () => sarah.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -154,8 +152,8 @@ function IntroStage({name, language, setLanguage, onReady, onBack}: {name: strin
       <View style={styles.avatarWrap}><SarahAvatar state={sarah.speaking ? 'speaking' : 'idle'} size="lg" /></View>
       <Text style={styles.sarahIntro}>Hi{name ? ` ${name}` : ''}, I’m Sarah — your AI wellbeing companion. I’ll guide this check-in and stay with you the whole way through.</Text>
       <GlassCard>
-        <Text style={styles.display}>Your voice knows before you do.</Text>
-        <Text style={styles.body}>We’ll talk twice — once now, once after your session — so we can see what actually changed. Your voice carries how you’re really feeling, often before you’d put it into words.</Text>
+        <Text style={styles.display}>A few simple questions.</Text>
+        <Text style={styles.body}>For this VR session I’ll ask you some easy questions — once now, once after. I just want to hear your natural voice, because it carries how you’re really feeling inside. There are no right or wrong answers.</Text>
       </GlassCard>
       <GlassCard>
         <InfoRow icon={Clock} text="About a minute" />
@@ -168,7 +166,7 @@ function IntroStage({name, language, setLanguage, onReady, onBack}: {name: strin
         <Pill label="සිංහල" active={language === 'sinhala'} onPress={() => setLanguage('sinhala')} />
         <Pill label="தமிழ்" active={language === 'tamil'} onPress={() => setLanguage('tamil')} />
       </View>
-      <PrimaryButton label="I’m ready" onPress={() => { sarah.stop(); onReady(); }} />
+      <PrimaryButton label="I agree" onPress={() => { sarah.stop(); onReady(); }} />
       <TextLink label="Not now" onPress={() => { sarah.stop(); onBack(); }} />
     </>
   );
