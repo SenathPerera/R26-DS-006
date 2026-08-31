@@ -177,16 +177,23 @@ outbound Quest-state/visual-telemetry serialization are implemented and covered
 by Unity EditMode tests. A runtime Unity bridge now validates the configured
 scene on the main thread, forwards relay inputs through `VisualSessionBoundary`,
 and publishes session-phase snapshots; its focused PlayMode tests are validated.
-The non-secret connection profile and runtime pairing entry point are now
-implemented and validated. Locally durable visual telemetry is now exposed to
-the bridge and published in configuration-sized relay batches; a failed batch
-is retained instead of being discarded. Relay-backend integration, runtime
-pairing UI, reconnect credential renewal, final delivery acknowledgement and
-offline-log recovery, and production scene wiring remain pending.
+The non-secret connection profile, controller-ray pairing UI, development
+relay, and production Temple Pond scene wiring are now implemented and
+validated. Locally durable visual telemetry is exposed to the bridge and
+published in configuration-sized relay batches; a failed batch is retained
+instead of being discarded. The relay forwards Quest readiness and waits the
+configured 30-second initialization period before issuing exactly one `start`
+command. Terminal visual logs are downloaded by mobile and acknowledged using
+an exact message-count/last-message receipt. Quest defers its terminal phase
+snapshot until every locally queued telemetry batch has a relay
+acknowledgement, preventing final critical events from falling outside the
+finalized log. Reconnect credential renewal, relay-restart recovery, Supabase
+handoff, and full pilot-length validation remain pending.
 
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
-  commands, readiness/status, and completed visual-log transfer.
+  commands, readiness/status, and completed visual-log transfer. The
+  development path is implemented; deployment hardening remains.
 - Make command handling idempotent and use stable message IDs.
 - Keep session control operational when Component B is temporarily unavailable.
 
@@ -246,12 +253,15 @@ been agreed with the mobile/relay team.
 ### Slice E: hardening and Quest validation
 
 **Status:** In progress. A development FastAPI relay, React Native prepared-
-session flow, six-digit code display, Quest gaze keypad, pseudonymous Quest
-installation identity, relay bridge, telemetry acknowledgement, and durable
-relay-side visual log are implemented. A Unity editor command creates the
-development profile and wires the Temple Pond composition root without storing
-the one-time code. The current endpoint and limits are explicitly development
-configuration; they are not a frozen research deployment.
+session flow, six-digit code display, Quest controller-ray keypad, pseudonymous
+Quest installation identity, relay bridge, telemetry acknowledgement, and
+durable relay-side visual log are implemented. Terminal log download,
+idempotent mobile acknowledgement, and an in-app retry state are also
+implemented. A Unity editor command creates the development profile and wires
+the Temple Pond composition root without storing the one-time code.
+Mobile-to-Quest pairing has passed on the standalone headset. The current
+endpoint and limits are explicitly development configuration; they are not a
+frozen research deployment.
 
 - Exercise disconnect/reconnect, stale payload, duplicate payload, second-client
   rejection, session rollover, completion, and abort paths.
@@ -278,6 +288,9 @@ Recommended pairing sequence:
 9. Quest publishes readiness and lifecycle state, then launches the local
    session only after configuration validation succeeds.
 10. Both sides receive explicit disconnect and session-ended state.
+11. Relay finalizes the append-only visual log on `completed` or `aborted`.
+12. Mobile downloads that snapshot and idempotently acknowledges its message
+    count and last message ID before treating the transfer as secured.
 
 The development implementation uses a local FastAPI/WebSocket relay so the
 whole system can be exercised before research values and production hosting are
@@ -302,9 +315,22 @@ Mobile receives that export, joins it with its pre/post-session data, and owns
 the final Supabase upload and retry behavior. Only pseudonymous participant and
 session identifiers should cross this boundary.
 
+The mobile-owned composite record uses schema
+`mindsync-complete-session-v1`. Its root `sessionId` is the identifier created
+before the pre-session voice interaction. Component D output remains under the
+`voice` contribution, while the relay-generated Quest session identifier and
+finalized visual envelopes remain under the `visual` contribution. The two
+payloads must not be flattened because they contain overlapping field names.
+Completed composite records are written idempotently to the mobile
+`mindsync_complete_session_outbox_v1` AsyncStorage outbox before any remote
+upload. An outbox item is eligible for upload only after the visual log has
+been finalized and delivery-acknowledged. The Supabase adapter is responsible
+for removing an item only after a confirmed idempotent write.
+
 Audio-agent events are intentionally absent from the first implementation.
 When the teammate's audio contract is ready, it should be added as a separately
-versioned log contribution rather than coupled to the visual policy.
+versioned log contribution rather than coupled to the visual policy. Until
+then, the composite record carries `audio: null`.
 
 ## 8. Constraints, risks, and follow-ups
 

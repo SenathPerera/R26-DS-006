@@ -3,6 +3,7 @@ export type ConnectionState = 'idle' | 'scanning' | 'connecting' | 'connected' |
 export type VrStatus = 'not-paired' | 'pairing' | 'ready' | 'waiting' | 'active' | 'disconnected';
 export type SessionStatus = 'ready' | 'active' | 'paused' | 'ending' | 'complete';
 export type SessionRelayConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
+export type VisualLogDeliveryStatus = 'idle' | 'downloading' | 'pending' | 'acknowledged' | 'error';
 export type QuestionType = 'single' | 'multiple' | 'likert' | 'text' | 'numeric' | 'slider' | 'voice';
 
 export interface UserProfile {
@@ -122,12 +123,33 @@ export interface PreparedVrSession {
   mobileToken: string;
 }
 
+export interface RelayEnvelope {
+  schemaVersion: string;
+  messageId: string;
+  messageType: string;
+  payload: Record<string, unknown>;
+}
+
+export interface VisualLogSnapshot {
+  schemaVersion: string;
+  sessionId: string;
+  finalized: boolean;
+  completionPhase: 'completed' | 'aborted' | null;
+  deliveryAcknowledged: boolean;
+  messageCount: number;
+  lastMessageId: string | null;
+  messages: RelayEnvelope[];
+}
+
 export interface SessionRelayState {
   connectionState: SessionRelayConnectionState;
   preparedRequestId: string | null;
   preparedSession: PreparedVrSession | null;
   questPhase: string | null;
   visualTelemetryMessages: unknown[];
+  visualLogSnapshot: VisualLogSnapshot | null;
+  visualLogDeliveryStatus: VisualLogDeliveryStatus;
+  visualLogMessageCount: number;
   lastError: string | null;
 }
 

@@ -13,13 +13,17 @@ from .session_store import SessionStore
 class SessionRelayAppTests(unittest.TestCase):
     def setUp(self) -> None:
         self._temporary_directory = tempfile.TemporaryDirectory()
+        self._initialization_delay_seconds = relay.INITIALIZATION_DELAY_SECONDS
         relay.DATA_DIRECTORY = Path(self._temporary_directory.name)
+        relay.INITIALIZATION_DELAY_SECONDS = 0
         relay.store = SessionStore(code_factory=lambda: "482731")
         relay.channels = relay.SessionChannels()
-        self.client = TestClient(relay.app)
+        self._client_context = TestClient(relay.app)
+        self.client = self._client_context.__enter__()
 
     def tearDown(self) -> None:
-        self.client.close()
+        self._client_context.__exit__(None, None, None)
+        relay.INITIALIZATION_DELAY_SECONDS = self._initialization_delay_seconds
         self._temporary_directory.cleanup()
 
     def test_mobile_and_quest_complete_pairing_command_and_telemetry_flow(self) -> None:
@@ -63,16 +67,46 @@ class SessionRelayAppTests(unittest.TestCase):
 
                 pairing = quest.receive_json()
                 configuration = quest.receive_json()
-                start = quest.receive_json()
                 self.assertTrue(pairing["payload"]["accepted"])
                 self.assertEqual("session_configuration", configuration["messageType"])
-                self.assertEqual("start", start["payload"]["command"])
 
+                # A command sent before readiness must arrive before start. This
+                # guards against starting immediately after configuration.
                 mobile.send_json(
                     self._envelope(
                         "session_command",
                         {"sessionId": session_id, "command": "pause"},
                         "mobile-command",
+                    )
+                )
+                self.assertEqual("pause", quest.receive_json()["payload"]["command"])
+
+                ready = self._envelope(
+                    "quest_state",
+                    {
+                        "sessionId": session_id,
+                        "phase": "ready",
+                        "timestamp": 1787282800.0,
+                    },
+                    "ready-message",
+                )
+                quest.send_json(ready)
+                self.assertEqual(ready, mobile.receive_json())
+                start = quest.receive_json()
+                self.assertEqual("start", start["payload"]["command"])
+
+                duplicate_ready = self._envelope(
+                    "quest_state",
+                    ready["payload"],
+                    "duplicate-ready-message",
+                )
+                quest.send_json(duplicate_ready)
+                self.assertEqual(duplicate_ready, mobile.receive_json())
+                mobile.send_json(
+                    self._envelope(
+                        "session_command",
+                        {"sessionId": session_id, "command": "pause"},
+                        "post-ready-command",
                     )
                 )
                 self.assertEqual("pause", quest.receive_json()["payload"]["command"])
@@ -100,12 +134,55 @@ class SessionRelayAppTests(unittest.TestCase):
                 )
                 self.assertEqual(telemetry, forwarded)
 
+                completed = self._envelope(
+                    "quest_state",
+                    {
+                        "sessionId": session_id,
+                        "phase": "completed",
+                        "timestamp": 1787284000.0,
+                    },
+                    "completed-message",
+                )
+                quest.send_json(completed)
+                self.assertEqual(completed, mobile.receive_json())
+
         visual_log = self.client.get(
             f"/sessions/{session_id}/visual-log",
             params={"mobileToken": session["mobileToken"]},
         )
         self.assertEqual(200, visual_log.status_code)
-        self.assertEqual([telemetry], visual_log.json()["messages"])
+        visual_log_body = visual_log.json()
+        self.assertTrue(visual_log_body["finalized"])
+        self.assertEqual("completed", visual_log_body["completionPhase"])
+        self.assertFalse(visual_log_body["deliveryAcknowledged"])
+        self.assertEqual(4, visual_log_body["messageCount"])
+        self.assertEqual("completed-message", visual_log_body["lastMessageId"])
+        self.assertEqual(
+            [ready, duplicate_ready, telemetry, completed],
+            visual_log_body["messages"],
+        )
+
+        acknowledgement_path = (
+            f"/sessions/{session_id}/visual-log/acknowledgement"
+            f"?mobileToken={session['mobileToken']}"
+        )
+        receipt = {"messageCount": 4, "lastMessageId": "completed-message"}
+        acknowledgement = self.client.post(acknowledgement_path, json=receipt)
+        repeated = self.client.post(acknowledgement_path, json=receipt)
+        self.assertEqual(200, acknowledgement.status_code)
+        self.assertEqual(acknowledgement.json(), repeated.json())
+        self.assertTrue(acknowledgement.json()["acknowledged"])
+        acknowledged_log = self.client.get(
+            f"/sessions/{session_id}/visual-log",
+            params={"mobileToken": session["mobileToken"]},
+        )
+        self.assertTrue(acknowledged_log.json()["deliveryAcknowledged"])
+
+        stale_receipt = self.client.post(
+            acknowledgement_path,
+            json={"messageCount": 3, "lastMessageId": "telemetry-message"},
+        )
+        self.assertEqual(409, stale_receipt.status_code)
 
     @staticmethod
     def _envelope(message_type: str, payload: dict, message_id: str) -> dict:

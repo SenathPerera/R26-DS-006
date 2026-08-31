@@ -52,6 +52,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private int maximumTelemetryEventsPerBatch;
         private bool telemetryPublishBlocked;
         private bool coordinatorSubscribed;
+        private bool terminalQuestStateDeferred;
+        private VrSessionPhase deferredTerminalPhase;
         private string acceptedSessionId;
 
         public string LastValidationError { get; private set; } = string.Empty;
@@ -155,6 +157,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         "A session relay transport is already active.");
                 }
 
+                terminalQuestStateDeferred = false;
+
                 var factory = transportFactory
                     ?? new SessionRelayTransportFactory();
                 var transport = factory.Create(connectionInfo)
@@ -217,6 +221,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 {
                     DetachTransport(transport);
                     acceptedSessionId = null;
+                    terminalQuestStateDeferred = false;
                     ClearPendingQuestStates();
                 }
             }
@@ -239,8 +244,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 processedCount++;
             }
 
-            TryStartQuestStatePublish();
             TryStartTelemetryPublish();
+            TryQueueDeferredTerminalQuestState();
+            TryStartQuestStatePublish();
             return processedCount;
         }
 
@@ -368,6 +374,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void QueueCurrentQuestState()
         {
+            QueueQuestState(productionCoordinator.Phase);
+        }
+
+        private void QueueQuestState(VrSessionPhase phase)
+        {
             var transport = GetActiveTransport();
             var sessionId = transport?.ActiveSessionId;
             if (transport == null
@@ -382,7 +393,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 new SessionRelayQuestState(
                     Guid.NewGuid().ToString("N"),
                     sessionId,
-                    productionCoordinator.Phase,
+                    phase,
                     UtcNowUnixSeconds()));
         }
 
@@ -570,7 +581,35 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void HandlePhaseChanged(SessionPhaseTransition transition)
         {
+            if (transition.CurrentPhase == VrSessionPhase.Completed
+                || transition.CurrentPhase == VrSessionPhase.Aborted)
+            {
+                terminalQuestStateDeferred = true;
+                deferredTerminalPhase = transition.CurrentPhase;
+                return;
+            }
+
             QueueCurrentQuestState();
+        }
+
+        private void TryQueueDeferredTerminalQuestState()
+        {
+            if (!terminalQuestStateDeferred
+                || activeTelemetryPublish != null
+                || activeTelemetryBatch != null
+                || telemetryPublishBlocked)
+            {
+                return;
+            }
+
+            var telemetrySource = ResolveTelemetrySource();
+            if (telemetrySource != null && telemetrySource.PendingEventCount > 0)
+            {
+                return;
+            }
+
+            terminalQuestStateDeferred = false;
+            QueueQuestState(deferredTerminalPhase);
         }
 
         private void RejectInbound(string reason)
@@ -640,6 +679,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             DetachTransport(transport);
             acceptedSessionId = null;
+            terminalQuestStateDeferred = false;
             ClearPendingQuestStates();
             visualSessionBoundary?.ReceiveConnectionState(
                 SessionTransportConnectionState.Disconnected);

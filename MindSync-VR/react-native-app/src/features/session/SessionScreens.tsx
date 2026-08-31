@@ -68,10 +68,19 @@ export function LiveSessionScreen({navigation}: any) {
 
 export function SessionCompleteScreen({navigation}: any) {
   const active = useMindSyncStore(state => state.activeSession);
+  const visualLogStatus = useMindSyncStore(state => state.relay.visualLogDeliveryStatus);
+  const visualLogMessageCount = useMindSyncStore(state => state.relay.visualLogMessageCount);
+  const refreshVisualLog = useMindSyncStore(state => state.refreshVisualLog);
+  const logStatusLabel = visualLogStatus === 'acknowledged'
+    ? `Session data secured · ${visualLogMessageCount} messages`
+    : visualLogStatus === 'error'
+      ? 'Session data transfer needs retry'
+      : 'Securing session data…';
   return (
     <Screen style={{justifyContent: 'center'}}>
       <View style={{alignItems: 'center'}}><BreathingVisual size={150} /></View>
-      <Card><Text style={[uiStyles.value, {textAlign: 'center'}]}>Session complete</Text><Text style={[uiStyles.body, {textAlign: 'center'}]}>Take your time before moving. Your reflection helps validate this session without judging how you felt.</Text><Text style={[uiStyles.label, {textAlign: 'center'}]}>{active?.title ?? 'Adaptive meditation'}</Text></Card>
+      <Card><Text style={[uiStyles.value, {textAlign: 'center'}]}>Session complete</Text><Text style={[uiStyles.body, {textAlign: 'center'}]}>Take your time before moving. Your reflection helps validate this session without judging how you felt.</Text><Text style={[uiStyles.label, {textAlign: 'center'}]}>{active?.title ?? 'Adaptive meditation'}</Text><StatusPill label={logStatusLabel} tone={visualLogStatus === 'error' ? 'warning' : 'good'} /></Card>
+      {visualLogStatus === 'error' ? <SecondaryButton label="Retry session data transfer" onPress={() => { refreshVisualLog().catch(() => undefined); }} /> : null}
       <PrimaryButton label="Complete post-session validation" onPress={() => navigation.replace('QuestionnaireForm', {templateId: 'component-d-post-v1'})} />
       <SecondaryButton label="Return home" onPress={() => navigation.navigate('MainTabs')} />
     </Screen>

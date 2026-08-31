@@ -19,6 +19,9 @@ class PreparedSession:
     mobile_token: str
     quest_client_id: str | None = None
     ended: bool = False
+    completion_phase: str | None = None
+    visual_log_message_count: int | None = None
+    visual_log_last_message_id: str | None = None
 
 
 class SessionStore:
@@ -121,11 +124,47 @@ class SessionStore:
         with self._lock:
             return self._sessions_by_id.get(session_id)
 
-    def end(self, session_id: str) -> None:
+    def end(self, session_id: str, completion_phase: str | None = None) -> None:
+        if completion_phase not in {None, "completed", "aborted"}:
+            raise ValueError("completion_phase is invalid")
         with self._lock:
             session = self._sessions_by_id.get(session_id)
             if session is not None:
                 session.ended = True
+                if completion_phase is not None:
+                    session.completion_phase = completion_phase
+
+    def acknowledge_visual_log(
+        self,
+        session_id: str,
+        message_count: int,
+        last_message_id: str,
+    ) -> PreparedSession:
+        if (
+            isinstance(message_count, bool)
+            or not isinstance(message_count, int)
+            or message_count < 1
+        ):
+            raise VisualLogAcknowledgementError("visual-log-message-count-invalid")
+        last_message_id = self._required(last_message_id, "last_message_id")
+        with self._lock:
+            session = self._sessions_by_id.get(session_id)
+            if session is None:
+                raise VisualLogAcknowledgementError("session-not-found")
+            if session.completion_phase is None:
+                raise VisualLogAcknowledgementError("visual-log-not-finalized")
+            if session.visual_log_message_count is not None:
+                if (
+                    session.visual_log_message_count != message_count
+                    or session.visual_log_last_message_id != last_message_id
+                ):
+                    raise VisualLogAcknowledgementError(
+                        "visual-log-acknowledgement-conflict"
+                    )
+                return session
+            session.visual_log_message_count = message_count
+            session.visual_log_last_message_id = last_message_id
+            return session
 
     def _expire_unpaired(self, now: float) -> None:
         for session in self._sessions_by_id.values():
@@ -182,4 +221,8 @@ class PairingRejectedError(RuntimeError):
 
 
 class MobileAuthenticationError(RuntimeError):
+    pass
+
+
+class VisualLogAcknowledgementError(RuntimeError):
     pass
