@@ -4995,6 +4995,7 @@ GameObject:
   - component: {fileID: 1414086898}
   - component: {fileID: 1414086899}
   - component: {fileID: 1414086900}
+  - component: {fileID: 1414086901}
   m_Layer: 0
   m_Name: AdaptiveEnvironment
   m_TagString: Untagged
@@ -5103,6 +5104,22 @@ MonoBehaviour:
   m_EditorClassIdentifier:
   productionCoordinator: {fileID: 1414086899}
   maximumMessagesPerFrame: 64
+--- !u!114 &1414086901
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1414086894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7fd5b0273dcb45b4bcd377bd31b8ce6a, type: 3}
+  m_Name:
+  m_EditorClassIdentifier:
+  productionCoordinator: {fileID: 1414086899}
+  visualSessionBoundary: {fileID: 1414086900}
+  streamConnectionProfile: {fileID: 11400000, guid: d37ea6fd51534a5d91e603b5dd448969, type: 2}
+  reconnectBackoffProfile: {fileID: 11400000, guid: d51d5b57a8f74a20b8113d36f2140764, type: 2}
 --- !u!1 &1423676677
 GameObject:
   m_ObjectHideFlags: 0

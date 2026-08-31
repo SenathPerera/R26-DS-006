@@ -140,16 +140,24 @@ Quest-device validation remain pending.
 
 ### Slice C: prediction gate and production wiring
 
-**Status:** Forwarding gate, validated connection profile, and production
-bridge are implemented in source. Unity Test Runner validation and serialized
-Temple Pond wiring remain pending. The endpoint and reconnect asset values must
-be approved before scene wiring.
+**Status:** Implemented and validated in Unity Test Runner. The Temple Pond
+scene is wired to the approved local pilot configuration. Quest-device and
+end-to-end Component B validation remain pending.
 
 - Add `windowEnd` deduplication and the configurable 60-second forwarding gate.
 - Connect only for an active session and disconnect on completion or abort.
 - Forward accepted windows through the existing transport-neutral visual
   session boundary and production coordinator; do not bypass physiology
   validation, reward attribution, policy, or safety layers.
+
+Approved local pilot connection configuration:
+
+- Component B stream: `ws://192.168.1.23:8000/stream`.
+- Keepalive interval: 20 seconds.
+- Maximum inbound message size: 65,536 bytes.
+- Reconnect schedule: eight attempts, one-second initial delay, multiplier 2,
+  and a 16-second delay cap. When attempts are exhausted, adaptation remains
+  safely frozen rather than fabricating physiological input.
 
 ### Slice D: mobile-to-Quest relay adapter
 
