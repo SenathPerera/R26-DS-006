@@ -235,6 +235,13 @@ been agreed with the mobile/relay team.
 
 ### Slice E: hardening and Quest validation
 
+**Status:** In progress. The source/configuration baseline and remaining pilot
+gates are recorded in
+`docs/plans/TEMPLE_POND_QUEST_PILOT_READINESS.md`. The production scene is not
+yet wired to the relay because the endpoint, frozen schema, pairing/resume
+contract, telemetry limits, and Quest client-ID policy remain cross-team
+inputs. No placeholder production values will be serialized into the scene.
+
 - Exercise disconnect/reconnect, stale payload, duplicate payload, second-client
   rejection, session rollover, completion, and abort paths.
 - Validate TLS and Android network configuration in a Quest build.
