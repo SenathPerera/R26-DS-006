@@ -114,6 +114,8 @@ intervals serve different purposes and must remain independently configurable.
 
 ### Slice A: Component B parser
 
+**Status:** Implemented and validated in Unity EditMode on 2026-08-31.
+
 - Add `ComponentBStressPayloadParser` at the networking boundary.
 - Map JSON into the existing transport-neutral `PhysiologyWindow` and
   `StressDecision` types.
@@ -125,6 +127,9 @@ intervals serve different purposes and must remain independently configurable.
 - Cover point, band, malformed, and incomplete payloads with EditMode tests.
 
 ### Slice B: Component B streaming client
+
+**Status:** Implemented in source with focused tests; Unity Test Runner and
+Quest-device validation remain pending.
 
 - Implement an asynchronous Quest-compatible WebSocket client behind a
   focused Component B source abstraction.

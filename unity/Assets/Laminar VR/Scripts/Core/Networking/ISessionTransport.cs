@@ -14,7 +14,7 @@ namespace LaminarVR.AdaptiveMeditation.Networking
     public interface ISessionTransport<
         TSessionConfiguration,
         TSessionCommand,
-        TQuestState>
+        TQuestState> : IReconnectableConnection
     {
         event Action<TSessionConfiguration> SessionConfigurationReceived;
 
@@ -23,10 +23,6 @@ namespace LaminarVR.AdaptiveMeditation.Networking
         event Action<TSessionCommand> SessionCommandReceived;
 
         event Action<SessionTransportStatus> StatusChanged;
-
-        SessionTransportConnectionState ConnectionState { get; }
-
-        Task ConnectAsync(CancellationToken cancellationToken);
 
         Task PublishQuestStateAsync(
             TQuestState state,
