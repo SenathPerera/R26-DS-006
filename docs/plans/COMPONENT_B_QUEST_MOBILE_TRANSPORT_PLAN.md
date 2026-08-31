@@ -140,6 +140,11 @@ Quest-device validation remain pending.
 
 ### Slice C: prediction gate and production wiring
 
+**Status:** Forwarding gate, validated connection profile, and production
+bridge are implemented in source. Unity Test Runner validation and serialized
+Temple Pond wiring remain pending. The endpoint and reconnect asset values must
+be approved before scene wiring.
+
 - Add `windowEnd` deduplication and the configurable 60-second forwarding gate.
 - Connect only for an active session and disconnect on completion or abort.
 - Forward accepted windows through the existing transport-neutral visual

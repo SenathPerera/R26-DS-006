@@ -91,6 +91,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private EnvironmentState preferredEnvironment;
         private bool hasSessionContext;
 
+        public event Action<SessionPhaseTransition> PhaseChanged;
+
         public bool IsInitialized { get; private set; }
 
         public string LastValidationError { get; private set; } = string.Empty;
@@ -102,6 +104,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             : session.Phase;
 
         public bool IsNetworkConnected => networkConnected;
+
+        public double ExpectedPhysiologyOutputIntervalSeconds =>
+            coordinatorConfiguration
+                ?.ExpectedPhysiologyOutputIntervalSeconds
+            ?? 0d;
 
         public PhysiologyIngestionResult LastPhysiologyIngestionResult
         {
@@ -976,6 +983,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         Array.Empty<TelemetryField>());
                     break;
             }
+
+            PhaseChanged?.Invoke(transition);
         }
 
         private void RequestInvalidation(
