@@ -161,11 +161,30 @@ Approved local pilot connection configuration:
 
 ### Slice D: mobile-to-Quest relay adapter
 
+**Status:** In progress. Transport-neutral configuration/command messages and
+strict Quest-side JSON parsing are implemented in source. Unity Test Runner
+validation, pairing, socket lifecycle, outbound state/log serialization, and
+production wiring remain pending.
+
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
   commands, readiness/status, and completed visual-log transfer.
 - Make command handling idempotent and use stable message IDs.
 - Keep session control operational when Component B is temporarily unavailable.
+
+The current draft inbound envelope is intentionally version-configurable; a
+production schema identifier has not been invented in code. It contains:
+
+- `schemaVersion`, `messageId`, `messageType`, and `payload`.
+- `session_configuration` payloads with `sessionId`,
+  `participantPseudonym`, `sceneId`, and five named normalized values under
+  `preferredEnvironment`.
+- `session_command` payloads with `sessionId` and one of `start`, `pause`,
+  `resume`, `stop`, or `emergency_stop`.
+
+For commands, the stable envelope `messageId` is also the coordinator command
+ID, preserving idempotency across relay retries. Quest rejects incomplete,
+unsupported, non-normalized, or schema-mismatched messages before dispatch.
 
 ### Slice E: hardening and Quest validation
 
@@ -223,6 +242,9 @@ versioned log contribution rather than coupled to the visual policy.
   fabricate physiology or prevent local emergency exit.
 - The exact relay backend, pairing-code lifetime, message schema version, log
   chunking limits, and retention policy remain cross-team decisions.
+- The repository currently contains native Android and React Native mobile
+  prototypes; the team must identify the active mobile implementation before a
+  matching production relay client is added there.
 - `TODO(RESEARCH_DECISION)`: confirm whether the 60-second physiology forwarding
   gate remains in the frozen study configuration after full end-to-end timing
   validation.
