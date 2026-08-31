@@ -161,10 +161,11 @@ Approved local pilot connection configuration:
 
 ### Slice D: mobile-to-Quest relay adapter
 
-**Status:** In progress. Transport-neutral configuration/command messages and
-strict Quest-side JSON parsing are implemented in source. Unity Test Runner
-validation, pairing, socket lifecycle, outbound state/log serialization, and
-production wiring remain pending.
+**Status:** In progress. Transport-neutral messages, strict Quest-side parsing,
+the pairing-capable WebSocket transport core, command deduplication, and
+outbound Quest-state/visual-telemetry serialization are implemented in source.
+Unity Test Runner validation, relay-backend integration, runtime pairing UI,
+reconnect credential renewal, and production scene wiring remain pending.
 
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
@@ -185,6 +186,27 @@ production schema identifier has not been invented in code. It contains:
 For commands, the stable envelope `messageId` is also the coordinator command
 ID, preserving idempotency across relay retries. Quest rejects incomplete,
 unsupported, non-normalized, or schema-mismatched messages before dispatch.
+
+The current Quest-side transport draft adds these relay messages:
+
+- `pairing_request` from Quest with `pairingCode`, the fixed `quest` client
+  role, a pseudonymous Quest installation/client ID, and app version.
+- `pairing_result` from the relay with `accepted` and either the bound
+  `sessionId` or a non-sensitive `rejectionCode`.
+- `quest_state` from Quest with the bound `sessionId`, session phase, and UTC
+  timestamp.
+- `visual_telemetry_batch` from Quest with the existing versioned visual
+  telemetry events and their typed fields.
+
+These are draft cross-component field names until the mobile/relay team freezes
+the shared schema. The schema version remains a required runtime input rather
+than a hardcoded production identifier. The pairing code is runtime-only and is
+never written to a ScriptableObject, scene, diagnostic code, or log message.
+
+The transport reports `Connected` only after the WebSocket is open and the
+relay accepts pairing. It rejects messages for a different session and drops
+duplicate configuration/command message IDs. Component B physiology remains on
+its independent direct stream and is not carried by this transport.
 
 ### Slice E: hardening and Quest validation
 
@@ -213,6 +235,12 @@ The relay is an architectural recommendation, not an authorization to choose a
 specific backend framework or hosting provider. Credentials, endpoint URLs,
 timeouts, and protocol versions must be deployment configuration, not hardcoded
 research constants.
+
+The current one-time pairing credential is sufficient for the initial socket.
+Safe automatic reconnection requires a relay-defined renewable/resume credential
+or a fresh code supplied by mobile. That authentication field and lifetime must
+be agreed with the relay team before automatic reconnection is enabled; Quest
+must not silently reuse or persist a consumed one-time code.
 
 ## 7. Session log ownership
 
