@@ -166,9 +166,10 @@ the pairing-capable WebSocket transport core, command deduplication, and
 outbound Quest-state/visual-telemetry serialization are implemented and covered
 by Unity EditMode tests. A runtime Unity bridge now validates the configured
 scene on the main thread, forwards relay inputs through `VisualSessionBoundary`,
-and publishes session-phase snapshots. Its PlayMode tests, relay-backend
-integration, runtime pairing UI, reconnect credential renewal, completed-log
-handoff, and production scene wiring remain pending.
+and publishes session-phase snapshots; its focused PlayMode tests are validated.
+The non-secret connection profile and runtime pairing entry point are now
+implemented. Relay-backend integration, runtime pairing UI, reconnect credential
+renewal, completed-log handoff, and production scene wiring remain pending.
 
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
@@ -211,13 +212,21 @@ relay accepts pairing. It rejects messages for a different session and drops
 duplicate configuration/command message IDs. Component B physiology remains on
 its independent direct stream and is not carried by this transport.
 
-`SessionRelayBridge` is the Unity lifecycle boundary around that transport. It
-accepts `SessionRelayConnectionInfo` from a future runtime pairing flow rather
-than serializing a code into the Temple Pond scene. Transport callbacks are
-queued and dispatched on Unity's main thread; scene IDs are checked against the
-initialized `ApplicationBootstrap` profile before preferences reach the
-production coordinator. Disable/shutdown freezes the visual network state and
-disconnects the relay without blocking a frame.
+`SessionRelayBridge` is the Unity lifecycle boundary around that transport. Its
+PlayMode routing, rejection, and shutdown tests are validated. Transport
+callbacks are queued and dispatched on Unity's main thread; scene IDs are
+checked against the initialized `ApplicationBootstrap` profile before
+preferences reach the production coordinator. Disable/shutdown freezes the
+visual network state and disconnects the relay without blocking a frame.
+
+`SessionRelayConnectionProfile` holds only non-secret deployment settings:
+relay endpoint, draft schema version, and maximum inbound message size. A
+`SessionRelayPairingController` accepts the one-time pairing code and
+pseudonymous Quest client ID at runtime, combines them with `Application.version`,
+and passes the resulting runtime-only connection object to the bridge. Neither
+runtime credential is serialized into the profile or scene. Non-TLS `ws://`
+requires an explicit development-only opt-in; deployed configurations should
+use `wss://`.
 
 ### Slice E: hardening and Quest validation
 

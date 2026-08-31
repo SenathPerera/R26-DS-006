@@ -12,7 +12,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
     [AddComponentMenu(
         "Adaptive Meditation/Application/Session Relay Bridge")]
     [DisallowMultipleComponent]
-    public sealed class SessionRelayBridge : MonoBehaviour
+    public sealed class SessionRelayBridge : MonoBehaviour,
+        ISessionRelayConnectionTarget
     {
         private const int DefaultMaximumMessagesPerFrame = 64;
 
