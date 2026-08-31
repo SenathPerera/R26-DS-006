@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 namespace LaminarVR.AdaptiveMeditation.Editor
 {
@@ -13,6 +14,10 @@ namespace LaminarVR.AdaptiveMeditation.Editor
         private const string ProfilePath =
             "Assets/Laminar VR/Configuration/Networking/"
             + "TemplePondDevelopmentSessionRelayProfile.asset";
+
+        private const string InputActionsPath =
+            "Assets/Samples/XR Interaction Toolkit/3.0.11/Starter Assets/"
+            + "XRI Default Input Actions.inputactions";
 
         [MenuItem(
             "Adaptive Meditation/Configure Temple Pond Development Relay")]
@@ -44,6 +49,19 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             }
 
             var profile = LoadOrCreateProfile();
+            var inputActions = AssetDatabase.LoadAssetAtPath<InputActionAsset>(
+                InputActionsPath);
+            if (inputActions == null)
+            {
+                EditorUtility.DisplayDialog(
+                    "Temple Pond Relay",
+                    "The XRI Default Input Actions asset could not be found. "
+                    + "Reimport the XR Interaction Toolkit Starter Assets "
+                    + "sample before configuring the relay.",
+                    "OK");
+                return;
+            }
+
             var bridge = GetOrAdd<SessionRelayBridge>(root);
             var pairing = GetOrAdd<SessionRelayPairingController>(root);
             var panel = GetOrAdd<QuestPairingRuntimePanel>(root);
@@ -54,6 +72,7 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             SetReference(pairing, "connectionProfile", profile);
             SetReference(pairing, "sessionRelayBridge", bridge);
             SetReference(panel, "pairingController", pairing);
+            SetReference(panel, "inputActions", inputActions);
 
             PlayerSettings.SetApplicationIdentifier(
                 NamedBuildTarget.Android,

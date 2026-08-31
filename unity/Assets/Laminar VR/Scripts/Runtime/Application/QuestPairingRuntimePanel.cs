@@ -1,7 +1,10 @@
 using System;
 using System.Threading;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UI;
+using UnityEngine.XR;
+using XRCommonUsages = UnityEngine.XR.CommonUsages;
 
 namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 {
@@ -19,9 +22,20 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         [SerializeField]
         private Camera viewingCamera = null;
 
-        [Header("Comfortable Gaze Input")]
+        [Header("Placement")]
         [SerializeField, Min(0.5f)]
         private float panelDistanceMeters = 1.75f;
+
+        [Header("Controller Ray Input")]
+        [SerializeField]
+        private InputActionAsset inputActions = null;
+
+        [SerializeField, Min(1f)]
+        private float controllerRayDistanceMeters = 5f;
+
+        [Header("Optional Accessibility Fallback")]
+        [SerializeField]
+        private bool enableGazeFallback = false;
 
         [SerializeField, Min(0.5f)]
         private float dwellSeconds = 1.1f;
@@ -36,6 +50,19 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private QuestPairingGazeTarget currentTarget;
         private QuestPairingGazeTarget consumedTarget;
         private float currentDwellSeconds;
+        private InputAction leftAimPosition;
+        private InputAction leftAimRotation;
+        private InputAction rightAimPosition;
+        private InputAction rightAimRotation;
+        private bool leftPressWasActive;
+        private bool rightPressWasActive;
+        private GameObject controllerVisualRoot;
+        private LineRenderer leftControllerRay;
+        private LineRenderer rightControllerRay;
+        private RectTransform leftControllerCursor;
+        private RectTransform rightControllerCursor;
+        private Material controllerRayMaterial;
+        private bool controllerTrackingWasAvailable = true;
 
         public string EnteredCode => enteredCode;
 
@@ -46,6 +73,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private void OnEnable()
         {
             lifetime = new CancellationTokenSource();
+            controllerTrackingWasAvailable = true;
             identityProvider = new QuestClientIdentityProvider(
                 new PlayerPrefsQuestClientIdentityStore());
             if (pairingController == null)
@@ -60,15 +88,21 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             BuildPanelIfRequired();
+            ResolveControllerActions();
             if (panelRoot != null)
             {
                 panelRoot.SetActive(true);
             }
 
+            if (controllerVisualRoot != null)
+            {
+                controllerVisualRoot.SetActive(true);
+            }
+
             SetStatus(
                 pairingController == null
                     ? "Pairing is not configured."
-                    : "Look at a key until it activates.");
+                    : "Point at a key and press either trigger.");
         }
 
         private void Update()
@@ -88,7 +122,37 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 return;
             }
 
-            ProcessGaze();
+            var controllerTracked = ProcessControllerRay(
+                XRNode.LeftHand,
+                leftAimPosition,
+                leftAimRotation,
+                leftControllerRay,
+                leftControllerCursor,
+                ref leftPressWasActive);
+            controllerTracked |= ProcessControllerRay(
+                XRNode.RightHand,
+                rightAimPosition,
+                rightAimRotation,
+                rightControllerRay,
+                rightControllerCursor,
+                ref rightPressWasActive);
+
+            if (controllerTracked != controllerTrackingWasAvailable)
+            {
+                controllerTrackingWasAvailable = controllerTracked;
+                SetStatus(
+                    controllerTracked
+                        ? enteredCode.Length == RequiredCodeLength
+                            ? "Code ready. Point at PAIR and press trigger."
+                            : "Point at a key and press either trigger."
+                        : "No tracked controller detected. Move or wake a "
+                            + "controller.");
+            }
+
+            if (!controllerTracked && enableGazeFallback)
+            {
+                ProcessGaze();
+            }
         }
 
         private void OnDisable()
@@ -100,12 +164,29 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             {
                 panelRoot.SetActive(false);
             }
+
+            if (controllerVisualRoot != null)
+            {
+                controllerVisualRoot.SetActive(false);
+            }
         }
 
         private void OnValidate()
         {
             panelDistanceMeters = Mathf.Max(0.5f, panelDistanceMeters);
+            controllerRayDistanceMeters = Mathf.Max(
+                1f,
+                controllerRayDistanceMeters);
             dwellSeconds = Mathf.Max(0.5f, dwellSeconds);
+        }
+
+        private void OnDestroy()
+        {
+            if (controllerRayMaterial != null)
+            {
+                Destroy(controllerRayMaterial);
+                controllerRayMaterial = null;
+            }
         }
 
         public void AppendDigit(int digit)
@@ -119,7 +200,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             RefreshCode();
             SetStatus(
                 enteredCode.Length == RequiredCodeLength
-                    ? "Code ready. Look at PAIR."
+                    ? "Code ready. Point at PAIR and press trigger."
                     : "Enter all six digits.");
         }
 
@@ -170,6 +251,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     lifetime?.Token ?? CancellationToken.None);
                 SetStatus("Connected. Loading your session...");
                 panelRoot.SetActive(false);
+                if (controllerVisualRoot != null)
+                {
+                    controllerVisualRoot.SetActive(false);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -244,6 +329,172 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             Activate(target.Action);
         }
 
+        private bool ProcessControllerRay(
+            XRNode hand,
+            InputAction aimPosition,
+            InputAction aimRotation,
+            LineRenderer rayRenderer,
+            RectTransform cursor,
+            ref bool pressWasActive)
+        {
+            var device = InputDevices.GetDeviceAtXRNode(hand);
+            if (!device.isValid
+                || viewingCamera == null
+                || !device.TryGetFeatureValue(
+                    XRCommonUsages.devicePosition,
+                    out var localPosition)
+                || !device.TryGetFeatureValue(
+                    XRCommonUsages.deviceRotation,
+                    out var localRotation))
+            {
+                if (rayRenderer != null)
+                {
+                    rayRenderer.enabled = false;
+                }
+
+                if (cursor != null)
+                {
+                    cursor.gameObject.SetActive(false);
+                }
+
+                pressWasActive = false;
+                return false;
+            }
+
+            if (aimPosition != null
+                && aimRotation != null
+                && aimPosition.enabled
+                && aimRotation.enabled)
+            {
+                var actionRotation = aimRotation.ReadValue<Quaternion>();
+                if (Quaternion.Dot(actionRotation, actionRotation) > 0.5f)
+                {
+                    localPosition = aimPosition.ReadValue<Vector3>();
+                    localRotation = actionRotation;
+                }
+            }
+
+            var trackingSpace = viewingCamera.transform.parent;
+            var rayOrigin = trackingSpace != null
+                ? trackingSpace.TransformPoint(localPosition)
+                : localPosition;
+            var rayRotation = trackingSpace != null
+                ? trackingSpace.rotation * localRotation
+                : localRotation;
+            var ray = new Ray(rayOrigin, rayRotation * Vector3.forward);
+            var target = FindNearestTarget(
+                ray,
+                controllerRayDistanceMeters,
+                out var hitDistance);
+            UpdateControllerRay(
+                rayRenderer,
+                ray,
+                target == null
+                    ? controllerRayDistanceMeters
+                    : hitDistance);
+            UpdateControllerCursor(cursor, ray);
+
+            var hasTriggerButton = device.TryGetFeatureValue(
+                XRCommonUsages.triggerButton,
+                out var triggerPressed);
+            var hasTriggerValue = device.TryGetFeatureValue(
+                XRCommonUsages.trigger,
+                out var triggerValue);
+            var pressIsActive = hasTriggerButton
+                ? triggerPressed
+                : hasTriggerValue && triggerValue >= 0.5f;
+            if (pressIsActive && !pressWasActive && target != null)
+            {
+                Activate(target.Action);
+            }
+            else if (pressIsActive && !pressWasActive)
+            {
+                SetStatus(
+                    "Trigger detected. Point the cursor directly at a key.");
+            }
+
+            pressWasActive = pressIsActive;
+            return true;
+        }
+
+        private QuestPairingGazeTarget FindNearestTarget(
+            Ray ray,
+            float maximumDistance,
+            out float hitDistance)
+        {
+            var hitCount = Physics.RaycastNonAlloc(
+                ray,
+                gazeHits,
+                maximumDistance);
+            QuestPairingGazeTarget target = null;
+            hitDistance = maximumDistance;
+            for (var index = 0; index < hitCount; index++)
+            {
+                var candidate = gazeHits[index].collider.GetComponent<
+                    QuestPairingGazeTarget>();
+                if (candidate != null
+                    && gazeHits[index].distance < hitDistance)
+                {
+                    target = candidate;
+                    hitDistance = gazeHits[index].distance;
+                }
+            }
+
+            return target;
+        }
+
+        private static void UpdateControllerRay(
+            LineRenderer rayRenderer,
+            Ray ray,
+            float distance)
+        {
+            if (rayRenderer == null)
+            {
+                return;
+            }
+
+            rayRenderer.enabled = true;
+            rayRenderer.SetPosition(0, ray.origin);
+            rayRenderer.SetPosition(1, ray.GetPoint(distance));
+        }
+
+        private void UpdateControllerCursor(
+            RectTransform cursor,
+            Ray ray)
+        {
+            if (cursor == null || panelRoot == null)
+            {
+                return;
+            }
+
+            var panelPlane = new Plane(
+                panelRoot.transform.forward,
+                panelRoot.transform.position);
+            if (!panelPlane.Raycast(ray, out var distance)
+                || distance < 0f
+                || distance > controllerRayDistanceMeters)
+            {
+                cursor.gameObject.SetActive(false);
+                return;
+            }
+
+            var localPoint = panelRoot.transform.InverseTransformPoint(
+                ray.GetPoint(distance));
+            var canvasRect = panelRoot.GetComponent<RectTransform>();
+            var halfWidth = canvasRect.rect.width * 0.5f;
+            var halfHeight = canvasRect.rect.height * 0.5f;
+            if (Mathf.Abs(localPoint.x) > halfWidth
+                || Mathf.Abs(localPoint.y) > halfHeight)
+            {
+                cursor.gameObject.SetActive(false);
+                return;
+            }
+
+            cursor.anchoredPosition = new Vector2(localPoint.x, localPoint.y);
+            cursor.gameObject.SetActive(true);
+            cursor.SetAsLastSibling();
+        }
+
         private void Activate(string action)
         {
             if (int.TryParse(action, out var digit))
@@ -291,6 +542,17 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             var background = panelRoot.AddComponent<Image>();
             background.color = new Color(0.025f, 0.07f, 0.14f, 0.97f);
+
+            controllerVisualRoot = new GameObject(
+                "Quest Pairing Controller Visuals");
+            controllerVisualRoot.transform.SetParent(transform, false);
+
+            leftControllerRay = CreateControllerRay(
+                "Left Controller Ray",
+                new Color(0.25f, 0.9f, 0.85f, 0.9f));
+            rightControllerRay = CreateControllerRay(
+                "Right Controller Ray",
+                new Color(0.45f, 0.72f, 1f, 0.9f));
 
             CreateText(
                 "Title",
@@ -345,6 +607,85 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
                 CreateGazeKey(labels[index], actions[index], position, size);
             }
+
+            leftControllerCursor = CreateControllerCursor(
+                "Left Controller Cursor",
+                new Color(0.25f, 0.9f, 0.85f, 1f));
+            rightControllerCursor = CreateControllerCursor(
+                "Right Controller Cursor",
+                new Color(0.45f, 0.72f, 1f, 1f));
+        }
+
+        private void ResolveControllerActions()
+        {
+            if (inputActions == null)
+            {
+                return;
+            }
+
+            leftAimPosition = inputActions.FindAction(
+                "XRI Left/Aim Position",
+                false);
+            leftAimRotation = inputActions.FindAction(
+                "XRI Left/Aim Rotation",
+                false);
+            rightAimPosition = inputActions.FindAction(
+                "XRI Right/Aim Position",
+                false);
+            rightAimRotation = inputActions.FindAction(
+                "XRI Right/Aim Rotation",
+                false);
+        }
+
+        private LineRenderer CreateControllerRay(
+            string objectName,
+            Color color)
+        {
+            if (controllerRayMaterial == null)
+            {
+                var shader = Shader.Find("Sprites/Default");
+                if (shader == null)
+                {
+                    return null;
+                }
+
+                controllerRayMaterial = new Material(shader)
+                {
+                    name = "Quest Pairing Controller Ray Material"
+                };
+            }
+
+            var rayObject = new GameObject(objectName);
+            rayObject.transform.SetParent(controllerVisualRoot.transform, false);
+            var rayRenderer = rayObject.AddComponent<LineRenderer>();
+            rayRenderer.useWorldSpace = true;
+            rayRenderer.positionCount = 2;
+            rayRenderer.startWidth = 0.006f;
+            rayRenderer.endWidth = 0.003f;
+            rayRenderer.sharedMaterial = controllerRayMaterial;
+            rayRenderer.startColor = color;
+            rayRenderer.endColor = new Color(
+                color.r,
+                color.g,
+                color.b,
+                0.35f);
+            rayRenderer.enabled = false;
+            return rayRenderer;
+        }
+
+        private RectTransform CreateControllerCursor(
+            string objectName,
+            Color color)
+        {
+            var cursorObject = new GameObject(objectName);
+            cursorObject.transform.SetParent(panelRoot.transform, false);
+            var cursor = cursorObject.AddComponent<RectTransform>();
+            cursor.sizeDelta = new Vector2(28f, 28f);
+            var image = cursorObject.AddComponent<Image>();
+            image.color = color;
+            image.raycastTarget = false;
+            cursorObject.SetActive(false);
+            return cursor;
         }
 
         private Text CreateText(
