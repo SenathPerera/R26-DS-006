@@ -177,7 +177,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 "482913",
                 "quest-install-7",
                 "1.2.0",
-                65536);
+                65536,
+                32);
             return new SessionRelayWebSocketTransport(
                 info,
                 new SessionRelayJsonCodec(SchemaVersion),

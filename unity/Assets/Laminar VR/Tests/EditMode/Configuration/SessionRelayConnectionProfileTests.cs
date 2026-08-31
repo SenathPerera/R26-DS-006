@@ -39,7 +39,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 ""deploymentConfigurationApproved"": true,
                 ""relayEndpoint"": ""ws://192.0.2.10:8080/session"",
                 ""schemaVersion"": ""relay-test-v1"",
-                ""maximumMessageBytes"": 65536
+                ""maximumMessageBytes"": 65536,
+                ""maximumTelemetryEventsPerBatch"": 32
             }";
             var asset = CreateProfile(Json);
             try
@@ -72,7 +73,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 ""deploymentConfigurationApproved"": true,
                 ""relayEndpoint"": ""wss://relay.example.test/session"",
                 ""schemaVersion"": ""relay-test-v1"",
-                ""maximumMessageBytes"": 65536
+                ""maximumMessageBytes"": 65536,
+                ""maximumTelemetryEventsPerBatch"": 32
             }";
             var asset = CreateProfile(Json);
             try
@@ -99,6 +101,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                     Is.EqualTo("quest-install-7"));
                 Assert.That(connectionInfo.AppVersion, Is.EqualTo("1.2.0"));
                 Assert.That(connectionInfo.MaximumMessageBytes, Is.EqualTo(65536));
+                Assert.That(
+                    connectionInfo.MaximumTelemetryEventsPerBatch,
+                    Is.EqualTo(32));
             }
             finally
             {

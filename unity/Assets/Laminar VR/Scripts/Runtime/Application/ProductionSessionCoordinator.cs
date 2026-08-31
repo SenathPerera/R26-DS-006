@@ -21,7 +21,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
     [AddComponentMenu(
         "Adaptive Meditation/Application/Production Session Coordinator")]
     [DisallowMultipleComponent]
-    public sealed class ProductionSessionCoordinator : MonoBehaviour
+    public sealed class ProductionSessionCoordinator : MonoBehaviour,
+        IRecordedTelemetrySource
     {
         [Header("Composition Root")]
         [SerializeField]
@@ -72,6 +73,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private PolicyController policyController;
         private TelemetryRecorder telemetryRecorder;
         private LocalJsonLinesTelemetrySink telemetrySink;
+        private DurableTelemetryBufferingSink telemetryBufferingSink;
         private Task activeOperation;
         private bool previousNetworkConnected;
         private volatile bool networkConnected;
@@ -98,6 +100,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public string LastValidationError { get; private set; } = string.Empty;
 
         public string TelemetryFilePath => telemetrySink?.FilePath;
+
+        public int PendingEventCount =>
+            telemetryBufferingSink?.PendingEventCount ?? 0;
 
         public VrSessionPhase Phase => session == null
             ? VrSessionPhase.Boot
@@ -199,6 +204,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             telemetrySink = null;
+            telemetryBufferingSink = null;
         }
 
         public void Configure(
@@ -328,12 +334,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 telemetrySink = new LocalJsonLinesTelemetrySink(
                     telemetryPath,
                     telemetryConfiguration);
+                telemetryBufferingSink =
+                    new DurableTelemetryBufferingSink(telemetrySink);
                 telemetryRecorder = new TelemetryRecorder(
                     telemetryConfiguration,
                     new TelemetrySessionIdentity(
                         sessionId,
                         participantPseudonym),
-                    telemetrySink);
+                    telemetryBufferingSink);
                 lifetimeCancellation = new CancellationTokenSource();
 
                 session = new SessionStateMachine();
@@ -433,6 +441,17 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public void SetNetworkConnected(bool connected)
         {
             networkConnected = connected;
+        }
+
+        public bool TryDequeue(out TelemetryEvent telemetryEvent)
+        {
+            if (telemetryBufferingSink == null)
+            {
+                telemetryEvent = null;
+                return false;
+            }
+
+            return telemetryBufferingSink.TryDequeue(out telemetryEvent);
         }
 
         public void Advance(
@@ -1034,6 +1053,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             lifetimeCancellation = null;
             telemetrySink?.Dispose();
             telemetrySink = null;
+            telemetryBufferingSink = null;
             telemetryRecorder = null;
         }
 

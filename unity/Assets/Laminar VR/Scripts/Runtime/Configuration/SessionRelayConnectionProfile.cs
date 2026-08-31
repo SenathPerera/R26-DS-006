@@ -39,6 +39,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private int maximumMessageBytes = 0;
 
         [Tooltip(
+            "Maximum recorded visual telemetry events sent in one relay "
+            + "message. This limit must match relay deployment constraints.")]
+        [SerializeField, Min(0)]
+        private int maximumTelemetryEventsPerBatch = 0;
+
+        [Tooltip(
             "Development-only opt-in for a non-TLS ws:// relay. Leave disabled "
             + "for deployed Quest builds.")]
         [SerializeField]
@@ -100,7 +106,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
                     pairingCode,
                     questClientId,
                     appVersion,
-                    maximumMessageBytes);
+                    maximumMessageBytes,
+                    maximumTelemetryEventsPerBatch);
                 validationError = string.Empty;
                 return true;
             }

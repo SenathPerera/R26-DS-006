@@ -118,6 +118,67 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 Is.EqualTo(messagesBeforeDisable + 1));
         }
 
+        [UnityTest]
+        public IEnumerator Bridge_PublishesDurablyRecordedTelemetryInBatches()
+        {
+            var setup = CreateSetup();
+            var connectTask = setup.Bridge.ConnectAsync(
+                CreateConnectionInfo(),
+                CancellationToken.None);
+            yield return AwaitTask(connectTask);
+
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(1));
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(2));
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(3));
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration("production-test-scene"));
+
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(
+                setup.Transport.PublishedTelemetryBatches,
+                Has.Count.EqualTo(1));
+            Assert.That(
+                setup.Transport.PublishedTelemetryBatches[0],
+                Has.Count.EqualTo(2));
+
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(
+                setup.Transport.PublishedTelemetryBatches,
+                Has.Count.EqualTo(2));
+            Assert.That(
+                setup.Transport.PublishedTelemetryBatches[1],
+                Has.Count.EqualTo(1));
+
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(setup.Bridge.PendingTelemetryEventCount, Is.Zero);
+            Assert.That(setup.Bridge.LastTelemetryError, Is.Empty);
+        }
+
+        [UnityTest]
+        public IEnumerator FailedTelemetryPublish_RetainsBatchWithoutHotRetry()
+        {
+            var setup = CreateSetup();
+            var connectTask = setup.Bridge.ConnectAsync(
+                CreateConnectionInfo(),
+                CancellationToken.None);
+            yield return AwaitTask(connectTask);
+
+            setup.Transport.FailTelemetryPublishes = true;
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(1));
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration("production-test-scene"));
+
+            setup.Bridge.ProcessPendingMessages();
+            setup.Bridge.ProcessPendingMessages();
+            setup.Bridge.ProcessPendingMessages();
+
+            Assert.That(setup.Transport.TelemetryPublishAttemptCount, Is.EqualTo(1));
+            Assert.That(setup.Bridge.PendingTelemetryEventCount, Is.EqualTo(1));
+            Assert.That(
+                setup.Bridge.LastTelemetryError,
+                Is.EqualTo("telemetry-publish-failed:InvalidOperationException"));
+        }
+
         private Setup CreateSetup()
         {
             var root = Track(new GameObject("SessionRelayBridgeHarness"));
@@ -135,16 +196,22 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             boundary.Configure(coordinator);
 
             var transport = new FakeSessionRelayTransport("session-42");
+            var telemetrySource = new FakeRecordedTelemetrySource();
             var bridge = root.AddComponent<SessionRelayBridge>();
             bridge.enabled = false;
             bridge.Configure(
                 bootstrap,
                 coordinator,
                 boundary,
-                new FakeTransportFactory(transport));
+                new FakeTransportFactory(transport),
+                telemetrySource);
             bridge.enabled = true;
 
-            return new Setup(bridge, boundary, transport);
+            return new Setup(
+                bridge,
+                boundary,
+                transport,
+                telemetrySource);
         }
 
         private SceneParameterProfile CreateSceneProfile()
@@ -179,7 +246,27 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 "482913",
                 "quest-install-7",
                 "1.2.0",
-                65536);
+                65536,
+                2);
+        }
+
+        private static TelemetryEvent CreateTelemetryEvent(
+            long sequenceNumber)
+        {
+            return new TelemetryEvent(
+                "visual-event",
+                "1",
+                "telemetry-test",
+                1,
+                "event-" + sequenceNumber,
+                sequenceNumber,
+                "session-42",
+                "P017",
+                "session_phase_changed",
+                1787282898.4d + sequenceNumber,
+                sequenceNumber,
+                true,
+                Array.Empty<TelemetryField>());
         }
 
         private static SessionRelayConfigurationMessage CreateConfiguration(
@@ -199,11 +286,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             public Setup(
                 SessionRelayBridge bridge,
                 VisualSessionBoundary boundary,
-                FakeSessionRelayTransport transport)
+                FakeSessionRelayTransport transport,
+                FakeRecordedTelemetrySource telemetrySource)
             {
                 Bridge = bridge;
                 Boundary = boundary;
                 Transport = transport;
+                TelemetrySource = telemetrySource;
             }
 
             public SessionRelayBridge Bridge { get; }
@@ -211,6 +300,34 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             public VisualSessionBoundary Boundary { get; }
 
             public FakeSessionRelayTransport Transport { get; }
+
+            public FakeRecordedTelemetrySource TelemetrySource { get; }
+        }
+
+        private sealed class FakeRecordedTelemetrySource
+            : IRecordedTelemetrySource
+        {
+            private readonly Queue<TelemetryEvent> events =
+                new Queue<TelemetryEvent>();
+
+            public int PendingEventCount => events.Count;
+
+            public void Enqueue(TelemetryEvent telemetryEvent)
+            {
+                events.Enqueue(telemetryEvent);
+            }
+
+            public bool TryDequeue(out TelemetryEvent telemetryEvent)
+            {
+                if (events.Count == 0)
+                {
+                    telemetryEvent = null;
+                    return false;
+                }
+
+                telemetryEvent = events.Dequeue();
+                return true;
+            }
         }
 
         private sealed class FakeTransportFactory
@@ -273,6 +390,14 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 get;
             } = new List<SessionRelayQuestState>();
 
+            public List<IReadOnlyList<TelemetryEvent>>
+                PublishedTelemetryBatches { get; } =
+                    new List<IReadOnlyList<TelemetryEvent>>();
+
+            public bool FailTelemetryPublishes { get; set; }
+
+            public int TelemetryPublishAttemptCount { get; private set; }
+
             public Task ConnectAsync(CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -299,6 +424,21 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                TelemetryPublishAttemptCount++;
+                if (FailTelemetryPublishes)
+                {
+                    return Task.FromException(
+                        new InvalidOperationException(
+                            "Simulated telemetry publish failure."));
+                }
+
+                var copy = new TelemetryEvent[telemetryEvents.Count];
+                for (var index = 0; index < telemetryEvents.Count; index++)
+                {
+                    copy[index] = telemetryEvents[index];
+                }
+
+                PublishedTelemetryBatches.Add(Array.AsReadOnly(copy));
                 return Task.CompletedTask;
             }
 

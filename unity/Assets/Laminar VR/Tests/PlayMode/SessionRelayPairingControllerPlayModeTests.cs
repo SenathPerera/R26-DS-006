@@ -108,7 +108,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 ""deploymentConfigurationApproved"": true,
                 ""relayEndpoint"": ""wss://relay.example.test/session"",
                 ""schemaVersion"": ""relay-test-v1"",
-                ""maximumMessageBytes"": 65536
+                ""maximumMessageBytes"": 65536,
+                ""maximumTelemetryEventsPerBatch"": 32
             }";
             var profile = Track(ScriptableObject.CreateInstance<
                 SessionRelayConnectionProfile>());

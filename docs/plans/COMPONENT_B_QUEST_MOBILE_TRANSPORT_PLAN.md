@@ -128,8 +128,8 @@ intervals serve different purposes and must remain independently configurable.
 
 ### Slice B: Component B streaming client
 
-**Status:** Implemented in source with focused tests; Unity Test Runner and
-Quest-device validation remain pending.
+**Status:** Implemented and validated in Unity Test Runner. Quest-device and
+live Component B endpoint validation remain pending.
 
 - Implement an asynchronous Quest-compatible WebSocket client behind a
   focused Component B source abstraction.
@@ -168,8 +168,11 @@ by Unity EditMode tests. A runtime Unity bridge now validates the configured
 scene on the main thread, forwards relay inputs through `VisualSessionBoundary`,
 and publishes session-phase snapshots; its focused PlayMode tests are validated.
 The non-secret connection profile and runtime pairing entry point are now
-implemented. Relay-backend integration, runtime pairing UI, reconnect credential
-renewal, completed-log handoff, and production scene wiring remain pending.
+implemented and validated. Locally durable visual telemetry is now exposed to
+the bridge and published in configuration-sized relay batches; a failed batch
+is retained instead of being discarded. Relay-backend integration, runtime
+pairing UI, reconnect credential renewal, final delivery acknowledgement and
+offline-log recovery, and production scene wiring remain pending.
 
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
@@ -226,7 +229,9 @@ pseudonymous Quest client ID at runtime, combines them with `Application.version
 and passes the resulting runtime-only connection object to the bridge. Neither
 runtime credential is serialized into the profile or scene. Non-TLS `ws://`
 requires an explicit development-only opt-in; deployed configurations should
-use `wss://`.
+use `wss://`. The maximum telemetry events per relay batch is also required
+deployment configuration because the final relay payload limit has not yet
+been agreed with the mobile/relay team.
 
 ### Slice E: hardening and Quest validation
 

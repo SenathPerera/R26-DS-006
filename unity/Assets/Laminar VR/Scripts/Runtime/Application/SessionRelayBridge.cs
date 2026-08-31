@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Runtime.Networking;
 using LaminarVR.AdaptiveMeditation.Session;
+using LaminarVR.AdaptiveMeditation.Telemetry;
 using UnityEngine;
 
 namespace LaminarVR.AdaptiveMeditation.Runtime.Application
@@ -41,9 +43,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 new ConcurrentQueue<SessionRelayQuestState>();
 
         private ISessionRelayTransportFactory transportFactory;
+        private IRecordedTelemetrySource recordedTelemetrySource;
         private ISessionRelayTransport activeTransport;
         private CancellationTokenSource componentLifetime;
         private Task activeQuestStatePublish;
+        private Task activeTelemetryPublish;
+        private TelemetryEvent[] activeTelemetryBatch;
+        private int maximumTelemetryEventsPerBatch;
+        private bool telemetryPublishBlocked;
         private bool coordinatorSubscribed;
         private string acceptedSessionId;
 
@@ -52,6 +59,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public string LastConnectionError { get; private set; } = string.Empty;
 
         public string LastOutboundError { get; private set; } = string.Empty;
+
+        public string LastTelemetryError { get; private set; } = string.Empty;
+
+        public int PendingTelemetryEventCount =>
+            (activeTelemetryBatch?.Length ?? 0)
+            + (ResolveTelemetrySource()?.PendingEventCount ?? 0);
 
         public int RejectedInboundMessageCount { get; private set; }
 
@@ -92,7 +105,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             ApplicationBootstrap bootstrap,
             ProductionSessionCoordinator coordinator,
             VisualSessionBoundary boundary,
-            ISessionRelayTransportFactory relayTransportFactory = null)
+            ISessionRelayTransportFactory relayTransportFactory = null,
+            IRecordedTelemetrySource telemetrySource = null)
         {
             if (GetActiveTransport() != null)
             {
@@ -105,6 +119,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             productionCoordinator = coordinator;
             visualSessionBoundary = boundary;
             transportFactory = relayTransportFactory;
+            recordedTelemetrySource = telemetrySource ?? coordinator;
             SubscribeToCoordinator();
         }
 
@@ -126,6 +141,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             var lifetime = componentLifetime
                 ?? throw new InvalidOperationException(
                     "The session relay bridge must be enabled before connecting.");
+
+            maximumTelemetryEventsPerBatch =
+                connectionInfo.MaximumTelemetryEventsPerBatch;
 
             await lifecycleGate.WaitAsync(cancellationToken)
                 .ConfigureAwait(false);
@@ -211,6 +229,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public int ProcessPendingMessages()
         {
             ObserveQuestStatePublish();
+            ObserveTelemetryPublish();
 
             var processedCount = 0;
             while (processedCount < maximumMessagesPerFrame
@@ -221,6 +240,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             TryStartQuestStatePublish();
+            TryStartTelemetryPublish();
             return processedCount;
         }
 
@@ -266,6 +286,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     if (inboundEvent.Status.CurrentState
                         == SessionTransportConnectionState.Connected)
                     {
+                        telemetryPublishBlocked = false;
                         QueueCurrentQuestState();
                     }
 
@@ -416,6 +437,99 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             activeQuestStatePublish = null;
+        }
+
+        private void TryStartTelemetryPublish()
+        {
+            if (activeTelemetryPublish != null
+                || telemetryPublishBlocked
+                || acceptedSessionId == null)
+            {
+                return;
+            }
+
+            var transport = GetActiveTransport();
+            if (transport == null
+                || transport.ConnectionState
+                    != SessionTransportConnectionState.Connected)
+            {
+                return;
+            }
+
+            if (activeTelemetryBatch == null)
+            {
+                var telemetrySource = ResolveTelemetrySource();
+                if (telemetrySource == null)
+                {
+                    return;
+                }
+
+                var batch = new List<TelemetryEvent>(
+                    maximumTelemetryEventsPerBatch);
+                while (batch.Count < maximumTelemetryEventsPerBatch
+                    && telemetrySource.TryDequeue(
+                        out var telemetryEvent))
+                {
+                    batch.Add(telemetryEvent);
+                }
+
+                if (batch.Count == 0)
+                {
+                    return;
+                }
+
+                activeTelemetryBatch = batch.ToArray();
+            }
+
+            try
+            {
+                activeTelemetryPublish = transport.PublishTelemetryBatchAsync(
+                    activeTelemetryBatch,
+                    componentLifetime.Token);
+            }
+            catch (Exception exception)
+            {
+                LastTelemetryError =
+                    "telemetry-publish-failed:"
+                    + exception.GetType().Name;
+                telemetryPublishBlocked = true;
+                activeTelemetryPublish = null;
+            }
+        }
+
+        private void ObserveTelemetryPublish()
+        {
+            if (activeTelemetryPublish == null
+                || !activeTelemetryPublish.IsCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                activeTelemetryPublish.GetAwaiter().GetResult();
+                activeTelemetryBatch = null;
+                LastTelemetryError = string.Empty;
+            }
+            catch (OperationCanceledException)
+            {
+                LastTelemetryError = "telemetry-publish-cancelled";
+                telemetryPublishBlocked = true;
+            }
+            catch (Exception exception)
+            {
+                LastTelemetryError =
+                    "telemetry-publish-failed:"
+                    + exception.GetType().Name;
+                telemetryPublishBlocked = true;
+            }
+
+            activeTelemetryPublish = null;
+        }
+
+        private IRecordedTelemetrySource ResolveTelemetrySource()
+        {
+            return recordedTelemetrySource ?? productionCoordinator;
         }
 
         private void HandleConfigurationReceived(
