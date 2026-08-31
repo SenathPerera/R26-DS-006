@@ -163,9 +163,12 @@ Approved local pilot connection configuration:
 
 **Status:** In progress. Transport-neutral messages, strict Quest-side parsing,
 the pairing-capable WebSocket transport core, command deduplication, and
-outbound Quest-state/visual-telemetry serialization are implemented in source.
-Unity Test Runner validation, relay-backend integration, runtime pairing UI,
-reconnect credential renewal, and production scene wiring remain pending.
+outbound Quest-state/visual-telemetry serialization are implemented and covered
+by Unity EditMode tests. A runtime Unity bridge now validates the configured
+scene on the main thread, forwards relay inputs through `VisualSessionBoundary`,
+and publishes session-phase snapshots. Its PlayMode tests, relay-backend
+integration, runtime pairing UI, reconnect credential renewal, completed-log
+handoff, and production scene wiring remain pending.
 
 - Add a concrete `ISessionTransport` implementation for relay messages.
 - Support pairing, configuration/preferences, start/pause/resume/stop/emergency
@@ -207,6 +210,14 @@ The transport reports `Connected` only after the WebSocket is open and the
 relay accepts pairing. It rejects messages for a different session and drops
 duplicate configuration/command message IDs. Component B physiology remains on
 its independent direct stream and is not carried by this transport.
+
+`SessionRelayBridge` is the Unity lifecycle boundary around that transport. It
+accepts `SessionRelayConnectionInfo` from a future runtime pairing flow rather
+than serializing a code into the Temple Pond scene. Transport callbacks are
+queued and dispatched on Unity's main thread; scene IDs are checked against the
+initialized `ApplicationBootstrap` profile before preferences reach the
+production coordinator. Disable/shutdown freezes the visual network state and
+disconnects the relay without blocking a frame.
 
 ### Slice E: hardening and Quest validation
 

@@ -30,10 +30,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
     }
 
     public sealed class SessionRelayWebSocketTransport
-        : ISessionTransport<
-            SessionRelayConfigurationMessage,
-            SessionRelayCommandMessage,
-            SessionRelayQuestState>
+        : ISessionRelayTransport
     {
         private const string ConnectFailureCode = "relay-connect-failed";
         private const string PairingInvalidCode = "relay-pairing-invalid";
