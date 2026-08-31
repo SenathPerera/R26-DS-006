@@ -7,6 +7,7 @@ import {componentDService} from '../services/api/componentDService';
 import {WEARABLE_DEVICE_NAME, wearableBleService} from '../services/ble/wearableBleService';
 import {componentBPipelineService} from '../services/componentB/componentBPipelineService';
 import {realtimeService} from '../services/realtime/realtimeService';
+import type {VisualLogSnapshot} from '../services/realtime/realtimeService';
 import {unityBridge} from '../services/unity/unityBridge';
 import {
   BleIngestionState,
@@ -54,7 +55,8 @@ const emptyVoice: VoiceCheckInState = {
 
 const emptyRelay: SessionRelayState = {
   connectionState: 'idle', preparedRequestId: null, preparedSession: null, questPhase: null,
-  visualTelemetryMessages: [], visualLogDeliveryStatus: 'idle', visualLogMessageCount: 0,
+  visualTelemetryMessages: [], visualLogSnapshot: null,
+  visualLogDeliveryStatus: 'idle', visualLogMessageCount: 0,
   lastError: null,
 };
 
@@ -96,7 +98,7 @@ type MindSyncStore = {
   setComponentBEndpoint: (endpoint: string) => void;
   prepareVrSession: (requestId: string) => Promise<void>;
   sendVrCommand: (command: 'pause' | 'resume' | 'stop' | 'emergency_stop') => void;
-  refreshVisualLog: () => Promise<void>;
+  refreshVisualLog: () => Promise<VisualLogSnapshot | null>;
   createSession: () => MeditationSession;
   setSessionStatus: (status: MindSyncStore['sessionStatus']) => void;
   submitQuestionnaire: (templateId: string, sessionId: string | null, answers: QuestionnaireSubmission['answers']) => void;
@@ -208,7 +210,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
       },
       refreshVisualLog: async () => {
         const prepared = get().relay.preparedSession;
-        if (!prepared) return;
+        if (!prepared) return null;
         set(state => ({relay: {
           ...state.relay,
           visualLogDeliveryStatus: 'downloading',
@@ -220,22 +222,29 @@ export const useMindSyncStore = create<MindSyncStore>()(
             set(state => ({relay: {
               ...state.relay,
               visualTelemetryMessages: snapshot.messages,
+              visualLogSnapshot: snapshot,
               visualLogDeliveryStatus: 'pending',
               visualLogMessageCount: snapshot.messageCount,
               lastError: null,
             }}));
-            return;
+            return snapshot;
           }
           if (!snapshot.deliveryAcknowledged) {
             await realtimeService.acknowledgeVisualLog(prepared, snapshot);
           }
+          const acknowledgedSnapshot: VisualLogSnapshot = {
+            ...snapshot,
+            deliveryAcknowledged: true,
+          };
           set(state => ({relay: {
             ...state.relay,
             visualTelemetryMessages: snapshot.messages,
+            visualLogSnapshot: acknowledgedSnapshot,
             visualLogDeliveryStatus: 'acknowledged',
             visualLogMessageCount: snapshot.messageCount,
             lastError: null,
           }}));
+          return acknowledgedSnapshot;
         } catch (error) {
           set(state => ({relay: {
             ...state.relay,

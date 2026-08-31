@@ -123,12 +123,31 @@ export interface PreparedVrSession {
   mobileToken: string;
 }
 
+export interface RelayEnvelope {
+  schemaVersion: string;
+  messageId: string;
+  messageType: string;
+  payload: Record<string, unknown>;
+}
+
+export interface VisualLogSnapshot {
+  schemaVersion: string;
+  sessionId: string;
+  finalized: boolean;
+  completionPhase: 'completed' | 'aborted' | null;
+  deliveryAcknowledged: boolean;
+  messageCount: number;
+  lastMessageId: string | null;
+  messages: RelayEnvelope[];
+}
+
 export interface SessionRelayState {
   connectionState: SessionRelayConnectionState;
   preparedRequestId: string | null;
   preparedSession: PreparedVrSession | null;
   questPhase: string | null;
   visualTelemetryMessages: unknown[];
+  visualLogSnapshot: VisualLogSnapshot | null;
   visualLogDeliveryStatus: VisualLogDeliveryStatus;
   visualLogMessageCount: number;
   lastError: string | null;

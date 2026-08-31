@@ -24,6 +24,8 @@ import {ReportView, scoreToPhrase, typeToPhrase} from './VoiceResults';
 import {loadSessions, saveSession, type SavedVoiceSession} from './voiceHistory';
 import {useSarah} from './useSarah';
 import {Users, Waves, Zap} from 'lucide-react-native';
+import {createCompleteSessionRecord} from '../../services/session/completeSessionRecord';
+import {sessionRecordOutbox} from '../../services/session/sessionRecordOutbox';
 
 type Stage = StageId; // intro | room | pre | vr | post | report
 type Phase = 'pre' | 'post';
@@ -61,6 +63,7 @@ const SPEECH_BUDGET = 30; // seconds of speech we aim to collect across turns
 const MIN_TURNS = 2;      // always hold a short conversation, never one line
 const MAX_TURNS = 4;      // cap so it never drags on
 const SILENCE_TAIL_SEC = 2.5;
+const TEMPLE_POND_SCENE_ID = 'temple-pond';
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -93,7 +96,11 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
   const [stage, setStage] = useState<Stage>('intro');
   const [language, setLanguage] = useState<Lang>('english');
   const sessionId = useMemo(() => `voice-${Date.now()}`, []);
-  const userId = firstName || user?.id || 'default';
+  const sessionStartedAtUnixSeconds = useMemo(() => Date.now() / 1000, []);
+  const userId = user?.id ?? 'anonymous';
+  const fullSessionStartedRef = useRef(false);
+  const finalVisualLogRefreshStartedRef = useRef(false);
+  const sessionRecordQueuedRef = useRef(false);
 
   const [ambient, setAmbient] = useState<AmbientResult | null>(null);
   const [pre, setPre] = useState<StressResult | null>(null);
@@ -109,11 +116,78 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
   useEffect(() => { void componentDService.warmup(); loadSessions().then(setHistory).catch(() => {}); }, []);
 
   useEffect(() => {
-    if (stage !== 'report' || !pre || !post || full) return;
+    if (
+      stage !== 'report'
+      || !pre
+      || !post
+      || full
+      || fullSessionStartedRef.current
+    ) return;
+    fullSessionStartedRef.current = true;
     componentDService.fullSession(sessionId, userId, {useMockHrv: true, language, log: true})
-      .then(f => { setFull(f); const e: SavedVoiceSession = {id: sessionId, at: Date.now(), participant: firstName, language, pre, post, full: f, vrSessionId: relay.preparedSession?.sessionId, visualTelemetryMessages: relay.visualTelemetryMessages}; void saveSession(e).then(setHistory); })
-      .catch(() => {});
-  }, [stage, pre, post, full, sessionId, userId, language, firstName, relay.preparedSession?.sessionId, relay.visualTelemetryMessages]);
+      .then(f => {
+        setFull(f);
+        const entry: SavedVoiceSession = {
+          id: sessionId,
+          at: Date.now(),
+          participant: firstName,
+          language,
+          pre,
+          post,
+          full: f,
+          vrSessionId: relay.preparedSession?.sessionId,
+        };
+        saveSession(entry).then(setHistory).catch(() => undefined);
+      })
+      .catch(() => { fullSessionStartedRef.current = false; });
+  }, [stage, pre, post, full, sessionId, userId, language, firstName, relay.preparedSession?.sessionId]);
+
+  useEffect(() => {
+    const relaySessionId = relay.preparedSession?.sessionId;
+    const visualLog = relay.visualLogSnapshot;
+    if (
+      !full
+      || !pre
+      || !post
+      || !relaySessionId
+    ) return;
+    if (!visualLog?.finalized || !visualLog.deliveryAcknowledged) {
+      if (!finalVisualLogRefreshStartedRef.current) {
+        finalVisualLogRefreshStartedRef.current = true;
+        refreshVisualLog().catch(() => undefined);
+      }
+      return;
+    }
+    if (sessionRecordQueuedRef.current) return;
+
+    sessionRecordQueuedRef.current = true;
+    const record = createCompleteSessionRecord({
+      sessionId,
+      participantPseudonym: user?.id ?? 'anonymous',
+      startedAtUnixSeconds: sessionStartedAtUnixSeconds,
+      completedAtUnixSeconds: Date.now() / 1000,
+      language,
+      pre,
+      post,
+      voiceSummary: full,
+      relaySessionId,
+      sceneId: TEMPLE_POND_SCENE_ID,
+      visualLog,
+    });
+    sessionRecordOutbox.enqueue(record)
+      .catch(() => { sessionRecordQueuedRef.current = false; });
+  }, [
+    full,
+    language,
+    post,
+    pre,
+    relay.preparedSession?.sessionId,
+    relay.visualLogSnapshot,
+    refreshVisualLog,
+    sessionId,
+    sessionStartedAtUnixSeconds,
+    user?.id,
+  ]);
 
   const commonProps = {onBack: navigation.goBack};
 

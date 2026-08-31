@@ -315,9 +315,22 @@ Mobile receives that export, joins it with its pre/post-session data, and owns
 the final Supabase upload and retry behavior. Only pseudonymous participant and
 session identifiers should cross this boundary.
 
+The mobile-owned composite record uses schema
+`mindsync-complete-session-v1`. Its root `sessionId` is the identifier created
+before the pre-session voice interaction. Component D output remains under the
+`voice` contribution, while the relay-generated Quest session identifier and
+finalized visual envelopes remain under the `visual` contribution. The two
+payloads must not be flattened because they contain overlapping field names.
+Completed composite records are written idempotently to the mobile
+`mindsync_complete_session_outbox_v1` AsyncStorage outbox before any remote
+upload. An outbox item is eligible for upload only after the visual log has
+been finalized and delivery-acknowledged. The Supabase adapter is responsible
+for removing an item only after a confirmed idempotent write.
+
 Audio-agent events are intentionally absent from the first implementation.
 When the teammate's audio contract is ready, it should be added as a separately
-versioned log contribution rather than coupled to the visual policy.
+versioned log contribution rather than coupled to the visual policy. Until
+then, the composite record carries `audio: null`.
 
 ## 8. Constraints, risks, and follow-ups
 

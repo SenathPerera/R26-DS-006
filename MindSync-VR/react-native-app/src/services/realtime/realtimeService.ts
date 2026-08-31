@@ -1,5 +1,12 @@
 import {environment} from '../../config/environment';
-import {PreferredEnvironment, PreparedVrSession} from '../../types/domain';
+import {
+  PreferredEnvironment,
+  PreparedVrSession,
+  RelayEnvelope,
+  VisualLogSnapshot,
+} from '../../types/domain';
+
+export type {RelayEnvelope, VisualLogSnapshot} from '../../types/domain';
 
 export const SESSION_RELAY_SCHEMA_VERSION = 'mindsync-session-v1';
 
@@ -13,24 +20,6 @@ export type CreatePreparedSessionInput = {
 type RelayHandlers = {
   onConnectionState: (state: 'connecting' | 'connected' | 'error', error?: string) => void;
   onMessage: (message: RelayEnvelope) => void;
-};
-
-export type RelayEnvelope = {
-  schemaVersion: string;
-  messageId: string;
-  messageType: string;
-  payload: Record<string, unknown>;
-};
-
-export type VisualLogSnapshot = {
-  schemaVersion: string;
-  sessionId: string;
-  finalized: boolean;
-  completionPhase: 'completed' | 'aborted' | null;
-  deliveryAcknowledged: boolean;
-  messageCount: number;
-  lastMessageId: string | null;
-  messages: RelayEnvelope[];
 };
 
 export type VisualLogAcknowledgement = {
