@@ -22,10 +22,16 @@ and visual-session log handoff
 - The mobile and Quest applications should communicate through a
   backend-mediated secure WebSocket relay. Final session-log transfer may use
   HTTPS through the same backend.
-- Pairing uses a short-lived, one-time code displayed by the mobile app and
-  entered or selected in the Quest app. The relay binds one mobile client and
-  one Quest client to the active session and rejects a second active
-  participant.
+- Pairing uses a short-lived, one-time code generated only after the user
+  completes the pre-session voice interaction and taps `Start my session` in
+  the mobile app. The code is displayed in the `Your session` screen directly
+  below `Ready when you are` and is entered in the Quest app. The relay binds
+  one mobile client and one Quest client to the prepared session and rejects a
+  second active participant.
+- The mobile `Start my session` action prepares the session and requests the
+  access code. It does not prematurely start Unity's timed VR session or the
+  adaptive phase; those begin only after Quest has redeemed the code, received
+  and validated the configuration, and entered the appropriate local phase.
 - The mobile application remains responsible for the final Supabase upload.
   The Quest application does not write directly to Supabase.
 - Adaptive audio integration is deferred because that component is not yet
@@ -37,12 +43,16 @@ and visual-session log handoff
 2. Before a VR session, the mobile app collects session-specific preferences.
 3. The user completes the pre-session voice-companion interaction on mobile;
    its stress result remains a mobile-owned input to session setup.
-4. Mobile creates the session, generates a short-lived pairing code, and sends
-   the normalized visual preferences and session context to the relay.
-5. Mobile prompts the user to put on the headset and launch the Quest app.
-6. Quest pairs through the relay, receives the session configuration, validates
-   it, and acknowledges readiness.
-7. When the session starts, Quest opens the Component B prediction stream and
+4. The user taps `Start my session`. Mobile creates the prepared session,
+   submits its normalized visual preferences and session context to the relay,
+   and requests a short-lived one-time access code.
+5. Mobile shows the code in `Your session`, below `Ready when you are`, and
+   prompts the user to put on the headset and launch the Quest app.
+6. The user enters the code in Quest. Quest redeems it through the relay,
+   receives the prepared session configuration, validates it, and acknowledges
+   readiness.
+7. Quest launches the local timed session only after successful redemption and
+   validation, then opens the Component B prediction stream and
    associates accepted predictions with its one active session.
 8. The visual adaptation pipeline consumes only eligible, fresh Component B
    windows through the existing physiology validation and coordinator flow.
@@ -152,7 +162,7 @@ end-to-end Component B validation remain pending.
 
 Approved local pilot connection configuration:
 
-- Component B stream: `ws://192.168.1.23:8000/stream`.
+- Component B stream: `ws://172.20.10.4:8000/stream`.
 - Keepalive interval: 20 seconds.
 - Maximum inbound message size: 65,536 bytes.
 - Reconnect schedule: eight attempts, one-second initial delay, multiplier 2,
@@ -235,12 +245,13 @@ been agreed with the mobile/relay team.
 
 ### Slice E: hardening and Quest validation
 
-**Status:** In progress. The source/configuration baseline and remaining pilot
-gates are recorded in
-`docs/plans/TEMPLE_POND_QUEST_PILOT_READINESS.md`. The production scene is not
-yet wired to the relay because the endpoint, frozen schema, pairing/resume
-contract, telemetry limits, and Quest client-ID policy remain cross-team
-inputs. No placeholder production values will be serialized into the scene.
+**Status:** In progress. A development FastAPI relay, React Native prepared-
+session flow, six-digit code display, Quest gaze keypad, pseudonymous Quest
+installation identity, relay bridge, telemetry acknowledgement, and durable
+relay-side visual log are implemented. A Unity editor command creates the
+development profile and wires the Temple Pond composition root without storing
+the one-time code. The current endpoint and limits are explicitly development
+configuration; they are not a frozen research deployment.
 
 - Exercise disconnect/reconnect, stale payload, duplicate payload, second-client
   rejection, session rollover, completion, and abort paths.
@@ -251,22 +262,27 @@ inputs. No placeholder production values will be serialized into the scene.
 
 Recommended pairing sequence:
 
-1. Mobile authenticates the participant and requests a session from the relay.
-2. Relay returns a cryptographically random one-time code with a short expiry.
-3. Quest submits the code and its app/protocol version over WSS.
-4. Relay atomically binds the mobile and Quest connections to that session.
-5. Relay rejects expired/reused codes and any second active mobile, Quest, or
+1. Mobile authenticates the participant and completes preferences and the
+   pre-session voice-companion flow.
+2. The user taps `Start my session`; mobile creates the prepared relay session
+   and submits its session configuration.
+3. Relay returns a cryptographically random one-time code with a short expiry.
+4. Mobile displays the code in `Your session`, immediately below
+   `Ready when you are`.
+5. Quest submits the user-entered code and its app/protocol version over WSS.
+6. Relay atomically binds the mobile and Quest connections to that session.
+7. Relay rejects expired/reused codes and any second active mobile, Quest, or
    participant binding.
-6. Mobile sends the normalized session configuration; Quest validates and
-   acknowledges it.
-7. Quest publishes readiness and lifecycle state. The user starts locally in
-   the headset after the app is ready.
-8. Both sides receive explicit disconnect and session-ended state.
+8. Relay delivers the prepared normalized session configuration; Quest
+   validates and acknowledges it.
+9. Quest publishes readiness and lifecycle state, then launches the local
+   session only after configuration validation succeeds.
+10. Both sides receive explicit disconnect and session-ended state.
 
-The relay is an architectural recommendation, not an authorization to choose a
-specific backend framework or hosting provider. Credentials, endpoint URLs,
-timeouts, and protocol versions must be deployment configuration, not hardcoded
-research constants.
+The development implementation uses a local FastAPI/WebSocket relay so the
+whole system can be exercised before research values and production hosting are
+frozen. Credentials, endpoint URLs, timeouts, and protocol versions remain
+deployment configuration rather than learning-policy constants.
 
 The current one-time pairing credential is sufficient for the initial socket.
 Safe automatic reconnection requires a relay-defined renewable/resume credential

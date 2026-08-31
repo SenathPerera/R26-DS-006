@@ -297,6 +297,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         + ":"
                         + inboundEvent.DiagnosticCode);
                     break;
+                case InboundRelayEventKind.TelemetryAcknowledged:
+                    activeTelemetryBatch = null;
+                    telemetryPublishBlocked = false;
+                    LastTelemetryError = string.Empty;
+                    break;
                 default:
                     throw new ArgumentOutOfRangeException();
             }
@@ -508,8 +513,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             try
             {
                 activeTelemetryPublish.GetAwaiter().GetResult();
-                activeTelemetryBatch = null;
-                LastTelemetryError = string.Empty;
+                telemetryPublishBlocked = true;
+                LastTelemetryError = "telemetry-awaiting-acknowledgement";
             }
             catch (OperationCanceledException)
             {
@@ -557,6 +562,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 InboundRelayEvent.ForRejection(reason, diagnosticCode));
         }
 
+        private void HandleTelemetryBatchAcknowledged(string messageId)
+        {
+            inboundEvents.Enqueue(
+                InboundRelayEvent.ForTelemetryAcknowledgement(messageId));
+        }
+
         private void HandlePhaseChanged(SessionPhaseTransition transition)
         {
             QueueCurrentQuestState();
@@ -578,6 +589,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             transport.StatusChanged += HandleStatusChanged;
             transport.InboundMessageRejected +=
                 HandleInboundMessageRejected;
+            transport.TelemetryBatchAcknowledged +=
+                HandleTelemetryBatchAcknowledged;
         }
 
         private void DetachTransport(ISessionRelayTransport transport)
@@ -588,6 +601,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             transport.StatusChanged -= HandleStatusChanged;
             transport.InboundMessageRejected -=
                 HandleInboundMessageRejected;
+            transport.TelemetryBatchAcknowledged -=
+                HandleTelemetryBatchAcknowledged;
         }
 
         private void SubscribeToCoordinator()
@@ -708,7 +723,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             Configuration,
             Command,
             Status,
-            Rejection
+            Rejection,
+            TelemetryAcknowledged
         }
 
         private readonly struct InboundRelayEvent
@@ -719,7 +735,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 SessionRelayCommandMessage command,
                 SessionTransportStatus status,
                 SessionRelayInboundRejectionReason rejectionReason,
-                string diagnosticCode)
+                string diagnosticCode,
+                string acknowledgedMessageId = null)
             {
                 Kind = kind;
                 Configuration = configuration;
@@ -727,6 +744,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 Status = status;
                 RejectionReason = rejectionReason;
                 DiagnosticCode = diagnosticCode;
+                AcknowledgedMessageId = acknowledgedMessageId;
             }
 
             public InboundRelayEventKind Kind { get; }
@@ -741,6 +759,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             public string DiagnosticCode { get; }
 
+            public string AcknowledgedMessageId { get; }
+
             public static InboundRelayEvent ForConfiguration(
                 SessionRelayConfigurationMessage configuration)
             {
@@ -750,6 +770,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     null,
                     default,
                     default,
+                    null,
                     null);
             }
 
@@ -762,6 +783,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     command,
                     default,
                     default,
+                    null,
                     null);
             }
 
@@ -774,6 +796,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     null,
                     status,
                     default,
+                    null,
                     null);
             }
 
@@ -787,7 +810,21 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     null,
                     default,
                     reason,
-                    diagnosticCode);
+                    diagnosticCode,
+                    null);
+            }
+
+            public static InboundRelayEvent ForTelemetryAcknowledgement(
+                string messageId)
+            {
+                return new InboundRelayEvent(
+                    InboundRelayEventKind.TelemetryAcknowledged,
+                    null,
+                    null,
+                    default,
+                    default,
+                    null,
+                    messageId);
             }
         }
     }

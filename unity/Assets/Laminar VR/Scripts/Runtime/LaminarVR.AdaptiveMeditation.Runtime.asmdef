@@ -3,6 +3,7 @@
     "rootNamespace": "LaminarVR.AdaptiveMeditation",
     "references": [
         "LaminarVR.AdaptiveMeditation.Core",
+        "Unity.ugui",
         "Unity.RenderPipelines.Core.Runtime",
         "Unity.RenderPipelines.Universal.Runtime"
     ],

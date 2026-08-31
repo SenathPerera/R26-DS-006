@@ -102,6 +102,9 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
   const [post, setPost] = useState<StressResult | null>(null);
   const [full, setFull] = useState<FullSessionResult | null>(null);
   const [history, setHistory] = useState<SavedVoiceSession[]>([]);
+  const prepareVrSession = useMindSyncStore(s => s.prepareVrSession);
+  const refreshVisualLog = useMindSyncStore(s => s.refreshVisualLog);
+  const relay = useMindSyncStore(s => s.relay);
 
   // §3.8: warm the model the moment the check-in opens, so the analysing wait
   // is short by the time the first clip is uploaded.
@@ -110,9 +113,9 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
   useEffect(() => {
     if (stage !== 'report' || !pre || !post || full) return;
     componentDService.fullSession(sessionId, userId, {useMockHrv: true, language, log: true})
-      .then(f => { setFull(f); const e: SavedVoiceSession = {id: sessionId, at: Date.now(), participant: firstName, language, pre, post, full: f}; void saveSession(e).then(setHistory); })
+      .then(f => { setFull(f); const e: SavedVoiceSession = {id: sessionId, at: Date.now(), participant: firstName, language, pre, post, full: f, vrSessionId: relay.preparedSession?.sessionId, visualTelemetryMessages: relay.visualTelemetryMessages}; void saveSession(e).then(setHistory); })
       .catch(() => {});
-  }, [stage, pre, post, full, sessionId, userId, language, firstName]);
+  }, [stage, pre, post, full, sessionId, userId, language, firstName, relay.preparedSession?.sessionId, relay.visualTelemetryMessages]);
 
   const commonProps = {onBack: navigation.goBack};
 
@@ -124,9 +127,12 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
         {stage === 'pre' || stage === 'post' ? (
           <CheckInStage key={stage} {...commonProps} phase={stage} sessionId={sessionId} userId={userId} language={language} ambient={ambient}
             result={stage === 'pre' ? pre : post} onScored={r => (stage === 'pre' ? setPre(r) : setPost(r))}
-            onContinue={() => setStage(stage === 'pre' ? 'vr' : 'report')} />
+            onContinue={async () => {
+              if (stage === 'pre') await prepareVrSession(sessionId);
+              setStage(stage === 'pre' ? 'vr' : 'report');
+            }} />
         ) : null}
-        {stage === 'vr' ? <VrStage {...commonProps} name={firstName} onBack2={() => setStage('post')} /> : null}
+        {stage === 'vr' ? <VrStage {...commonProps} name={firstName} onBack2={async () => { try { await refreshVisualLog(); } catch { /* live messages remain available */ } setStage('post'); }} /> : null}
         {stage === 'report' ? <ReportStage {...commonProps} full={full} pre={pre} post={post} history={history} onHome={() => navigation.navigate('MainTabs')} /> : null}
       </ScrollView>
     </AuroraBackground>
@@ -247,13 +253,15 @@ function RoomStage({ambient, setAmbient, onContinue, onBack}: {ambient: AmbientR
 /* ---------- Check-in loop ---------- */
 function CheckInStage({phase, sessionId, userId, language, ambient, result, onScored, onContinue, onBack}: {
   phase: Phase; sessionId: string; userId: string; language: Lang; ambient: AmbientResult | null;
-  result: StressResult | null; onScored: (r: StressResult) => void; onContinue: () => void; onBack: () => void;
+  result: StressResult | null; onScored: (r: StressResult) => void; onContinue: () => void | Promise<void>; onBack: () => void;
 }) {
   const sarah = useSarah();
   const rec = useRecorder();
   const [sub, setSub] = useState<'running' | 'processing' | 'result' | 'error'>('running');
   const [turnIndex, setTurnIndex] = useState(0);
   const [error, setError] = useState('');
+  const [continuing, setContinuing] = useState(false);
+  const [continueError, setContinueError] = useState('');
   const finishRef = useRef<((r: RecordingResult | null) => void) | null>(null);
   const started = useRef(false);
   const abortRef = useRef(false);
@@ -298,7 +306,7 @@ function CheckInStage({phase, sessionId, userId, language, ambient, result, onSc
 
   // DEV demo: run a picked audio file through the exact same scoring path,
   // bypassing the live mic. Aborts the conversation loop cleanly first.
-  const useAudioFile = useCallback(async () => {
+  const chooseAudioFile = useCallback(async () => {
     abortRef.current = true;
     sarah.stop();
     if (finishRef.current) { const f = finishRef.current; finishRef.current = null; f(null); }
@@ -338,7 +346,18 @@ function CheckInStage({phase, sessionId, userId, language, ambient, result, onSc
         <GlassCard>
           <Text style={styles.body}>{phase === 'pre' ? 'This is a starting point, not a verdict. Let’s see what the session does.' : 'Let’s look at what changed.'}</Text>
         </GlassCard>
-        <PrimaryButton label={phase === 'pre' ? 'Start my session' : 'See what changed'} onPress={() => { sarah.stop(); onContinue(); }} />
+        {continueError ? <Text style={styles.errorText}>{continueError}</Text> : null}
+        <PrimaryButton
+          label={continuing ? 'Preparing your session…' : phase === 'pre' ? 'Start my session' : 'See what changed'}
+          disabled={continuing}
+          onPress={() => {
+            sarah.stop();
+            setContinuing(true);
+            setContinueError('');
+            Promise.resolve(onContinue())
+              .catch(() => setContinueError('I couldn’t prepare the headset session. Check the relay connection and try again.'))
+              .finally(() => setContinuing(false));
+          }} />
       </>
     );
   }
@@ -367,14 +386,16 @@ function CheckInStage({phase, sessionId, userId, language, ambient, result, onSc
       {rec.isRecording ? <LinearVisualizer levels={rec.levels} active /> : null}
       {rec.isRecording ? <TextLink label="That’s all for now" onPress={() => void rec.stop()} /> : null}
       {sub === 'error' ? (<><Text style={styles.errorText}>{error}</Text><PrimaryButton label="Try again" onPress={() => { started.current = false; setSub('running'); setError(''); started.current = true; void runLoop(); }} /></>) : null}
-      {__DEV__ ? <Text onPress={() => void useAudioFile()} style={styles.devLink}>Use an audio file (dev)</Text> : null}
+      {__DEV__ ? <Text onPress={() => void chooseAudioFile()} style={styles.devLink}>Use an audio file (dev)</Text> : null}
     </>
   );
 }
 
 /* ---------- VR ---------- */
-function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void; onBack: () => void}) {
+function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void | Promise<void>; onBack: () => void}) {
   const sarah = useSarah();
+  const pairingCode = useMindSyncStore(s => s.pairingCode);
+  const relay = useMindSyncStore(s => s.relay);
   useEffect(() => {
     void sarah.say(`Go ahead and put the headset on${name ? `, ${name}` : ''}. I'll be right here when you're back.`, 'english');
     return () => sarah.stop();
@@ -383,6 +404,16 @@ function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void; on
   return (
     <>
       <StageHeader stage="vr" title={HEADER.vr.title} status={HEADER.vr.status} onBack={onBack} />
+      <GlassCard accent={palette.aqua}>
+        <Text style={styles.smallLabel}>ONE-TIME HEADSET CODE</Text>
+        <Text style={styles.accessCode}>{pairingCode ?? '••••••'}</Text>
+        <Text style={styles.body}>
+          {relay.connectionState === 'connected'
+            ? 'Open MindSync on your Quest and enter this code. It expires in five minutes.'
+            : 'Connecting your phone to the session relay…'}
+        </Text>
+        {relay.lastError ? <Text style={styles.errorText}>Relay unavailable. Return and tap Start my session again.</Text> : null}
+      </GlassCard>
       <View style={{alignItems: 'center', paddingVertical: space.xl}}><Headset /></View>
       <Text style={styles.display}>Time to drop in.</Text>
       <Text style={styles.body}>Put on your headset and let the session take over. I’ll be waiting when you’re back — we’ll see what changed.</Text>
@@ -390,7 +421,7 @@ function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void; on
         <InfoRow icon={Clock} text="20–30 minutes" />
         <InfoRow icon={Sparkles} text="Sarah will be waiting" />
       </GlassCard>
-      <PrimaryButton label="I’m back" onPress={() => { sarah.stop(); onBack2(); }} />
+      <PrimaryButton label="I’m back" onPress={() => { sarah.stop(); void onBack2(); }} />
     </>
   );
 }
@@ -497,6 +528,7 @@ const styles = StyleSheet.create({
   bubble: {...T.h2, color: palette.textHi, fontWeight: '500'},
   sarahIntro: {...T.body, color: palette.textHi, textAlign: 'center', paddingHorizontal: space.md},
   smallLabel: {...T.caption, color: palette.textMid, fontWeight: '700'},
+  accessCode: {...T.metricXL, color: palette.aqua, textAlign: 'center', fontWeight: '800', letterSpacing: 12},
   hintCenter: {...T.caption, color: palette.textLow, textAlign: 'center'},
   countOverlay: {position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center'},
   count: {...T.metricXL, color: palette.aqua, textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 12},

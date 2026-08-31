@@ -142,6 +142,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 Has.Count.EqualTo(2));
 
             setup.Bridge.ProcessPendingMessages();
+            Assert.That(setup.Bridge.PendingTelemetryEventCount, Is.EqualTo(3));
+            Assert.That(
+                setup.Bridge.LastTelemetryError,
+                Is.EqualTo("telemetry-awaiting-acknowledgement"));
+
+            setup.Transport.EmitTelemetryAcknowledgement("batch-1");
+            setup.Bridge.ProcessPendingMessages();
             Assert.That(
                 setup.Transport.PublishedTelemetryBatches,
                 Has.Count.EqualTo(2));
@@ -149,6 +156,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 setup.Transport.PublishedTelemetryBatches[1],
                 Has.Count.EqualTo(1));
 
+            setup.Bridge.ProcessPendingMessages();
+            setup.Transport.EmitTelemetryAcknowledgement("batch-2");
             setup.Bridge.ProcessPendingMessages();
             Assert.That(setup.Bridge.PendingTelemetryEventCount, Is.Zero);
             Assert.That(setup.Bridge.LastTelemetryError, Is.Empty);
@@ -377,6 +386,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 remove { }
             }
 
+            public event Action<string> TelemetryBatchAcknowledged;
+
             public string ActiveSessionId { get; }
 
             public SessionTransportConnectionState ConnectionState
@@ -469,6 +480,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             public void EmitCommand(SessionRelayCommandMessage command)
             {
                 SessionCommandReceived?.Invoke(command);
+            }
+
+            public void EmitTelemetryAcknowledgement(string messageId)
+            {
+                TelemetryBatchAcknowledged?.Invoke(messageId);
             }
 
             private void PublishTransition(

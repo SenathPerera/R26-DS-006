@@ -3,7 +3,6 @@ import {Alert, Text, View} from 'react-native';
 import {CirclePause, CirclePlay, ShieldAlert, Square} from 'lucide-react-native';
 import {BreathingVisual, Card, Header, Metric, PrimaryButton, Screen, SecondaryButton, StatusPill, uiStyles} from '../../components/ui';
 import {useMindSyncStore} from '../../store/useMindSyncStore';
-import {unityBridge} from '../../services/unity/unityBridge';
 import {colors} from '../../theme/theme';
 
 export function PreSessionScreen({navigation}: any) {
@@ -32,6 +31,7 @@ export function LiveSessionScreen({navigation}: any) {
   const [elapsed, setElapsed] = useState(0);
   const status = useMindSyncStore(state => state.sessionStatus);
   const setStatus = useMindSyncStore(state => state.setSessionStatus);
+  const sendVrCommand = useMindSyncStore(state => state.sendVrCommand);
   const wearable = useMindSyncStore(state => state.wearableState);
   const telemetry = useMindSyncStore(state => state.ble.telemetry);
   const vr = useMindSyncStore(state => state.vrStatus);
@@ -43,9 +43,10 @@ export function LiveSessionScreen({navigation}: any) {
   }, [status]);
   const stop = () => Alert.alert('End this session?', 'The VR environment will stop gently and your post-session check-in will remain available.', [
     {text: 'Continue session', style: 'cancel'},
-    {text: 'End session', style: 'destructive', onPress: () => { setStatus('complete'); void unityBridge.stop(); navigation.replace('SessionComplete'); }},
+    {text: 'End session', style: 'destructive', onPress: () => { setStatus('complete'); sendVrCommand('stop'); navigation.replace('SessionComplete'); }},
   ]);
-  const pause = () => { const next = status === 'paused' ? 'active' : 'paused'; setStatus(next); if (next === 'paused') void unityBridge.pause(); };
+  const pause = () => { const next = status === 'paused' ? 'active' : 'paused'; setStatus(next); sendVrCommand(next === 'paused' ? 'pause' : 'resume'); };
+  const emergency = () => { setStatus('complete'); sendVrCommand('emergency_stop'); navigation.replace('SessionComplete'); };
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const seconds = String(elapsed % 60).padStart(2, '0');
   return (
@@ -60,7 +61,7 @@ export function LiveSessionScreen({navigation}: any) {
         <View style={{flex: 1}}><SecondaryButton label={status === 'paused' ? 'Resume' : 'Pause'} icon={status === 'paused' ? CirclePlay : CirclePause} onPress={pause} /></View>
         <View style={{flex: 1}}><SecondaryButton label="Stop" danger icon={Square} onPress={stop} /></View>
       </View>
-      <SecondaryButton label="Ground and exit" danger icon={ShieldAlert} onPress={stop} />
+      <SecondaryButton label="Ground and exit" danger icon={ShieldAlert} onPress={emergency} />
     </Screen>
   );
 }

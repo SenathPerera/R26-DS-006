@@ -9,12 +9,14 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 662db3606651452b8a71fe9cc4ab5d71, type: 3}
-  m_Name: ComponentBQuestStreamConnectionProfile
+  m_Script: {fileID: 11500000, guid: 173822ef4eb54119b33287e6723d74b3, type: 3}
+  m_Name: TemplePondDevelopmentSessionRelayProfile
   m_EditorClassIdentifier: 
-  configurationId: component-b-quest-stream-dev-v1
+  configurationId: temple-pond-session-relay-dev-v1
   configurationVersion: 1
   deploymentConfigurationApproved: 1
-  streamEndpoint: ws://172.20.10.4:8000/stream
-  keepaliveIntervalSeconds: 20
+  relayEndpoint: ws://172.20.10.4:8080/realtime?role=quest
+  schemaVersion: mindsync-session-v1
   maximumMessageBytes: 65536
+  maximumTelemetryEventsPerBatch: 32
+  allowInsecureDevelopmentEndpoint: 1
