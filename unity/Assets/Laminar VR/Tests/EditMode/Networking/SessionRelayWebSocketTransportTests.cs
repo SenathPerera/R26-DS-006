@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Runtime.Networking;
 using LaminarVR.AdaptiveMeditation.Session;
+using LaminarVR.AdaptiveMeditation.Telemetry;
 using NUnit.Framework;
 
 namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
@@ -168,6 +169,29 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
             await transport.DisconnectAsync(CancellationToken.None);
         }
 
+        [Test]
+        public async Task PublishTelemetryBatch_RaisesOnlyMatchingDurableAcknowledgement()
+        {
+            var connection = new FakeConnection();
+            connection.EnqueueText(CreateAcceptedPairingJson());
+            var transport = CreateTransport(connection);
+            var acknowledgedCount = 0;
+            transport.TelemetryBatchAcknowledged +=
+                _ => Interlocked.Increment(ref acknowledgedCount);
+            await transport.ConnectAsync(CancellationToken.None);
+
+            await transport.PublishTelemetryBatchAsync(
+                new[] { CreateTelemetryEvent() },
+                CancellationToken.None);
+            connection.EnqueueText(CreateDeliveryAcknowledgementJson(
+                "generated-2"));
+            await WaitUntilAsync(
+                () => Volatile.Read(ref acknowledgedCount) == 1);
+
+            Assert.That(acknowledgedCount, Is.EqualTo(1));
+            await transport.DisconnectAsync(CancellationToken.None);
+        }
+
         private static SessionRelayWebSocketTransport CreateTransport(
             FakeConnection connection)
         {
@@ -242,6 +266,35 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"messageType\":\"session_command\","
                 + "\"payload\":{\"sessionId\":\"" + sessionId + "\","
                 + "\"command\":\"start\"}}";
+        }
+
+        private static string CreateDeliveryAcknowledgementJson(
+            string acknowledgedMessageId)
+        {
+            return "{\"schemaVersion\":\"mindsync-relay-test-v1\"," +
+                "\"messageId\":\"ack-1\"," +
+                "\"messageType\":\"delivery_ack\"," +
+                "\"payload\":{\"sessionId\":\"session-42\"," +
+                "\"acknowledgedMessageId\":\""
+                + acknowledgedMessageId + "\"}}";
+        }
+
+        private static TelemetryEvent CreateTelemetryEvent()
+        {
+            return new TelemetryEvent(
+                "visual-event",
+                "1",
+                "logging-test",
+                1,
+                "event-1",
+                1L,
+                "session-42",
+                "P017",
+                "session.phase_changed",
+                1787282898.4d,
+                10d,
+                false,
+                Array.Empty<TelemetryField>());
         }
 
         private sealed class FixedMessageIdSource

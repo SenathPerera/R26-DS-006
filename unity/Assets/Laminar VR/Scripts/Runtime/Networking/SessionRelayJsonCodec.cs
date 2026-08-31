@@ -25,6 +25,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         private const string QuestStateMessageType = "quest_state";
         private const string TelemetryBatchMessageType =
             "visual_telemetry_batch";
+        private const string DeliveryAcknowledgementMessageType =
+            "delivery_ack";
 
         private readonly string schemaVersion;
 
@@ -225,6 +227,49 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                         events = eventDtos
                     }
                 });
+        }
+
+        public bool TryParseDeliveryAcknowledgement(
+            string json,
+            out string acknowledgedMessageId)
+        {
+            acknowledgedMessageId = null;
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                return false;
+            }
+
+            DeliveryAcknowledgementEnvelopeDto envelope;
+            try
+            {
+                envelope = JsonUtility.FromJson<
+                    DeliveryAcknowledgementEnvelopeDto>(json);
+            }
+            catch (ArgumentException)
+            {
+                return false;
+            }
+
+            if (envelope == null
+                || envelope.payload == null
+                || !string.Equals(
+                    envelope.schemaVersion,
+                    schemaVersion,
+                    StringComparison.Ordinal)
+                || !string.Equals(
+                    envelope.messageType,
+                    DeliveryAcknowledgementMessageType,
+                    StringComparison.Ordinal)
+                || string.IsNullOrWhiteSpace(envelope.messageId)
+                || string.IsNullOrWhiteSpace(
+                    envelope.payload.acknowledgedMessageId))
+            {
+                return false;
+            }
+
+            acknowledgedMessageId =
+                envelope.payload.acknowledgedMessageId.Trim();
+            return true;
         }
 
         private static TelemetryEventDto MapTelemetryEvent(
@@ -434,6 +479,22 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         private sealed class TelemetryBatchPayloadDto
         {
             public TelemetryEventDto[] events;
+        }
+
+        [Serializable]
+        private sealed class DeliveryAcknowledgementEnvelopeDto
+        {
+            public string schemaVersion;
+            public string messageId;
+            public string messageType;
+            public DeliveryAcknowledgementPayloadDto payload;
+        }
+
+        [Serializable]
+        private sealed class DeliveryAcknowledgementPayloadDto
+        {
+            public string sessionId;
+            public string acknowledgedMessageId;
         }
 
         [Serializable]

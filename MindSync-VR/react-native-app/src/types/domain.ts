@@ -2,6 +2,7 @@ export type UserRole = 'participant' | 'clinician' | 'researcher';
 export type ConnectionState = 'idle' | 'scanning' | 'connecting' | 'connected' | 'disconnected' | 'error';
 export type VrStatus = 'not-paired' | 'pairing' | 'ready' | 'waiting' | 'active' | 'disconnected';
 export type SessionStatus = 'ready' | 'active' | 'paused' | 'ending' | 'complete';
+export type SessionRelayConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 export type QuestionType = 'single' | 'multiple' | 'likert' | 'text' | 'numeric' | 'slider' | 'voice';
 
 export interface UserProfile {
@@ -103,6 +104,31 @@ export interface MeditationSession {
   moodBefore: number;
   moodAfter: number;
   validationComplete: boolean;
+}
+
+export interface PreferredEnvironment {
+  illumination: number;
+  warmth: number;
+  atmosphericSoftness: number;
+  colorRichness: number;
+  ambientMotion: number;
+}
+
+export interface PreparedVrSession {
+  schemaVersion: string;
+  sessionId: string;
+  pairingCode: string;
+  expiresAt: number;
+  mobileToken: string;
+}
+
+export interface SessionRelayState {
+  connectionState: SessionRelayConnectionState;
+  preparedRequestId: string | null;
+  preparedSession: PreparedVrSession | null;
+  questPhase: string | null;
+  visualTelemetryMessages: unknown[];
+  lastError: string | null;
 }
 
 export interface BranchRule {

@@ -12,6 +12,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             SessionRelayInboundRejectionReason,
             string> InboundMessageRejected;
 
+        event Action<string> TelemetryBatchAcknowledged;
+
         string ActiveSessionId { get; }
     }
 

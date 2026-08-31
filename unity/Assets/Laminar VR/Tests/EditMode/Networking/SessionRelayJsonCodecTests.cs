@@ -15,6 +15,24 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
             new SessionRelayJsonCodec(SchemaVersion);
 
         [Test]
+        public void DeliveryAcknowledgement_ParsesAcknowledgedMessageId()
+        {
+            const string json =
+                "{\"schemaVersion\":\"mindsync-relay-test-v1\"," +
+                "\"messageId\":\"ack-1\"," +
+                "\"messageType\":\"delivery_ack\"," +
+                "\"payload\":{\"sessionId\":\"session-42\"," +
+                "\"acknowledgedMessageId\":\"telemetry-7\"}}";
+
+            var accepted = codec.TryParseDeliveryAcknowledgement(
+                json,
+                out var acknowledgedMessageId);
+
+            Assert.That(accepted, Is.True);
+            Assert.That(acknowledgedMessageId, Is.EqualTo("telemetry-7"));
+        }
+
+        [Test]
         public void SerializePairingRequest_UsesQuestRoleAndRuntimeIdentity()
         {
             var json = codec.SerializePairingRequest(

@@ -50,6 +50,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         private readonly ISessionRelayMessageIdSource messageIdSource;
         private readonly HashSet<string> dispatchedMessageIds =
             new HashSet<string>(StringComparer.Ordinal);
+        private readonly HashSet<string> pendingTelemetryMessageIds =
+            new HashSet<string>(StringComparer.Ordinal);
 
         private SessionTransportConnectionState connectionState =
             SessionTransportConnectionState.Disconnected;
@@ -123,6 +125,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         public event Action<
             SessionRelayInboundRejectionReason,
             string> InboundMessageRejected;
+
+        public event Action<string> TelemetryBatchAcknowledged;
 
         public SessionTransportConnectionState ConnectionState
         {
@@ -294,7 +298,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 cancellationToken);
         }
 
-        public Task PublishTelemetryBatchAsync(
+        public async Task PublishTelemetryBatchAsync(
             IReadOnlyList<TelemetryEvent> telemetryEvents,
             CancellationToken cancellationToken)
         {
@@ -328,11 +332,30 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 }
             }
 
-            return SendAsync(
-                codec.SerializeTelemetryBatch(
-                    RequireGeneratedMessageId(),
-                    telemetryEvents),
-                cancellationToken);
+            var messageId = RequireGeneratedMessageId();
+            lock (synchronization)
+            {
+                pendingTelemetryMessageIds.Add(messageId);
+            }
+
+            try
+            {
+                await SendAsync(
+                        codec.SerializeTelemetryBatch(
+                            messageId,
+                            telemetryEvents),
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch
+            {
+                lock (synchronization)
+                {
+                    pendingTelemetryMessageIds.Remove(messageId);
+                }
+
+                throw;
+            }
         }
 
         public async Task DisconnectAsync(
@@ -472,6 +495,33 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                     return;
                 }
 
+                if (codec.TryParseDeliveryAcknowledgement(
+                        message.Text,
+                        out var acknowledgedMessageId))
+                {
+                    bool wasPending;
+                    lock (synchronization)
+                    {
+                        wasPending = pendingTelemetryMessageIds.Remove(
+                            acknowledgedMessageId);
+                    }
+
+                    if (wasPending)
+                    {
+                        TelemetryBatchAcknowledged?.Invoke(
+                            acknowledgedMessageId);
+                    }
+                    else
+                    {
+                        InboundMessageRejected?.Invoke(
+                            SessionRelayInboundRejectionReason
+                                .DuplicateMessage,
+                            "telemetry-acknowledgement-unknown");
+                    }
+
+                    continue;
+                }
+
                 if (!inboundParser.TryParse(
                         message.Text,
                         out var inbound,
@@ -577,6 +627,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 }
 
                 activeSessionId = sessionId;
+                pendingTelemetryMessageIds.Clear();
             }
         }
 
