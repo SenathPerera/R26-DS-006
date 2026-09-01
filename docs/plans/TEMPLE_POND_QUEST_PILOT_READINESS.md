@@ -33,7 +33,7 @@ pilot validation.
 To unblock full-system testing, the current implementation uses provisional,
 clearly identified development values:
 
-- Local relay endpoint: `ws://172.20.10.4:8080/realtime?role=quest`.
+- Local relay endpoint: `ws://192.168.183.190:8080/realtime?role=quest`.
 - Schema identifier: `mindsync-session-v1`.
 - Pairing-code lifetime: five minutes.
 - Readiness-to-start initialization delay: 30 seconds.
@@ -63,7 +63,7 @@ development identifier above. Confirm the team's permanent reverse-domain
 package ID before distributing a participant APK; changing it later creates a
 different Android application identity and upgrade path.
 
-The current local Component B endpoint uses `ws://172.20.10.4:8000/stream`.
+The current local Component B endpoint uses `ws://192.168.183.190:8000/stream`.
 Confirm Android cleartext-network behavior in a development Quest build, or
 serve Component B through TLS. Production relay communication must use WSS.
 

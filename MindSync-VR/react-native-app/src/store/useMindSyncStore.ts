@@ -3,7 +3,7 @@ import type {Session} from '@supabase/supabase-js';
 import {create} from 'zustand';
 import {createJSONStorage, persist} from 'zustand/middleware';
 import {demoSessions, demoUser, questionnaireTemplates} from '../constants/mockData';
-import {environment} from '../config/environment';
+import {environment, resolvePersistedComponentBEndpoint} from '../config/environment';
 import {componentDService} from '../services/api/componentDService';
 import {WEARABLE_DEVICE_NAME, wearableBleService} from '../services/ble/wearableBleService';
 import {componentBPipelineService} from '../services/componentB/componentBPipelineService';
@@ -477,8 +477,21 @@ export const useMindSyncStore = create<MindSyncStore>()(
     }),
     {
       name: 'mindsync-rn-state-v1',
-      version: 3,
+      version: 2,
       storage: createJSONStorage(() => AsyncStorage),
+      migrate: persistedState => {
+        const persisted = persistedState as Partial<MindSyncStore>;
+        return {
+          ...persisted,
+          componentB: {
+            ...emptyComponentB,
+            ...persisted.componentB,
+            endpoint: resolvePersistedComponentBEndpoint(
+              persisted.componentB?.endpoint,
+            ),
+          },
+        };
+      },
       partialize: state => ({user: state.user, onboarding: state.onboarding, sessions: state.sessions, questionnaireSubmissions: state.questionnaireSubmissions, pendingValidationCount: state.pendingValidationCount, componentB: {...emptyComponentB, endpoint: state.componentB.endpoint}}),
       merge: (persistedState, currentState) => {
         const persisted = persistedState as Partial<MindSyncStore>;
@@ -491,7 +504,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
       },
       onRehydrateStorage: () => state => {
         state?.setHydrated(true);
-        componentBPipelineService.setEndpoint(state?.componentB.endpoint ?? environment.componentBIngestUrl);
+        componentBPipelineService.setEndpoint(resolvePersistedComponentBEndpoint(state?.componentB.endpoint));
       },
     },
   ),

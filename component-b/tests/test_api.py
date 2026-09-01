@@ -143,6 +143,23 @@ def test_ingest_socket_rejects_bad_frame_then_accepts_next(client, monkeypatch):
         assert waiting["status"] == "waiting_for_temperature"
 
 
+def test_ingest_initializes_model_off_the_asgi_event_loop(client, monkeypatch):
+    calls = []
+
+    async def tracked_to_thread(function, *args, **kwargs):
+        calls.append(function)
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr("server.main.asyncio.to_thread", tracked_to_thread)
+    monkeypatch.setattr("server.main.new_stream", lambda: None)
+    monkeypatch.setattr("server.main.unavailable_reason", lambda: "test unavailable")
+
+    with client.websocket_connect("/ingest") as websocket:
+        assert websocket.receive_json()["status"] == "model_unavailable"
+
+    assert len(calls) == 1
+
+
 def test_latest_is_503_before_first_window(client):
     """Not 404: the resource exists, it just has no value yet."""
     r = client.get("/stress/latest")

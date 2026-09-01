@@ -15,6 +15,12 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             "Assets/Laminar VR/Configuration/Networking/"
             + "TemplePondDevelopmentSessionRelayProfile.asset";
 
+        private const string ComponentBProfilePath =
+            "Assets/Laminar VR/Configuration/Networking/"
+            + "ComponentBQuestStreamConnectionProfile.asset";
+
+        private const string DevelopmentBackendHost = "192.168.183.190";
+
         private const string InputActionsPath =
             "Assets/Samples/XR Interaction Toolkit/3.0.11/Starter Assets/"
             + "XRI Default Input Actions.inputactions";
@@ -49,6 +55,7 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             }
 
             var profile = LoadOrCreateProfile();
+            ConfigureComponentBProfile();
             var inputActions = AssetDatabase.LoadAssetAtPath<InputActionAsset>(
                 InputActionsPath);
             if (inputActions == null)
@@ -110,7 +117,7 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             serialized.FindProperty("deploymentConfigurationApproved")
                 .boolValue = true;
             serialized.FindProperty("relayEndpoint").stringValue =
-                "ws://172.20.10.4:8080/realtime?role=quest";
+                $"ws://{DevelopmentBackendHost}:8080/realtime?role=quest";
             serialized.FindProperty("schemaVersion").stringValue =
                 "mindsync-session-v1";
             serialized.FindProperty("maximumMessageBytes").intValue = 65536;
@@ -122,6 +129,34 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             EditorUtility.SetDirty(profile);
             AssetDatabase.SaveAssets();
             return profile;
+        }
+
+        private static void ConfigureComponentBProfile()
+        {
+            var profile = AssetDatabase.LoadAssetAtPath<
+                ComponentBStreamConnectionProfile>(ComponentBProfilePath);
+            if (profile == null)
+            {
+                Directory.CreateDirectory(
+                    Path.GetDirectoryName(ComponentBProfilePath));
+                profile = ScriptableObject.CreateInstance<
+                    ComponentBStreamConnectionProfile>();
+                AssetDatabase.CreateAsset(profile, ComponentBProfilePath);
+            }
+
+            var serialized = new SerializedObject(profile);
+            serialized.FindProperty("configurationId").stringValue =
+                "component-b-quest-stream-dev-v1";
+            serialized.FindProperty("configurationVersion").intValue = 1;
+            serialized.FindProperty("deploymentConfigurationApproved")
+                .boolValue = true;
+            serialized.FindProperty("streamEndpoint").stringValue =
+                $"ws://{DevelopmentBackendHost}:8000/stream";
+            serialized.FindProperty("keepaliveIntervalSeconds").floatValue = 20f;
+            serialized.FindProperty("maximumMessageBytes").intValue = 65536;
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            EditorUtility.SetDirty(profile);
+            AssetDatabase.SaveAssets();
         }
 
         private static T GetOrAdd<T>(GameObject root)

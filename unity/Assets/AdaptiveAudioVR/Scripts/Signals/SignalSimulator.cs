@@ -98,13 +98,15 @@ namespace AdaptiveAudioVR.Signals
 
         public void SetExternalSignal(float stress, float confidence)
         {
+            SetExternalSignal(new SignalPacket(stress, confidence, Time.time));
+        }
+
+        public void SetExternalSignal(SignalPacket signal)
+        {
             mode = SimulationMode.External;
-            targetStress = Mathf.Clamp01(stress);
-            targetConfidence = Mathf.Clamp01(confidence);
-            CurrentSignal = new SignalPacket(
-                targetStress,
-                targetConfidence,
-                Time.time);
+            targetStress = Mathf.Clamp01(signal.stress);
+            targetConfidence = Mathf.Clamp01(signal.confidence);
+            CurrentSignal = signal;
         }
 
         private void UpdateTargets()
