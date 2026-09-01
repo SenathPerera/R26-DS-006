@@ -194,12 +194,10 @@ The app matches the firmware in:
 Current packet:
 
 ```json
-{"t":1097073,"ir":24500,"red":43000,"noiseAvg":85000,"noisePeak":180000,"temp":33.7,"flags":7}
+{"t":1097073,"ir":24500,"red":43000,"noiseAvg":85000,"noisePeak":180000,"temp":null,"flags":3}
 ```
 
-`temp` is a TMP117 reading in degrees Celsius. It is `null` when the sensor is absent or has not produced a valid reading. The parser also accepts future compact fields `hr`, `rr`, `spo2`, and `bat`. Missing measurements remain `null`; the app does not invent BPM, RR, SpO2, temperature, or battery values.
-
-The firmware expects the Component B TMP117 at I2C address `0x48`, sharing the existing bus: SDA to GPIO1, SCL to GPIO2, VIN to 3V3, and GND to GND. A different temperature-sensor model requires a matching firmware driver; do not relabel another sensor's bytes as TMP117 data.
+`temp` is currently `null` because the wearable temperature sensor is unavailable. The parser also accepts future compact fields `hr`, `rr`, `spo2`, and `bat`. Missing device measurements remain `null`; the firmware and mobile UI do not relabel generated data as a sensor reading.
 
 The raw PPG characteristic is fixed-width, binary, and little-endian. Its 41-byte packet layout is:
 
@@ -244,7 +242,7 @@ The outbound shape is shown below with the PPG array abbreviated:
 {"timestamp":1787282838.4,"sample_rate":64.0,"ppg":[1834.2,1836.1],"temperature":33.7}
 ```
 
-The real `ppg` array always contains exactly 960 finite amplitudes. `timestamp` is the frame start in POSIX seconds. `temperature` is the latest real TMP117 value or `null`. The app never fills missing source data by repeating the latest UI telemetry value; a raw-sample discontinuity resets the partial frame.
+The real `ppg` array always contains exactly 960 finite amplitudes. `timestamp` is the frame start in POSIX seconds. The app sends `temperature: null` while the physical sensor is unavailable. Component B resolves that field to a smooth, bounded synthetic body-surface value and labels the acknowledgement `temperature_source: synthetic_backend`. The app never fills missing PPG data by repeating the latest UI telemetry value; a raw-sample discontinuity resets the partial frame.
 
 Start Component B from the repository root:
 
@@ -266,7 +264,7 @@ adb reverse tcp:8000 tcp:8000
 
 For a standalone phone on Wi-Fi, open Wearable detail and set the Component B endpoint to `ws://<laptop-LAN-IP>:8000/ingest`. The phone and backend must be on the same network and the laptop firewall must permit TCP port 8000. Internal Android research builds allow local cleartext WebSockets; production distribution must use `wss://` and disable cleartext traffic.
 
-The wearable detail screen reports raw samples buffered, frames sent, backend acknowledgements, reconnect state, and backend errors separately. Component B responds with `accepted`, `invalid_batch`, or `model_unavailable`; an invalid frame does not close the socket.
+The wearable detail screen reports raw samples buffered, frames sent, backend acknowledgements, resolved temperature/source, reconnect state, and backend errors separately. Component B responds with `accepted`, `invalid_batch`, or `model_unavailable`; an invalid frame does not close the socket.
 
 ## Component D
 
@@ -300,7 +298,7 @@ Physical BLE test:
 4. Open Wearable, grant Bluetooth permissions, and scan.
 5. Select `WearableHealthMonitor`, or the strongest anonymous candidate when Android hides its advertisement.
 6. Confirm Connected and live IR, RED, noise average, and noise peak values.
-7. Confirm temperature changes from `Unavailable` to a real TMP117 reading when that sensor is attached.
+7. Confirm device temperature remains `Unavailable` and Component B temperature is labeled `synthetic backend`.
 8. Confirm Raw BLE stream is Available and the Component B frame counter advances to 960.
 9. After about 15 seconds, confirm Frames sent and Accepted both increase.
 10. Power off the wearable and confirm graceful BLE and Component B reset/reconnect behavior.

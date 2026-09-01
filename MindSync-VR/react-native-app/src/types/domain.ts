@@ -103,6 +103,8 @@ export interface ComponentBPipelineState {
   framesSent: number;
   framesAcknowledged: number;
   lastFrameTimestamp: number | null;
+  lastTemperatureC: number | null;
+  temperatureSource: 'wearable' | 'wearable_cached' | 'synthetic_backend' | 'unavailable' | null;
   lastBackendMessage: string | null;
   lastError: string | null;
   logs: string[];
