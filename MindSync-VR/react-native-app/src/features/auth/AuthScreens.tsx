@@ -1,4 +1,4 @@
-import React from 'react';
+import React, {useState} from 'react';
 import {Controller, useForm} from 'react-hook-form';
 import {zodResolver} from '@hookform/resolvers/zod';
 import {Text, View} from 'react-native';
@@ -10,6 +10,7 @@ import {useMindSyncStore} from '../../store/useMindSyncStore';
 
 const loginSchema = z.object({email: z.string().email('Enter a valid email'), password: z.string().min(6, 'Use at least 6 characters')});
 const signUpSchema = loginSchema.extend({name: z.string().min(2, 'Tell us what to call you')});
+const resetSchema = z.object({email: z.string().email('Enter a valid email')});
 
 export function WelcomeScreen({navigation}: any) {
   return (
@@ -31,35 +32,84 @@ export function WelcomeScreen({navigation}: any) {
 }
 
 export function LoginScreen({navigation}: any) {
-  const login = useMindSyncStore(state => state.loginDemo);
-  const {control, handleSubmit, formState: {errors}} = useForm<z.infer<typeof loginSchema>>({resolver: zodResolver(loginSchema), defaultValues: {email: 'ari@mindsync.study', password: 'mindsync'}});
-  const submit = handleSubmit(values => { login(values.email); navigation.reset({index: 0, routes: [{name: 'MainTabs'}]}); });
+  const login = useMindSyncStore(state => state.login);
+  const configured = useMindSyncStore(state => state.supabaseConfigured);
+  const authError = useMindSyncStore(state => state.authError);
+  const authStatus = useMindSyncStore(state => state.authStatus);
+  const {control, handleSubmit, setError, formState: {errors}} = useForm<z.infer<typeof loginSchema>>({resolver: zodResolver(loginSchema), defaultValues: {email: configured ? '' : 'ari@mindsync.study', password: configured ? '' : 'mindsync'}});
+  const submit = handleSubmit(async values => {
+    try {
+      await login(values.email, values.password);
+    } catch (error) {
+      setError('root', {message: error instanceof Error ? error.message : 'Unable to sign in'});
+    }
+  });
+  const busy = authStatus === 'authenticating';
   return (
     <Screen>
       <Header title="Welcome back" subtitle="Continue to your private MindSync workspace." onBack={navigation.goBack} />
       <Card>
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
         <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
-        <PrimaryButton label="Log in" icon={LogIn} onPress={submit} />
+        {errors.root?.message || authError ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root?.message ?? authError}</Text> : null}
+        <PrimaryButton label={busy ? 'Signing in...' : 'Log in'} icon={LogIn} disabled={busy} onPress={submit} />
+        <SecondaryButton label="Forgot password" onPress={() => navigation.navigate('ForgotPassword')} />
       </Card>
-      <Text style={[uiStyles.label, {textAlign: 'center'}]}>Demo credentials are prefilled. Real authentication plugs into services/api without changing screen state.</Text>
+      {!configured ? <Text style={[uiStyles.label, {textAlign: 'center'}]}>Supabase is not configured in this build. Demo credentials are enabled.</Text> : null}
     </Screen>
   );
 }
 
 export function SignUpScreen({navigation}: any) {
   const signUp = useMindSyncStore(state => state.signUp);
-  const {control, handleSubmit, formState: {errors}} = useForm<z.infer<typeof signUpSchema>>({resolver: zodResolver(signUpSchema), defaultValues: {name: '', email: '', password: ''}});
-  const submit = handleSubmit(values => { signUp(values.name, values.email); navigation.replace('Onboarding'); });
+  const authStatus = useMindSyncStore(state => state.authStatus);
+  const {control, handleSubmit, setError, formState: {errors}} = useForm<z.infer<typeof signUpSchema>>({resolver: zodResolver(signUpSchema), defaultValues: {name: '', email: '', password: ''}});
+  const submit = handleSubmit(async values => {
+    try {
+      const result = await signUp(values.name, values.email, values.password);
+      if (result.emailConfirmationRequired) navigation.replace('Login');
+    } catch (error) {
+      setError('root', {message: error instanceof Error ? error.message : 'Unable to create the account'});
+    }
+  });
+  const busy = authStatus === 'authenticating';
   return (
     <Screen>
-      <Header title="Create your account" subtitle="Your preferences remain editable and your optional answers can be skipped." onBack={navigation.goBack} />
+      <Header title="Create your account" subtitle="After account creation, we’ll ask for your usual Temple Pond garden preferences." onBack={navigation.goBack} />
       <Card>
         <Controller control={control} name="name" render={({field: {onChange, value}}) => <Field label="Preferred name" value={value} onChangeText={onChange} error={errors.name?.message} />} />
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
         <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
-        <PrimaryButton label="Continue" onPress={submit} />
+        {errors.root?.message ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root.message}</Text> : null}
+        <PrimaryButton label={busy ? 'Creating account...' : 'Continue'} disabled={busy} onPress={submit} />
       </Card>
+    </Screen>
+  );
+}
+
+export function ForgotPasswordScreen({navigation}: any) {
+  const [sent, setSent] = useState(false);
+  const sendPasswordReset = useMindSyncStore(state => state.sendPasswordReset);
+  const configured = useMindSyncStore(state => state.supabaseConfigured);
+  const {control, handleSubmit, setError, formState: {errors, isSubmitting}} = useForm<z.infer<typeof resetSchema>>({resolver: zodResolver(resetSchema), defaultValues: {email: ''}});
+  const submit = handleSubmit(async values => {
+    try {
+      await sendPasswordReset(values.email);
+      setSent(true);
+    } catch (error) {
+      setError('root', {message: error instanceof Error ? error.message : 'Unable to send the reset email'});
+    }
+  });
+  return (
+    <Screen>
+      <Header title="Reset password" subtitle="We will send account recovery instructions to your email." onBack={navigation.goBack} />
+      <Card>
+        <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
+        {sent ? <StatusPill label="Recovery email requested" tone="good" /> : null}
+        {errors.root?.message ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root.message}</Text> : null}
+        <PrimaryButton label={isSubmitting ? 'Sending...' : 'Send recovery email'} disabled={isSubmitting || !configured} onPress={submit} />
+      </Card>
+      {!configured ? <Text style={[uiStyles.label, {textAlign: 'center'}]}>Password recovery becomes available when Supabase is configured.</Text> : null}
     </Screen>
   );
 }

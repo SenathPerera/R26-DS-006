@@ -109,6 +109,7 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
   const [history, setHistory] = useState<SavedVoiceSession[]>([]);
   const prepareVrSession = useMindSyncStore(s => s.prepareVrSession);
   const refreshVisualLog = useMindSyncStore(s => s.refreshVisualLog);
+  const syncNow = useMindSyncStore(s => s.syncNow);
   const relay = useMindSyncStore(s => s.relay);
 
   // §3.8: warm the model the moment the check-in opens, so the analysing wait
@@ -175,6 +176,7 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
       visualLog,
     });
     sessionRecordOutbox.enqueue(record)
+      .then(() => syncNow())
       .catch(() => { sessionRecordQueuedRef.current = false; });
   }, [
     full,
@@ -184,6 +186,7 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
     relay.preparedSession?.sessionId,
     relay.visualLogSnapshot,
     refreshVisualLog,
+    syncNow,
     sessionId,
     sessionStartedAtUnixSeconds,
     user?.id,

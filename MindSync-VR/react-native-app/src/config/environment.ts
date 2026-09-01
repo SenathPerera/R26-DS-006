@@ -20,6 +20,11 @@ export const environment = {
   componentBIngestUrl: __DEV__ ? developmentEndpoints.componentBIngestUrl : 'wss://api.mindsync.invalid/component-b/ingest',
   websocketUrl: __DEV__ ? developmentEndpoints.websocketUrl : 'wss://api.mindsync.invalid/realtime',
   useMockBackend: false,
+  supabase: {
+    enabled: generatedEnvironment.supabaseEnabled,
+    url: generatedEnvironment.supabaseUrl,
+    publishableKey: generatedEnvironment.supabasePublishableKey,
+  },
 } as const;
 
 export function resolvePersistedComponentBEndpoint(endpoint?: string | null) {

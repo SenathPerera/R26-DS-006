@@ -14,7 +14,7 @@ export function PreSessionScreen({navigation}: any) {
   return (
     <Screen>
       <Header title="Ready to begin" subtitle="Take a moment to confirm your setup. You can leave at any point." onBack={navigation.goBack} />
-      <Card><Text style={uiStyles.value}>{active?.title ?? 'Adaptive meditation'}</Text><Text style={uiStyles.body}>{active?.durationMinutes ?? 15} minutes · {active?.environment ?? 'Ocean'} · {active?.audioProfile ?? 'Warm pads'}</Text></Card>
+      <Card><Text style={uiStyles.value}>{active?.title ?? 'Adaptive meditation'}</Text><Text style={uiStyles.body}>{active?.durationMinutes ?? 20} minutes · {active?.environment ?? 'Temple Pond'} · {active?.audioProfile ?? 'Adaptive audio'}</Text></Card>
       <Card>
         <Text style={uiStyles.value}>System readiness</Text>
         <StatusPill label={wearable === 'connected' ? 'Wearable connected' : 'Wearable optional but not connected'} tone={wearable === 'connected' ? 'good' : 'warning'} />
