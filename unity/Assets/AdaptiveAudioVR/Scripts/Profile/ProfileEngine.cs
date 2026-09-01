@@ -28,11 +28,19 @@ namespace AdaptiveAudioVR.Profile
                 instruments = preferences.preferredInstruments,
                 avoidDissonance = preferences.avoidDissonance,
                 noveltyTolerance = preferences.noveltyTolerance,
-                baseIntensity = Mathf.Clamp01(0.2f + (preferences.audioIntensity * 0.55f) + GetMoodIntensityOffset(preferences.mood) + GetTempoIntensityOffset(preferences.tempoPreference)),
-                baseDensity = Mathf.Clamp01(0.25f + (preferences.audioIntensity * 0.40f) + GetInstrumentDensityOffset(preferences.preferredInstruments) + GetNoveltyDensityOffset(preferences.noveltyTolerance)),
-                baseBrightness = Mathf.Clamp01(0.28f + GetMoodBrightnessOffset(preferences.mood) + GetAmbienceBrightnessOffset(preferences.preferredAmbience) + GetNoveltyBrightnessOffset(preferences.noveltyTolerance) - (preferences.avoidDissonance ? 0.08f : 0f)),
-                baseAmbientMix = Mathf.Clamp01(0.45f + GetAmbienceMixOffset(preferences.preferredAmbience) - (preferences.audioIntensity * 0.15f)),
-                baseMusicMix = Mathf.Clamp01(0.55f + (preferences.audioIntensity * 0.10f) + GetInstrumentMusicOffset(preferences.preferredInstruments) - GetAmbienceMusicOffset(preferences.preferredAmbience))
+                baseIntensity = Mathf.Clamp01(0.2f + (preferences.audioIntensity * 0.55f) + ((ResolveLevel(preferences.volumePreference, 0.2f, 0.5f, 0.8f) - 0.5f) * 0.25f) + GetMoodIntensityOffset(preferences.mood) + GetTempoIntensityOffset(preferences.tempoPreference)),
+                baseDensity = Mathf.Clamp01((ResolveLevel(preferences.rhythmPreference, 0.2f, 0.5f, 0.75f) * 0.55f) + (preferences.audioIntensity * 0.20f) + GetInstrumentDensityOffset(preferences.preferredInstruments) + GetNoveltyDensityOffset(preferences.noveltyTolerance)),
+                baseBrightness = Mathf.Clamp01(ResolveBrightness(preferences.brightnessPreference) + (GetMoodBrightnessOffset(preferences.mood) * 0.35f) + (GetAmbienceBrightnessOffset(preferences.preferredAmbience) * 0.25f) - (preferences.avoidDissonance ? 0.03f : 0f)),
+                baseTempo = ResolveTempo(preferences.tempoPreference),
+                baseFade = ResolveFade(preferences.tempoPreference, preferences.noveltyTolerance, preferences.reverbPreference),
+                baseAmbientMix = ResolveAmbientMix(preferences.ambientMusicBalance),
+                baseMusicMix = 1f - ResolveAmbientMix(preferences.ambientMusicBalance),
+                rhythmAmount = ResolveLevel(preferences.rhythmPreference, 0.2f, 0.5f, 0.8f),
+                natureLevel = ResolveLevel(preferences.natureSoundPreference, 0f, 0.55f, 0.85f),
+                reverbAmount = ResolveLevel(preferences.reverbPreference, 0.2f, 0.5f, 0.8f),
+                volumeLevel = ResolveLevel(preferences.volumePreference, 0.25f, 0.55f, 0.8f),
+                relaxationResponsiveness = ResolveRelaxationResponsiveness(preferences),
+                confidenceSensitivity = Mathf.Lerp(0.55f, 0.85f, 1f - preferences.noveltyTolerance)
             };
 
             BalanceMixes(ref profile);
@@ -46,6 +54,81 @@ namespace AdaptiveAudioVR.Profile
             }
 
             return CurrentProfile;
+        }
+
+        private static float ResolveTempo(string tempo)
+        {
+            switch (tempo)
+            {
+                case "fast":
+                    return 0.8f;
+                case "medium":
+                    return 0.5f;
+                default:
+                    return 0.2f;
+            }
+        }
+
+        private static float ResolveFade(string tempo, float noveltyTolerance, string reverbPreference)
+        {
+            float tempoFade = tempo == "fast" ? 0.42f : tempo == "medium" ? 0.58f : 0.78f;
+            float reverbBias = reverbPreference == "spacious" ? 0.08f : reverbPreference == "dry" ? -0.08f : 0f;
+            return Mathf.Clamp01(tempoFade + reverbBias - (noveltyTolerance * 0.12f));
+        }
+
+        private static float ResolveAmbientMix(string balance)
+        {
+            switch (balance)
+            {
+                case "mostly_ambience":
+                case "mostly ambience":
+                    return 0.8f;
+                case "mostly_music":
+                case "mostly music":
+                    return 0.2f;
+                default:
+                    return 0.5f;
+            }
+        }
+
+        private static float ResolveBrightness(string preference)
+        {
+            switch (preference)
+            {
+                case "bright_clear":
+                case "bright/clear":
+                case "bright":
+                    return 0.8f;
+                case "neutral":
+                    return 0.5f;
+                default:
+                    return 0.2f;
+            }
+        }
+
+        private static float ResolveLevel(string value, float low, float medium, float high)
+        {
+            switch (value)
+            {
+                case "high":
+                case "more_motion":
+                case "more motion":
+                case "spacious":
+                    return high;
+                case "medium":
+                case "gentle_pulse":
+                case "gentle pulse":
+                case "balanced":
+                    return medium;
+                default:
+                    return low;
+            }
+        }
+
+        private static float ResolveRelaxationResponsiveness(UserPreferences preferences)
+        {
+            float moodBias = preferences.mood == "sleepy" ? 0.12f : preferences.mood == "calm" ? 0.08f : 0f;
+            return Mathf.Clamp01(0.62f + moodBias + ((1f - preferences.audioIntensity) * 0.12f));
         }
 
         private static void BalanceMixes(ref AudioProfile profile)
@@ -85,6 +168,14 @@ namespace AdaptiveAudioVR.Profile
             builder.Append(profile.avoidDissonance ? "Avoid dissonant tension." : "Allow mild harmonic tension.");
             builder.Append(" Novelty tolerance is ");
             builder.Append(profile.noveltyTolerance.ToString("F2"));
+            builder.Append(". Rhythm amount ");
+            builder.Append(profile.rhythmAmount.ToString("F2"));
+            builder.Append(", nature level ");
+            builder.Append(profile.natureLevel.ToString("F2"));
+            builder.Append(", spaciousness ");
+            builder.Append(profile.reverbAmount.ToString("F2"));
+            builder.Append(", preferred volume ");
+            builder.Append(profile.volumeLevel.ToString("F2"));
             builder.Append(".");
             return builder.ToString();
         }

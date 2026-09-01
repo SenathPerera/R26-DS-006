@@ -49,17 +49,28 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
             var source = CreateSource(connection, delay);
             var statuses = new List<SessionTransportStatus>();
             var received = new TaskCompletionSource<PhysiologyWindow>();
+            var acceptedPayload = new TaskCompletionSource<
+                AcceptedComponentBStressPayload>();
             source.StatusChanged += statuses.Add;
             source.PhysiologyReceived += value => received.TrySetResult(value);
+            source.AcceptedPayloadReceived += value =>
+                acceptedPayload.TrySetResult(value);
 
             await source.ConnectAsync(CancellationToken.None);
             var window = await WithTimeout(received.Task);
+            var payload = await WithTimeout(acceptedPayload.Task);
             await WaitUntilAsync(() => delay.PendingCount > 0);
             delay.ReleaseOne();
             await WaitUntilAsync(() => connection.SentTexts.Count == 1);
             await source.DisconnectAsync(CancellationToken.None);
 
             Assert.That(window.Stress.Mode, Is.EqualTo(StressDecisionMode.Point));
+            Assert.That(payload.RawJson, Is.EqualTo(ValidPointJson));
+            Assert.That(payload.Window, Is.SameAs(window));
+            Assert.That(
+                payload.NormalizedContinuousStress,
+                Is.EqualTo(0.14f).Within(0.0001f));
+            Assert.That(payload.Confidence, Is.EqualTo(0.7f).Within(0.0001f));
             Assert.That(connection.SentTexts, Is.EqualTo(new[] { "keepalive" }));
             Assert.That(connection.AbortCount, Is.GreaterThanOrEqualTo(1));
             Assert.That(connection.DisposeCount, Is.EqualTo(1));
@@ -91,7 +102,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 new ControlledKeepaliveDelay());
             var rejected = new TaskCompletionSource<
                 ComponentBStressPayloadParseReasonCode>();
+            var acceptedPayloadCount = 0;
             source.PayloadRejected += value => rejected.TrySetResult(value);
+            source.AcceptedPayloadReceived += _ => acceptedPayloadCount++;
 
             await source.ConnectAsync(CancellationToken.None);
             var reason = await WithTimeout(rejected.Task);
@@ -103,6 +116,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
             Assert.That(
                 source.ConnectionState,
                 Is.EqualTo(SessionTransportConnectionState.Connected));
+            Assert.That(acceptedPayloadCount, Is.Zero);
 
             await source.DisconnectAsync(CancellationToken.None);
         }

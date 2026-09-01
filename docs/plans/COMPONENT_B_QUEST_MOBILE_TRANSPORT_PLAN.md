@@ -2,10 +2,10 @@
 
 **Status:** Accepted implementation plan for the single-participant pilot
 
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-01
 
-**Scope:** Component B stress ingestion, mobile-to-Quest session coordination,
-and visual-session log handoff
+**Scope:** Component B stress ingestion for visual and audio adaptation,
+mobile-to-Quest session coordination, and visual-session log handoff
 
 ## 1. Confirmed decisions
 
@@ -34,8 +34,12 @@ and visual-session log handoff
   and validated the configuration, and entered the appropriate local phase.
 - The mobile application remains responsible for the final Supabase upload.
   The Quest application does not write directly to Supabase.
-- Adaptive audio integration is deferred because that component is not yet
-  complete. This plan covers the visual adaptive agent only.
+- The adaptive visual and audio components share one Quest-to-Component B
+  connection. Each validated payload is fanned out with its original JSON;
+  neither component opens a second Component B connection.
+- Audio adaptation remains owned by the audio component. Sharing physiology
+  input does not let the visual policy manipulate audio parameters, and audio
+  telemetry is not part of the current demo log requirement.
 
 ## 2. End-to-end pilot flow
 
@@ -54,8 +58,10 @@ and visual-session log handoff
 7. Quest launches the local timed session only after successful redemption and
    validation, then opens the Component B prediction stream and
    associates accepted predictions with its one active session.
-8. The visual adaptation pipeline consumes only eligible, fresh Component B
-   windows through the existing physiology validation and coordinator flow.
+8. Each validated Component B JSON payload is delivered to the audio input and
+   the visual bridge. The visual adaptation pipeline continues to consume only
+   eligible, fresh windows through its existing validation and coordinator
+   flow.
 9. At completion or abort, Quest closes Component B connectivity, finalizes its
    local visual-session log, and transfers the log to mobile through the relay.
 10. The user completes the post-session voice-companion interaction on mobile.
@@ -117,6 +123,12 @@ coordinator. It will deduplicate by `windowEnd`. This preserves the already
 tested reward and decision behavior while still receiving enough data to choose
 the freshest window.
 
+The audio receiver is notified for every structurally accepted Component B
+payload before the visual 60-second forwarding gate. It preserves the exact raw
+JSON and maps the contract's `[0,3]` `continuous_score` into the audio agent's
+existing `[0,1]` stress input; confidence is already `[0,1]` and is passed
+through unchanged.
+
 The configured visual policy decision interval remains 75 seconds. These two
 intervals serve different purposes and must remain independently configurable.
 
@@ -162,7 +174,7 @@ end-to-end Component B validation remain pending.
 
 Approved local pilot connection configuration:
 
-- Component B stream: `ws://172.20.10.4:8000/stream`.
+- Component B stream: `ws://192.168.183.190:8000/stream`.
 - Keepalive interval: 20 seconds.
 - Maximum inbound message size: 65,536 bytes.
 - Reconnect schedule: eight attempts, one-second initial delay, multiplier 2,

@@ -30,8 +30,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         [SerializeField]
         private ReconnectBackoffProfile reconnectBackoffProfile = null;
 
-        private readonly ConcurrentQueue<PhysiologyWindow> receivedWindows =
-            new ConcurrentQueue<PhysiologyWindow>();
+        private readonly ConcurrentQueue<AcceptedComponentBStressPayload>
+            receivedPayloads =
+                new ConcurrentQueue<AcceptedComponentBStressPayload>();
         private readonly ConcurrentQueue<SessionTransportStatus>
             receivedStatuses =
                 new ConcurrentQueue<SessionTransportStatus>();
@@ -65,6 +66,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public int InvalidWindowEndCount { get; private set; }
 
         public int RejectedPayloadCount { get; private set; }
+
+        public event Action<AcceptedComponentBStressPayload>
+            AcceptedPayloadReceived;
 
         public ComponentBStressPayloadParseReasonCode LastPayloadRejectionReason
         {
@@ -185,7 +189,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 streamConfiguration.StreamEndpoint,
                 streamConfiguration.KeepaliveIntervalSeconds,
                 streamConfiguration.MaximumMessageBytes);
-            physiologySource.PhysiologyReceived += HandlePhysiologyReceived;
+            physiologySource.AcceptedPayloadReceived +=
+                HandleAcceptedPayloadReceived;
             physiologySource.StatusChanged += HandleStatusChanged;
             physiologySource.PayloadRejected += HandlePayloadRejected;
             forwardingGate = new NewestPhysiologyWindowForwardingGate(
@@ -390,8 +395,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void DrainPhysiology(double monotonicTimeSeconds)
         {
-            while (receivedWindows.TryDequeue(out var window))
+            while (receivedPayloads.TryDequeue(out var payload))
             {
+                var window = payload.Window;
                 var result = forwardingGate.Observe(
                     window,
                     monotonicTimeSeconds,
@@ -413,6 +419,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     default:
                         throw new ArgumentOutOfRangeException();
                 }
+
+                AcceptedPayloadReceived?.Invoke(payload);
             }
         }
 
@@ -422,9 +430,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             ForwardedWindowCount++;
         }
 
-        private void HandlePhysiologyReceived(PhysiologyWindow window)
+        private void HandleAcceptedPayloadReceived(
+            AcceptedComponentBStressPayload payload)
         {
-            receivedWindows.Enqueue(window);
+            receivedPayloads.Enqueue(payload);
         }
 
         private void HandleStatusChanged(SessionTransportStatus status)
@@ -493,7 +502,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             var operationToObserve = activeConnectionOperation;
             if (sourceToShutdown != null)
             {
-                sourceToShutdown.PhysiologyReceived -= HandlePhysiologyReceived;
+                sourceToShutdown.AcceptedPayloadReceived -=
+                    HandleAcceptedPayloadReceived;
                 sourceToShutdown.StatusChanged -= HandleStatusChanged;
                 sourceToShutdown.PayloadRejected -= HandlePayloadRejected;
                 _ = ShutdownSourceAsync(
@@ -559,7 +569,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void ClearReceivedWindows()
         {
-            while (receivedWindows.TryDequeue(out _))
+            while (receivedPayloads.TryDequeue(out _))
             {
             }
         }

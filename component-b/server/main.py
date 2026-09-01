@@ -4,6 +4,7 @@ The ONLY place inference runs. Mobile relays raw PPG; Quest and the
 web dashboard subscribe to predictions.
 """
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -65,13 +66,16 @@ async def ingest(ws: WebSocket):
     and must not be shared between them.
     """
     await ws.accept()
-    engine = new_stream()
-    temperature_resolver = TemperatureResolver()
-    if engine is None:
-        await ws.send_json({"status": "model_unavailable",
-                            "detail": unavailable_reason()})
-
     try:
+        # TensorFlow/XGBoost artifact loading is synchronous and can take
+        # several seconds. Keep it off the ASGI event loop so prediction
+        # subscribers and additional handshakes remain responsive.
+        engine = await asyncio.to_thread(new_stream)
+        last_temperature = None
+        if engine is None:
+            await ws.send_json({"status": "model_unavailable",
+                                "detail": unavailable_reason()})
+
         while True:
             try:
                 payload = await ws.receive_json()

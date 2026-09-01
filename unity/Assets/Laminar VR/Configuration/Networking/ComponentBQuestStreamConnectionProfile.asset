@@ -15,6 +15,6 @@ MonoBehaviour:
   configurationId: component-b-quest-stream-dev-v1
   configurationVersion: 1
   deploymentConfigurationApproved: 1
-  streamEndpoint: ws://172.20.10.4:8000/stream
+  streamEndpoint: ws://192.168.183.190:8000/stream
   keepaliveIntervalSeconds: 20
   maximumMessageBytes: 65536

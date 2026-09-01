@@ -9,6 +9,7 @@ import {HomeScreen} from '../features/dashboard/HomeScreen';
 import {WearableDetailScreen, WearableScreen} from '../features/wearable/WearableScreens';
 import {VrScreen} from '../features/vr/VrScreen';
 import {LiveSessionScreen, PreSessionScreen, SessionCompleteScreen} from '../features/session/SessionScreens';
+import {SessionContextScreen} from '../features/session/SessionContextScreen';
 import {QuestionnaireFormScreen, QuestionnaireHomeScreen} from '../features/questionnaire/QuestionnaireScreens';
 import {AnalyticsScreen} from '../features/analytics/AnalyticsScreen';
 import {SettingsScreen} from '../features/settings/SettingsScreen';
@@ -32,6 +33,7 @@ export type RootStackParamList = {
   LiveSession: undefined;
   SessionComplete: undefined;
   VoiceCheckIn: undefined;
+  SessionContext: undefined;
   QuestionnaireForm: {templateId: string};
 };
 
@@ -102,6 +104,7 @@ export function AppNavigation() {
           <Stack.Screen name="LiveSession" component={LiveSessionScreen} options={{gestureEnabled: false}} />
           <Stack.Screen name="SessionComplete" component={SessionCompleteScreen} />
           <Stack.Screen name="VoiceCheckIn" component={VoiceCheckInScreen} />
+          <Stack.Screen name="SessionContext" component={SessionContextScreen} />
           <Stack.Screen name="QuestionnaireForm" component={QuestionnaireFormScreen} />
         </> : <>
           <Stack.Screen name="Welcome" component={WelcomeScreen} />

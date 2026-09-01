@@ -3,7 +3,7 @@ import type {Session} from '@supabase/supabase-js';
 import {create} from 'zustand';
 import {createJSONStorage, persist} from 'zustand/middleware';
 import {demoSessions, demoUser, questionnaireTemplates} from '../constants/mockData';
-import {environment} from '../config/environment';
+import {environment, resolvePersistedComponentBEndpoint} from '../config/environment';
 import {componentDService} from '../services/api/componentDService';
 import {WEARABLE_DEVICE_NAME, wearableBleService} from '../services/ble/wearableBleService';
 import {componentBPipelineService} from '../services/componentB/componentBPipelineService';
@@ -15,6 +15,10 @@ import {isSupabaseConfigured} from '../services/supabase/supabaseClient';
 import {supabaseAuthService} from '../services/supabase/supabaseAuthService';
 import {mindSyncRepository} from '../services/supabase/mindSyncRepository';
 import {
+  effectiveEnvironmentPreference,
+  TEMPLE_POND_SAFE_DEFAULT,
+} from '../services/preferences/preferenceProfile';
+import {
   AuthStatus,
   BleIngestionState,
   ComponentBPipelineState,
@@ -23,6 +27,7 @@ import {
   MeditationSession,
   OnboardingProfile,
   QuestionnaireSubmission,
+  SessionContext,
   SessionRelayState,
   UserProfile,
   VoiceCheckInState,
@@ -34,6 +39,12 @@ import {
 const emptyOnboarding: OnboardingProfile = {
   name: '', ageRange: '', meditationExperience: '', preferredDuration: 15, goals: [],
   meditationStyle: 'Guided', audioPreferences: [], environmentPreferences: [], sensitivities: [],
+  preferredIllumination: TEMPLE_POND_SAFE_DEFAULT.illumination,
+  preferredWarmth: TEMPLE_POND_SAFE_DEFAULT.warmth,
+  preferredAtmosphericSoftness: TEMPLE_POND_SAFE_DEFAULT.atmosphericSoftness,
+  preferredColorRichness: TEMPLE_POND_SAFE_DEFAULT.colorRichness,
+  preferredAmbientMotion: TEMPLE_POND_SAFE_DEFAULT.ambientMotion,
+  particlePreference: null, lightSensitivity: null, motionSensitivity: 0.5,
   consentAccepted: false, researchConsent: false,
 };
 
@@ -69,14 +80,6 @@ const emptyRelay: SessionRelayState = {
   lastError: null,
 };
 
-const developmentTemplePreference = {
-  illumination: 0.319,
-  warmth: 0.5,
-  atmosphericSoftness: 0,
-  colorRichness: 0.5,
-  ambientMotion: 0.75,
-};
-
 type MindSyncStore = {
   hydrated: boolean;
   authStatus: AuthStatus;
@@ -96,6 +99,7 @@ type MindSyncStore = {
   pairingCode: string | null;
   sessions: MeditationSession[];
   activeSession: MeditationSession | null;
+  sessionContext: SessionContext | null;
   sessionStatus: 'ready' | 'active' | 'paused' | 'complete';
   questionnaireSubmissions: QuestionnaireSubmission[];
   pendingValidationCount: number;
@@ -110,6 +114,7 @@ type MindSyncStore = {
   syncNow: () => Promise<void>;
   updateOnboarding: (patch: Partial<OnboardingProfile>) => void;
   completeOnboarding: () => Promise<void>;
+  setSessionContext: (context: SessionContext) => void;
   scanWearables: () => Promise<void>;
   connectWearable: (device: WearableDevice) => Promise<void>;
   disconnectWearable: () => Promise<void>;
@@ -146,6 +151,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
       pairingCode: null,
       sessions: demoSessions,
       activeSession: null,
+      sessionContext: null,
       sessionStatus: 'ready',
       questionnaireSubmissions: [],
       pendingValidationCount: 1,
@@ -222,6 +228,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
           authStatus: 'signed-out', authError: null, user: null,
           onboarding: emptyOnboarding, sessions: [], questionnaireSubmissions: [],
           activeSession: null, sessionStatus: 'ready', dataSyncStatus: 'idle',
+          sessionContext: null,
           dataSyncError: null, lastSyncedAt: null,
         });
       },
@@ -262,6 +269,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
           throw error;
         }
       },
+      setSessionContext: sessionContext => set({sessionContext}),
       scanWearables: async () => { await wearableBleService.scan(); },
       connectWearable: async device => {
         set({selectedWearable: device});
@@ -321,15 +329,35 @@ export const useMindSyncStore = create<MindSyncStore>()(
             requestId: createRequestId,
             participantPseudonym: state.user?.id ?? 'anonymous',
             sceneId: 'temple-pond',
-            preferredEnvironment: developmentTemplePreference,
+            preferredEnvironment: effectiveEnvironmentPreference(
+              state.onboarding,
+              state.sessionContext,
+            ),
           });
           const activeSession = state.activeSession ?? get().createSession();
+          const preparedActiveSession: MeditationSession = {
+            ...activeSession,
+            id: newPrepared.sessionId,
+            sessionContext: state.sessionContext,
+            effectiveEnvironmentPreference: effectiveEnvironmentPreference(
+              state.onboarding,
+              state.sessionContext,
+            ),
+          };
           set({
-            activeSession: {...activeSession, id: newPrepared.sessionId},
+            activeSession: preparedActiveSession,
+            sessions: [
+              preparedActiveSession,
+              ...get().sessions.filter(item => item.id !== activeSession.id && item.id !== newPrepared.sessionId),
+            ],
             pairingCode: newPrepared.pairingCode,
             vrStatus: 'waiting',
             relay: {...emptyRelay, preparedRequestId: requestId, preparedSession: newPrepared, connectionState: 'connecting'},
           });
+          if (isSupabaseConfigured && state.user) {
+            void mindSyncRepository.saveSession(state.user.id, preparedActiveSession)
+              .catch(error => set({dataSyncStatus: 'offline', dataSyncError: errorMessage(error)}));
+          }
           bindMobileRelay(newPrepared);
         } catch (error) {
           const lastError = error instanceof Error ? error.message : 'relay-session-create-failed';
@@ -395,13 +423,13 @@ export const useMindSyncStore = create<MindSyncStore>()(
           id: `session-${Date.now()}`, title: 'Japanese Temple Pond Garden', date: new Date().toISOString().slice(0, 10),
           durationMinutes: 20, environment: 'Temple Pond', audioProfile: 'Adaptive audio',
           completionRate: 0, moodBefore: 5, moodAfter: 0, validationComplete: false,
+          sessionContext: get().sessionContext,
+          effectiveEnvironmentPreference: effectiveEnvironmentPreference(
+            get().onboarding,
+            get().sessionContext,
+          ),
         };
-        set({activeSession: session, sessionStatus: 'ready', sessions: [session, ...get().sessions.filter(item => item.id !== session.id)]});
-        const user = get().user;
-        if (isSupabaseConfigured && user) {
-          void mindSyncRepository.saveSession(user.id, session)
-            .catch(error => set({dataSyncStatus: 'offline', dataSyncError: errorMessage(error)}));
-        }
+        set({activeSession: session, sessionStatus: 'ready'});
         return session;
       },
       setSessionStatus: status => {
@@ -446,17 +474,39 @@ export const useMindSyncStore = create<MindSyncStore>()(
       resetDemo: () => {
         if (isSupabaseConfigured) return;
         realtimeService.disconnect();
-        set({authStatus: 'authenticated', user: demoUser, onboarding: {...emptyOnboarding, name: demoUser.name, consentAccepted: true, researchConsent: true}, sessions: demoSessions, questionnaireSubmissions: [], pendingValidationCount: 1, vrStatus: 'not-paired', pairingCode: null, activeSession: null, voice: emptyVoice, relay: emptyRelay});
+        set({authStatus: 'authenticated', user: demoUser, onboarding: {...emptyOnboarding, name: demoUser.name, consentAccepted: true, researchConsent: true}, sessions: demoSessions, questionnaireSubmissions: [], pendingValidationCount: 1, vrStatus: 'not-paired', pairingCode: null, activeSession: null, sessionContext: null, voice: emptyVoice, relay: emptyRelay});
       },
     }),
     {
       name: 'mindsync-rn-state-v1',
       version: 2,
       storage: createJSONStorage(() => AsyncStorage),
+      migrate: persistedState => {
+        const persisted = persistedState as Partial<MindSyncStore>;
+        return {
+          ...persisted,
+          componentB: {
+            ...emptyComponentB,
+            ...persisted.componentB,
+            endpoint: resolvePersistedComponentBEndpoint(
+              persisted.componentB?.endpoint,
+            ),
+          },
+        };
+      },
       partialize: state => ({user: state.user, onboarding: state.onboarding, sessions: state.sessions, questionnaireSubmissions: state.questionnaireSubmissions, pendingValidationCount: state.pendingValidationCount, componentB: {...emptyComponentB, endpoint: state.componentB.endpoint}}),
+      merge: (persistedState, currentState) => {
+        const persisted = persistedState as Partial<MindSyncStore>;
+        return {
+          ...currentState,
+          ...persisted,
+          onboarding: {...emptyOnboarding, ...persisted.onboarding},
+          sessionContext: null,
+        };
+      },
       onRehydrateStorage: () => state => {
         state?.setHydrated(true);
-        componentBPipelineService.setEndpoint(state?.componentB.endpoint ?? environment.componentBIngestUrl);
+        componentBPipelineService.setEndpoint(resolvePersistedComponentBEndpoint(state?.componentB.endpoint));
       },
     },
   ),

@@ -106,6 +106,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
 
         public event Action<PhysiologyWindow> PhysiologyReceived;
 
+        public event Action<AcceptedComponentBStressPayload>
+            AcceptedPayloadReceived;
+
         public event Action<SessionTransportStatus> StatusChanged;
 
         public event Action<ComponentBStressPayloadParseReasonCode>
@@ -364,6 +367,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                         out var window,
                         out var rejectionReason))
                 {
+                    AcceptedPayloadReceived?.Invoke(
+                        new AcceptedComponentBStressPayload(
+                            message.Text,
+                            window));
                     PhysiologyReceived?.Invoke(window);
                 }
                 else
