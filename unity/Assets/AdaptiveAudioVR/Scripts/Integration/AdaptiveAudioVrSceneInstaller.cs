@@ -10,6 +10,7 @@ using AdaptiveAudioVR.RL.Agent;
 using AdaptiveAudioVR.Safety;
 using AdaptiveAudioVR.Signals;
 using AdaptiveAudioVR.UI;
+using LaminarVR.AdaptiveMeditation.Runtime.Application;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -84,6 +85,8 @@ namespace AdaptiveAudioVR.Integration
             PrototypeBootstrap bootstrap = GetOrAddComponent<PrototypeBootstrap>(appRoot);
 
             SignalSimulator signalSimulator = GetOrAddComponent<SignalSimulator>(signalSystem);
+            ComponentBStressSignalReceiver componentBSignalReceiver =
+                GetOrAddComponent<ComponentBStressSignalReceiver>(signalSystem);
 
             RLPersonalizationAgent rlPersonalizationAgent = GetOrAddComponent<RLPersonalizationAgent>(controllerSystem);
             AudioRLAgent audioRLAgent = GetOrAddComponent<AudioRLAgent>(controllerSystem);
@@ -171,6 +174,20 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(bootstrap, "safetyManager", safetyManager);
             SetPrivateField(bootstrap, "clipGenerationService", clipGenerationService);
             SetPrivateField(bootstrap, "requireGeneratedMeditationBeforeSession", requireGeneratedMeditationBeforeSession);
+
+            ComponentBPhysiologyBridge componentBBridge =
+                FindAnyObjectByType<ComponentBPhysiologyBridge>();
+            componentBSignalReceiver.Configure(
+                componentBBridge,
+                signalSimulator);
+
+            if (componentBBridge == null)
+            {
+                Debug.LogWarning(
+                    "[AdaptiveAudioVrSceneInstaller] Component B bridge was not found; "
+                    + "audio will keep using its configured simulator until one is assigned.",
+                    this);
+            }
 
             Debug.Log("[AdaptiveAudioVrSceneInstaller] Adaptive audio runtime is installed in the current VR scene.", this);
         }

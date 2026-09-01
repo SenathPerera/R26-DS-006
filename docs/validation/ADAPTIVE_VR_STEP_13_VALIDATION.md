@@ -59,10 +59,12 @@ Open **Window → General → Test Runner → PlayMode**, run
 | `TemplePondSceneAdapter_AppliesAllFiveMappings` | Passed | Full PlayMode suite reported passing on 2026-08-30 |
 | `ApplicationBootstrap_RegistersSceneAndStaticPolicy` | Passed | Full PlayMode suite reported passing on 2026-08-30 |
 | `ProductionSessionCoordinatorPlayModeTests.Coordinator_CollectsBaselineAndRunsDecisionCycle` | Passed | Full PlayMode suite reported passing on 2026-08-30 after correcting the synthetic physiology-window precision boundary |
+| `ProductionSessionCoordinatorPlayModeTests.VisualBoundary_ForwardsTransportNeutralInputs` | Passed | User-reported focused PlayMode run on 2026-08-31; verifies main-thread forwarding of session context, connection state, Component B physiology, and session commands |
 
-The first six tests use an isolated GameObject adapter. The two additional
-tests exercise the production Temple adapter and initial application composition
-root with isolated, explicitly approved test-only profiles. The serialized
+The first six tests use an isolated GameObject adapter. The Temple adapter and
+bootstrap tests exercise the initial application composition root, while the
+final two tests cover coordinator behavior and transport-neutral boundary
+forwarding with isolated, explicitly approved test-only profiles. The serialized
 Temple scene now contains the production bootstrap and coordinator with
 explicit references to the approved pilot profiles. Unity import and Inspector
 reference verification succeeded, and Play Mode initialized the serialized
@@ -116,8 +118,10 @@ Record for every run:
 
 - Step 13 validation covers only Japanese Temple Pond Garden. Forest Lake is
   explicitly outside the MVP study scope under ADR-004.
-- The production coordinator is implemented but is not yet wired into the
-  serialized Temple scene. The approved development timing profile now reserves
+- The production coordinator, visual session boundary, and their explicit
+  references are wired into the serialized Temple scene. The boundary exposes
+  transport-neutral ingress methods, but a concrete mobile-to-Quest transport
+  adapter is not yet connected. The approved development timing profile reserves
   30 seconds of external initialization followed by 120 seconds of
   acclimatization, 900 seconds of adaptation, and 150 seconds of stabilization,
   with 75-second decision opportunities. The provisional Component B
@@ -132,11 +136,9 @@ Record for every run:
   pilot runtime use under ADR-009. The Temple scene's calibrated normalized
   scene profile and raw Unity mapping profile are approved for provisional
   pilot runtime use under ADR-010 without changing their calibrated visual
-  values. The production composition root is wired into the serialized scene
-  for the visual LinUCB condition. It remains safely idle until a production
-  session boundary supplies real session context and inputs; that boundary is
-  not yet connected. The teammate-owned audio RL agent remains a separate
-  component and must not be wired through this visual policy.
+  values. The composition root remains safely idle until the boundary receives
+  real session context and inputs. The teammate-owned audio RL agent remains a
+  separate component and must not be wired through this visual policy.
 - The agreed mobile-to-Quest forwarding cadence is 60 seconds, while Component
   B's current internal inference cadence is beat-based and more frequent. The
   forwarding cadence must be validated against decision, staleness, and minimum

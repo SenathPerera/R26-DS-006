@@ -6,6 +6,8 @@ import {environment} from '../config/environment';
 import {componentDService} from '../services/api/componentDService';
 import {WEARABLE_DEVICE_NAME, wearableBleService} from '../services/ble/wearableBleService';
 import {componentBPipelineService} from '../services/componentB/componentBPipelineService';
+import {realtimeService} from '../services/realtime/realtimeService';
+import type {VisualLogSnapshot} from '../services/realtime/realtimeService';
 import {unityBridge} from '../services/unity/unityBridge';
 import {
   BleIngestionState,
@@ -14,6 +16,7 @@ import {
   MeditationSession,
   OnboardingProfile,
   QuestionnaireSubmission,
+  SessionRelayState,
   UserProfile,
   VoiceCheckInState,
   VrStatus,
@@ -50,6 +53,21 @@ const emptyVoice: VoiceCheckInState = {
   stage: 'intro', backendHealthy: null, personName: '', language: 'english', sessionId: null, busy: false, error: null,
 };
 
+const emptyRelay: SessionRelayState = {
+  connectionState: 'idle', preparedRequestId: null, preparedSession: null, questPhase: null,
+  visualTelemetryMessages: [], visualLogSnapshot: null,
+  visualLogDeliveryStatus: 'idle', visualLogMessageCount: 0,
+  lastError: null,
+};
+
+const developmentTemplePreference = {
+  illumination: 0.319,
+  warmth: 0.5,
+  atmosphericSoftness: 0,
+  colorRichness: 0.5,
+  ambientMotion: 0.75,
+};
+
 type MindSyncStore = {
   hydrated: boolean;
   user: UserProfile | null;
@@ -67,6 +85,7 @@ type MindSyncStore = {
   questionnaireSubmissions: QuestionnaireSubmission[];
   pendingValidationCount: number;
   voice: VoiceCheckInState;
+  relay: SessionRelayState;
   setHydrated: (hydrated: boolean) => void;
   loginDemo: (email?: string) => void;
   signUp: (name: string, email: string) => void;
@@ -77,7 +96,9 @@ type MindSyncStore = {
   connectWearable: (device: WearableDevice) => Promise<void>;
   disconnectWearable: () => Promise<void>;
   setComponentBEndpoint: (endpoint: string) => void;
-  pairVr: () => void;
+  prepareVrSession: (requestId: string) => Promise<void>;
+  sendVrCommand: (command: 'pause' | 'resume' | 'stop' | 'emergency_stop') => void;
+  refreshVisualLog: () => Promise<VisualLogSnapshot | null>;
   createSession: () => MeditationSession;
   setSessionStatus: (status: MindSyncStore['sessionStatus']) => void;
   submitQuestionnaire: (templateId: string, sessionId: string | null, answers: QuestionnaireSubmission['answers']) => void;
@@ -105,6 +126,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
       questionnaireSubmissions: [],
       pendingValidationCount: 1,
       voice: emptyVoice,
+      relay: emptyRelay,
       setHydrated: hydrated => set({hydrated}),
       loginDemo: email => set({user: {...demoUser, email: email || demoUser.email}}),
       signUp: (name, email) => set({user: {...demoUser, id: `participant-${Date.now()}`, name, email, onboardingComplete: false}, onboarding: {...emptyOnboarding, name}}),
@@ -118,15 +140,127 @@ export const useMindSyncStore = create<MindSyncStore>()(
       },
       disconnectWearable: async () => { await wearableBleService.disconnect(); },
       setComponentBEndpoint: endpoint => componentBPipelineService.setEndpoint(endpoint),
-      pairVr: () => set({vrStatus: 'ready', pairingCode: `MSVR-${Math.floor(1000 + Math.random() * 9000)}`}),
+      prepareVrSession: async requestId => {
+        const state = get();
+        const bindMobileRelay = (prepared: NonNullable<SessionRelayState['preparedSession']>) => {
+          realtimeService.connectMobile(prepared, {
+            onConnectionState: (connectionState, error) => set(current => ({
+              relay: {...current.relay, connectionState, lastError: error ?? null},
+              vrStatus: connectionState === 'error' ? 'disconnected' : current.vrStatus,
+            })),
+            onMessage: message => {
+              if (message.messageType === 'quest_state') {
+                const phase = typeof message.payload.phase === 'string' ? message.payload.phase : null;
+                const terminal = phase === 'completed' || phase === 'aborted';
+                set(current => ({
+                  relay: {...current.relay, questPhase: phase},
+                  vrStatus: phase === 'adaptive' ? 'active' : 'ready',
+                  sessionStatus: terminal ? 'complete' : current.sessionStatus,
+                }));
+                if (terminal) get().refreshVisualLog().catch(() => undefined);
+                return;
+              }
+              if (message.messageType === 'visual_telemetry_batch') {
+                set(current => ({relay: {
+                  ...current.relay,
+                  visualTelemetryMessages: [...current.relay.visualTelemetryMessages, message].slice(-200),
+                }}));
+              }
+            },
+          });
+        };
+        const prepared = state.relay.preparedSession;
+        const codeIsFresh = prepared != null && prepared.expiresAt > Date.now() / 1000;
+        if (prepared && state.relay.preparedRequestId === requestId && codeIsFresh) {
+          if (state.relay.connectionState !== 'connected' && state.relay.connectionState !== 'connecting') {
+            set({relay: {...state.relay, connectionState: 'connecting', lastError: null}});
+            bindMobileRelay(prepared);
+          }
+          return;
+        }
+        set({vrStatus: 'pairing', relay: {...emptyRelay, connectionState: 'connecting'}});
+        try {
+          const createRequestId = prepared && !codeIsFresh ? `${requestId}-${Date.now()}` : requestId;
+          const newPrepared = await realtimeService.createPreparedSession({
+            requestId: createRequestId,
+            participantPseudonym: state.user?.id ?? 'anonymous',
+            sceneId: 'temple-pond',
+            preferredEnvironment: developmentTemplePreference,
+          });
+          const activeSession = state.activeSession ?? get().createSession();
+          set({
+            activeSession: {...activeSession, id: newPrepared.sessionId},
+            pairingCode: newPrepared.pairingCode,
+            vrStatus: 'waiting',
+            relay: {...emptyRelay, preparedRequestId: requestId, preparedSession: newPrepared, connectionState: 'connecting'},
+          });
+          bindMobileRelay(newPrepared);
+        } catch (error) {
+          const lastError = error instanceof Error ? error.message : 'relay-session-create-failed';
+          set({vrStatus: 'not-paired', relay: {...emptyRelay, connectionState: 'error', lastError}});
+          throw error;
+        }
+      },
+      sendVrCommand: command => {
+        try {
+          realtimeService.sendCommand(command);
+        } catch (error) {
+          set(state => ({relay: {...state.relay, lastError: error instanceof Error ? error.message : 'relay-command-failed'}}));
+        }
+      },
+      refreshVisualLog: async () => {
+        const prepared = get().relay.preparedSession;
+        if (!prepared) return null;
+        set(state => ({relay: {
+          ...state.relay,
+          visualLogDeliveryStatus: 'downloading',
+          lastError: null,
+        }}));
+        try {
+          const snapshot = await realtimeService.fetchVisualLog(prepared);
+          if (!snapshot.finalized || !snapshot.lastMessageId) {
+            set(state => ({relay: {
+              ...state.relay,
+              visualTelemetryMessages: snapshot.messages,
+              visualLogSnapshot: snapshot,
+              visualLogDeliveryStatus: 'pending',
+              visualLogMessageCount: snapshot.messageCount,
+              lastError: null,
+            }}));
+            return snapshot;
+          }
+          if (!snapshot.deliveryAcknowledged) {
+            await realtimeService.acknowledgeVisualLog(prepared, snapshot);
+          }
+          const acknowledgedSnapshot: VisualLogSnapshot = {
+            ...snapshot,
+            deliveryAcknowledged: true,
+          };
+          set(state => ({relay: {
+            ...state.relay,
+            visualTelemetryMessages: snapshot.messages,
+            visualLogSnapshot: acknowledgedSnapshot,
+            visualLogDeliveryStatus: 'acknowledged',
+            visualLogMessageCount: snapshot.messageCount,
+            lastError: null,
+          }}));
+          return acknowledgedSnapshot;
+        } catch (error) {
+          set(state => ({relay: {
+            ...state.relay,
+            visualLogDeliveryStatus: 'error',
+            lastError: error instanceof Error ? error.message : 'relay-log-download-failed',
+          }}));
+          throw error;
+        }
+      },
       createSession: () => {
         const session: MeditationSession = {
-          id: `session-${Date.now()}`, title: 'Adaptive Ocean Reset', date: new Date().toISOString().slice(0, 10),
-          durationMinutes: get().onboarding.preferredDuration || 15, environment: 'Ocean', audioProfile: 'Warm pads',
+          id: `session-${Date.now()}`, title: 'Japanese Temple Pond Garden', date: new Date().toISOString().slice(0, 10),
+          durationMinutes: 20, environment: 'Temple Pond', audioProfile: 'Adaptive audio',
           completionRate: 0, moodBefore: 5, moodAfter: 0, validationComplete: false,
         };
         set({activeSession: session, sessionStatus: 'ready'});
-        void unityBridge.attachSession(session.id, get().pairingCode ?? 'UNPAIRED');
         return session;
       },
       setSessionStatus: status => set({sessionStatus: status}),
@@ -147,7 +281,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
         }
       },
       updateVoice: patch => set(state => ({voice: {...state.voice, ...patch}})),
-      resetDemo: () => set({user: demoUser, onboarding: {...emptyOnboarding, name: demoUser.name, consentAccepted: true, researchConsent: true}, sessions: demoSessions, questionnaireSubmissions: [], pendingValidationCount: 1, vrStatus: 'not-paired', pairingCode: null, activeSession: null, voice: emptyVoice}),
+      resetDemo: () => { realtimeService.disconnect(); set({user: demoUser, onboarding: {...emptyOnboarding, name: demoUser.name, consentAccepted: true, researchConsent: true}, sessions: demoSessions, questionnaireSubmissions: [], pendingValidationCount: 1, vrStatus: 'not-paired', pairingCode: null, activeSession: null, voice: emptyVoice, relay: emptyRelay}); },
     }),
     {
       name: 'mindsync-rn-state-v1',

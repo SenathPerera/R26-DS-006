@@ -4994,6 +4994,11 @@ GameObject:
   - component: {fileID: 1414086897}
   - component: {fileID: 1414086898}
   - component: {fileID: 1414086899}
+  - component: {fileID: 1414086900}
+  - component: {fileID: 1414086901}
+  - component: {fileID: 1414086904}
+  - component: {fileID: 1414086903}
+  - component: {fileID: 1414086902}
   m_Layer: 0
   m_Name: AdaptiveEnvironment
   m_TagString: Untagged
@@ -5060,8 +5065,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 475c2ae9362a40249e89c7b0d1b1bb7a, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   initializeOnStart: 1
   sceneParameterProfile: {fileID: 11400000, guid: ca6dfc59d1ea84c468ea22c46f4619f5, type: 2}
   sceneAdapterComponent: {fileID: 1414086895}
@@ -5078,8 +5083,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 899ab8f4cc9c4819ad7e8a0a36986e26, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   applicationBootstrap: {fileID: 1414086898}
   sessionTimingProfile: {fileID: 11400000, guid: 12d2968ab8184fcabca22e1f75279391, type: 2}
   physiologyValidationProfile: {fileID: 11400000, guid: 833ab46c3187477f93e252583fb3a23c, type: 2}
@@ -5088,6 +5093,85 @@ MonoBehaviour:
   telemetryLoggingProfile: {fileID: 11400000, guid: f7bdaf3f098d473aba8ba12907a09f48, type: 2}
   coordinatorProfile: {fileID: 11400000, guid: 2c9cc54c705b490c94d3779138d1b50e, type: 2}
   initializeWhenSessionContextAvailable: 1
+--- !u!114 &1414086900
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1414086894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 14b9c8c52f254e329cce9acd5862d9bb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  productionCoordinator: {fileID: 1414086899}
+  maximumMessagesPerFrame: 64
+--- !u!114 &1414086901
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1414086894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 7fd5b0273dcb45b4bcd377bd31b8ce6a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  productionCoordinator: {fileID: 1414086899}
+  visualSessionBoundary: {fileID: 1414086900}
+  streamConnectionProfile: {fileID: 11400000, guid: d37ea6fd51534a5d91e603b5dd448969, type: 2}
+  reconnectBackoffProfile: {fileID: 11400000, guid: d51d5b57a8f74a20b8113d36f2140764, type: 2}
+--- !u!114 &1414086902
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1414086894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5432a2a4a4ed4f818c88915c2ca3df82, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  pairingController: {fileID: 1414086903}
+  viewingCamera: {fileID: 0}
+  panelDistanceMeters: 1.75
+  inputActions: {fileID: -944628639613478452, guid: c348712bda248c246b8c49b3db54643f, type: 3}
+  controllerRayDistanceMeters: 5
+  enableGazeFallback: 0
+  dwellSeconds: 1.1
+--- !u!114 &1414086903
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1414086894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5bed42c4bec545d396aa9036dbf17b20, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  connectionProfile: {fileID: 11400000, guid: c1454d765f2f98e4da74938aa6547a4b, type: 2}
+  sessionRelayBridge: {fileID: 1414086904}
+--- !u!114 &1414086904
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1414086894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 19a83405949a4cb4820a4d88c6a5428a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  applicationBootstrap: {fileID: 1414086898}
+  productionCoordinator: {fileID: 1414086899}
+  visualSessionBoundary: {fileID: 1414086900}
+  maximumMessagesPerFrame: 64
 --- !u!1 &1423676677
 GameObject:
   m_ObjectHideFlags: 0
@@ -6235,6 +6319,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7907c6eb9ade4e04f9d6d5756056ccb9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  environmentId: default
+  environmentDisplayName: Meditation Environment
+  environmentMusicReference: calm instrumental music that fits the selected meditation
+    environment
 --- !u!114 &1636398913
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7471,7 +7559,9 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::AdaptiveAudioVR.Integration.AdaptiveAudioVrSceneInstaller
   environmentId: japanese_temple_pond_garden
   environmentDisplayName: Japanese Temple Pond Garden
-  meditationMusicReference: serene Japanese temple garden musical character with breathy bamboo flute, soft plucked strings, sparse temple bells, spacious stillness; music only, no pond, wind, bird, rain, or other environmental sound effects
+  meditationMusicReference: serene Japanese temple garden musical character with
+    breathy bamboo flute, soft plucked strings, sparse temple bells, spacious stillness;
+    music only, no pond, wind, bird, rain, or other environmental sound effects
   fixedAmbientClip: {fileID: 8300000, guid: d7374584d1816384db29efcb46f49b67, type: 3}
   fallbackMeditationClip: {fileID: 8300000, guid: ab9df6b19812d7b40957c39c8d45aa40, type: 3}
   backendBaseUrl: http://127.0.0.1:8000

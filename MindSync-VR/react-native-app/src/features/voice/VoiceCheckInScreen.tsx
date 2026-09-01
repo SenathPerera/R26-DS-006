@@ -24,38 +24,38 @@ import {ReportView, scoreToPhrase, typeToPhrase} from './VoiceResults';
 import {loadSessions, saveSession, type SavedVoiceSession} from './voiceHistory';
 import {useSarah} from './useSarah';
 import {Users, Waves, Zap} from 'lucide-react-native';
+import {createCompleteSessionRecord} from '../../services/session/completeSessionRecord';
+import {sessionRecordOutbox} from '../../services/session/sessionRecordOutbox';
 
 type Stage = StageId; // intro | room | pre | vr | post | report
 type Phase = 'pre' | 'post';
 type Lang = 'english' | 'sinhala' | 'tamil';
 
-// Warm, open prompts. We keep a wider pool and shuffle per session so the
-// opener is never the same twice, and Sarah feels like she's actually talking
-// with you rather than reading one line. Nothing clinical, nothing leading —
-// just enough to get you speaking naturally (the score reads the audio, not the
-// words). We ask a few of these each time, combining every answer into one clip.
+// Simple, everyday prompts. The point is only to get the user talking naturally
+// for a little while — the stress score reads the AUDIO, not the words — so the
+// questions are kept easy and concrete: anyone can answer them without thinking
+// hard, which is exactly what keeps them speaking. We shuffle per session so the
+// opener varies, ask a few each time, and merge every answer into one clip.
 const QUESTION_POOL: Record<Phase, string[]> = {
   pre: [
-    'How has today actually been for you — not the polite version?',
-    "What's been sitting heaviest on your mind lately?",
-    "If you had to name what you're carrying right now, what would it be?",
-    "What's been draining you most this week?",
-    "Is there something you've been holding in that you haven't said out loud today?",
-    'When did you last feel properly at ease — and what was different then?',
-    "What's one thing you wish felt a little lighter right now?",
-    'How are you really doing, underneath everything?',
-    "What's been on your mind when things go quiet?",
+    'Tell me a little about how your day has been so far.',
+    'What did you do today before coming here?',
+    'What did you have for your last meal?',
+    'Tell me about one thing that happened today.',
+    'In simple words, how are you feeling right now?',
+    'What have you been up to this week?',
+    'Is there something small on your mind today?',
+    'What do you usually do to relax?',
   ],
   post: [
-    'How does your body feel compared with before?',
-    "What's different in your head right now, even slightly?",
-    'Is anything still sitting with you?',
-    'What feels a little lighter than when we started?',
-    'If you had to describe this moment in one word, what would it be?',
-    "What are you taking with you out of this session?",
-    'How are you leaving this — honestly?',
-    'Did anything shift while you were in there?',
-    'What do you notice in your breathing, or your shoulders, right now?',
+    'How do you feel now compared to before?',
+    'What did you notice while you were in there?',
+    'Tell me one word for how you feel right now.',
+    'Did anything feel more relaxed after the session?',
+    'What was the session like for you?',
+    'How is your body feeling right now?',
+    'Would you want to do this again? Why?',
+    'What are you going to do after this?',
   ],
 };
 const ACK = 'Thank you. Can I ask one more thing…';
@@ -63,6 +63,7 @@ const SPEECH_BUDGET = 30; // seconds of speech we aim to collect across turns
 const MIN_TURNS = 2;      // always hold a short conversation, never one line
 const MAX_TURNS = 4;      // cap so it never drags on
 const SILENCE_TAIL_SEC = 2.5;
+const TEMPLE_POND_SCENE_ID = 'temple-pond';
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -95,24 +96,98 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
   const [stage, setStage] = useState<Stage>('intro');
   const [language, setLanguage] = useState<Lang>('english');
   const sessionId = useMemo(() => `voice-${Date.now()}`, []);
-  const userId = firstName || user?.id || 'default';
+  const sessionStartedAtUnixSeconds = useMemo(() => Date.now() / 1000, []);
+  const userId = user?.id ?? 'anonymous';
+  const fullSessionStartedRef = useRef(false);
+  const finalVisualLogRefreshStartedRef = useRef(false);
+  const sessionRecordQueuedRef = useRef(false);
 
   const [ambient, setAmbient] = useState<AmbientResult | null>(null);
   const [pre, setPre] = useState<StressResult | null>(null);
   const [post, setPost] = useState<StressResult | null>(null);
   const [full, setFull] = useState<FullSessionResult | null>(null);
   const [history, setHistory] = useState<SavedVoiceSession[]>([]);
+  const prepareVrSession = useMindSyncStore(s => s.prepareVrSession);
+  const refreshVisualLog = useMindSyncStore(s => s.refreshVisualLog);
+  const relay = useMindSyncStore(s => s.relay);
 
   // §3.8: warm the model the moment the check-in opens, so the analysing wait
   // is short by the time the first clip is uploaded.
   useEffect(() => { void componentDService.warmup(); loadSessions().then(setHistory).catch(() => {}); }, []);
 
   useEffect(() => {
-    if (stage !== 'report' || !pre || !post || full) return;
+    if (
+      stage !== 'report'
+      || !pre
+      || !post
+      || full
+      || fullSessionStartedRef.current
+    ) return;
+    fullSessionStartedRef.current = true;
     componentDService.fullSession(sessionId, userId, {useMockHrv: true, language, log: true})
-      .then(f => { setFull(f); const e: SavedVoiceSession = {id: sessionId, at: Date.now(), participant: firstName, language, pre, post, full: f}; void saveSession(e).then(setHistory); })
-      .catch(() => {});
-  }, [stage, pre, post, full, sessionId, userId, language, firstName]);
+      .then(f => {
+        setFull(f);
+        const entry: SavedVoiceSession = {
+          id: sessionId,
+          at: Date.now(),
+          participant: firstName,
+          language,
+          pre,
+          post,
+          full: f,
+          vrSessionId: relay.preparedSession?.sessionId,
+        };
+        saveSession(entry).then(setHistory).catch(() => undefined);
+      })
+      .catch(() => { fullSessionStartedRef.current = false; });
+  }, [stage, pre, post, full, sessionId, userId, language, firstName, relay.preparedSession?.sessionId]);
+
+  useEffect(() => {
+    const relaySessionId = relay.preparedSession?.sessionId;
+    const visualLog = relay.visualLogSnapshot;
+    if (
+      !full
+      || !pre
+      || !post
+      || !relaySessionId
+    ) return;
+    if (!visualLog?.finalized || !visualLog.deliveryAcknowledged) {
+      if (!finalVisualLogRefreshStartedRef.current) {
+        finalVisualLogRefreshStartedRef.current = true;
+        refreshVisualLog().catch(() => undefined);
+      }
+      return;
+    }
+    if (sessionRecordQueuedRef.current) return;
+
+    sessionRecordQueuedRef.current = true;
+    const record = createCompleteSessionRecord({
+      sessionId,
+      participantPseudonym: user?.id ?? 'anonymous',
+      startedAtUnixSeconds: sessionStartedAtUnixSeconds,
+      completedAtUnixSeconds: Date.now() / 1000,
+      language,
+      pre,
+      post,
+      voiceSummary: full,
+      relaySessionId,
+      sceneId: TEMPLE_POND_SCENE_ID,
+      visualLog,
+    });
+    sessionRecordOutbox.enqueue(record)
+      .catch(() => { sessionRecordQueuedRef.current = false; });
+  }, [
+    full,
+    language,
+    post,
+    pre,
+    relay.preparedSession?.sessionId,
+    relay.visualLogSnapshot,
+    refreshVisualLog,
+    sessionId,
+    sessionStartedAtUnixSeconds,
+    user?.id,
+  ]);
 
   const commonProps = {onBack: navigation.goBack};
 
@@ -124,9 +199,12 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
         {stage === 'pre' || stage === 'post' ? (
           <CheckInStage key={stage} {...commonProps} phase={stage} sessionId={sessionId} userId={userId} language={language} ambient={ambient}
             result={stage === 'pre' ? pre : post} onScored={r => (stage === 'pre' ? setPre(r) : setPost(r))}
-            onContinue={() => setStage(stage === 'pre' ? 'vr' : 'report')} />
+            onContinue={async () => {
+              if (stage === 'pre') await prepareVrSession(sessionId);
+              setStage(stage === 'pre' ? 'vr' : 'report');
+            }} />
         ) : null}
-        {stage === 'vr' ? <VrStage {...commonProps} name={firstName} onBack2={() => setStage('post')} /> : null}
+        {stage === 'vr' ? <VrStage {...commonProps} name={firstName} onBack2={async () => { try { await refreshVisualLog(); } catch { /* live messages remain available */ } setStage('post'); }} /> : null}
         {stage === 'report' ? <ReportStage {...commonProps} full={full} pre={pre} post={post} history={history} onHome={() => navigation.navigate('MainTabs')} /> : null}
       </ScrollView>
     </AuroraBackground>
@@ -137,8 +215,8 @@ export function VoiceCheckInScreen({navigation}: {navigation: {goBack: () => voi
 function IntroStage({name, language, setLanguage, onReady, onBack}: {name: string; language: Lang; setLanguage: (l: Lang) => void; onReady: () => void; onBack: () => void}) {
   const sarah = useSarah();
   useEffect(() => {
-    const hi = name ? `Hi ${name}. I'm Sarah.` : "Hi, I'm Sarah.";
-    void sarah.say(`${hi} Before you put the headset on, I'd like to hear how you're doing — and again afterwards, so we can see what actually changed for you.`, language);
+    const hi = name ? `Hi ${name}. I'm Sarah, your AI wellbeing companion.` : "Hi, I'm Sarah, your AI wellbeing companion.";
+    void sarah.say(`${hi} For this VR session I'll ask you a few simple questions. I just want to hear your natural voice — that helps me sense how you're really feeling inside. There are no right or wrong answers. If you're okay with this, tap "I agree" and we'll begin.`, language);
     return () => sarah.stop();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -148,8 +226,8 @@ function IntroStage({name, language, setLanguage, onReady, onBack}: {name: strin
       <View style={styles.avatarWrap}><SarahAvatar state={sarah.speaking ? 'speaking' : 'idle'} size="lg" /></View>
       <Text style={styles.sarahIntro}>Hi{name ? ` ${name}` : ''}, I’m Sarah — your AI wellbeing companion. I’ll guide this check-in and stay with you the whole way through.</Text>
       <GlassCard>
-        <Text style={styles.display}>Your voice knows before you do.</Text>
-        <Text style={styles.body}>We’ll talk twice — once now, once after your session — so we can see what actually changed. Your voice carries how you’re really feeling, often before you’d put it into words.</Text>
+        <Text style={styles.display}>A few simple questions.</Text>
+        <Text style={styles.body}>For this VR session I’ll ask you some easy questions — once now, once after. I just want to hear your natural voice, because it carries how you’re really feeling inside. There are no right or wrong answers.</Text>
       </GlassCard>
       <GlassCard>
         <InfoRow icon={Clock} text="About a minute" />
@@ -162,7 +240,7 @@ function IntroStage({name, language, setLanguage, onReady, onBack}: {name: strin
         <Pill label="සිංහල" active={language === 'sinhala'} onPress={() => setLanguage('sinhala')} />
         <Pill label="தமிழ்" active={language === 'tamil'} onPress={() => setLanguage('tamil')} />
       </View>
-      <PrimaryButton label="I’m ready" onPress={() => { sarah.stop(); onReady(); }} />
+      <PrimaryButton label="I agree" onPress={() => { sarah.stop(); onReady(); }} />
       <TextLink label="Not now" onPress={() => { sarah.stop(); onBack(); }} />
     </>
   );
@@ -247,13 +325,15 @@ function RoomStage({ambient, setAmbient, onContinue, onBack}: {ambient: AmbientR
 /* ---------- Check-in loop ---------- */
 function CheckInStage({phase, sessionId, userId, language, ambient, result, onScored, onContinue, onBack}: {
   phase: Phase; sessionId: string; userId: string; language: Lang; ambient: AmbientResult | null;
-  result: StressResult | null; onScored: (r: StressResult) => void; onContinue: () => void; onBack: () => void;
+  result: StressResult | null; onScored: (r: StressResult) => void; onContinue: () => void | Promise<void>; onBack: () => void;
 }) {
   const sarah = useSarah();
   const rec = useRecorder();
   const [sub, setSub] = useState<'running' | 'processing' | 'result' | 'error'>('running');
   const [turnIndex, setTurnIndex] = useState(0);
   const [error, setError] = useState('');
+  const [continuing, setContinuing] = useState(false);
+  const [continueError, setContinueError] = useState('');
   const finishRef = useRef<((r: RecordingResult | null) => void) | null>(null);
   const started = useRef(false);
   const abortRef = useRef(false);
@@ -298,7 +378,7 @@ function CheckInStage({phase, sessionId, userId, language, ambient, result, onSc
 
   // DEV demo: run a picked audio file through the exact same scoring path,
   // bypassing the live mic. Aborts the conversation loop cleanly first.
-  const useAudioFile = useCallback(async () => {
+  const chooseAudioFile = useCallback(async () => {
     abortRef.current = true;
     sarah.stop();
     if (finishRef.current) { const f = finishRef.current; finishRef.current = null; f(null); }
@@ -338,7 +418,18 @@ function CheckInStage({phase, sessionId, userId, language, ambient, result, onSc
         <GlassCard>
           <Text style={styles.body}>{phase === 'pre' ? 'This is a starting point, not a verdict. Let’s see what the session does.' : 'Let’s look at what changed.'}</Text>
         </GlassCard>
-        <PrimaryButton label={phase === 'pre' ? 'Start my session' : 'See what changed'} onPress={() => { sarah.stop(); onContinue(); }} />
+        {continueError ? <Text style={styles.errorText}>{continueError}</Text> : null}
+        <PrimaryButton
+          label={continuing ? 'Preparing your session…' : phase === 'pre' ? 'Start my session' : 'See what changed'}
+          disabled={continuing}
+          onPress={() => {
+            sarah.stop();
+            setContinuing(true);
+            setContinueError('');
+            Promise.resolve(onContinue())
+              .catch(() => setContinueError('I couldn’t prepare the headset session. Check the relay connection and try again.'))
+              .finally(() => setContinuing(false));
+          }} />
       </>
     );
   }
@@ -367,14 +458,16 @@ function CheckInStage({phase, sessionId, userId, language, ambient, result, onSc
       {rec.isRecording ? <LinearVisualizer levels={rec.levels} active /> : null}
       {rec.isRecording ? <TextLink label="That’s all for now" onPress={() => void rec.stop()} /> : null}
       {sub === 'error' ? (<><Text style={styles.errorText}>{error}</Text><PrimaryButton label="Try again" onPress={() => { started.current = false; setSub('running'); setError(''); started.current = true; void runLoop(); }} /></>) : null}
-      {__DEV__ ? <Text onPress={() => void useAudioFile()} style={styles.devLink}>Use an audio file (dev)</Text> : null}
+      {__DEV__ ? <Text onPress={() => void chooseAudioFile()} style={styles.devLink}>Use an audio file (dev)</Text> : null}
     </>
   );
 }
 
 /* ---------- VR ---------- */
-function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void; onBack: () => void}) {
+function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void | Promise<void>; onBack: () => void}) {
   const sarah = useSarah();
+  const pairingCode = useMindSyncStore(s => s.pairingCode);
+  const relay = useMindSyncStore(s => s.relay);
   useEffect(() => {
     void sarah.say(`Go ahead and put the headset on${name ? `, ${name}` : ''}. I'll be right here when you're back.`, 'english');
     return () => sarah.stop();
@@ -383,6 +476,16 @@ function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void; on
   return (
     <>
       <StageHeader stage="vr" title={HEADER.vr.title} status={HEADER.vr.status} onBack={onBack} />
+      <GlassCard accent={palette.aqua}>
+        <Text style={styles.smallLabel}>ONE-TIME HEADSET CODE</Text>
+        <Text style={styles.accessCode}>{pairingCode ?? '••••••'}</Text>
+        <Text style={styles.body}>
+          {relay.connectionState === 'connected'
+            ? 'Open MindSync on your Quest and enter this code. It expires in five minutes.'
+            : 'Connecting your phone to the session relay…'}
+        </Text>
+        {relay.lastError ? <Text style={styles.errorText}>Relay unavailable. Return and tap Start my session again.</Text> : null}
+      </GlassCard>
       <View style={{alignItems: 'center', paddingVertical: space.xl}}><Headset /></View>
       <Text style={styles.display}>Time to drop in.</Text>
       <Text style={styles.body}>Put on your headset and let the session take over. I’ll be waiting when you’re back — we’ll see what changed.</Text>
@@ -390,7 +493,7 @@ function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void; on
         <InfoRow icon={Clock} text="20–30 minutes" />
         <InfoRow icon={Sparkles} text="Sarah will be waiting" />
       </GlassCard>
-      <PrimaryButton label="I’m back" onPress={() => { sarah.stop(); onBack2(); }} />
+      <PrimaryButton label="I’m back" onPress={() => { sarah.stop(); void onBack2(); }} />
     </>
   );
 }
@@ -497,6 +600,7 @@ const styles = StyleSheet.create({
   bubble: {...T.h2, color: palette.textHi, fontWeight: '500'},
   sarahIntro: {...T.body, color: palette.textHi, textAlign: 'center', paddingHorizontal: space.md},
   smallLabel: {...T.caption, color: palette.textMid, fontWeight: '700'},
+  accessCode: {...T.metricXL, color: palette.aqua, textAlign: 'center', fontWeight: '800', letterSpacing: 12},
   hintCenter: {...T.caption, color: palette.textLow, textAlign: 'center'},
   countOverlay: {position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, alignItems: 'center', justifyContent: 'center'},
   count: {...T.metricXL, color: palette.aqua, textShadowColor: 'rgba(0,0,0,0.5)', textShadowRadius: 12},
