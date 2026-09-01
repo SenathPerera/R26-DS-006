@@ -77,9 +77,9 @@ export function PrimaryButton({label, onPress, disabled, loading, icon: Icon}: {
   );
 }
 
-export function SecondaryButton({label, onPress, danger = false, icon: Icon}: {label: string; onPress: () => void; danger?: boolean; icon?: LucideIcon}) {
+export function SecondaryButton({label, onPress, danger = false, disabled = false, icon: Icon}: {label: string; onPress: () => void; danger?: boolean; disabled?: boolean; icon?: LucideIcon}) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={({pressed}) => [styles.secondaryButton, danger && styles.dangerButton, pressed && styles.pressed]}>
+    <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={({pressed}) => [styles.secondaryButton, danger && styles.dangerButton, pressed && styles.pressed, disabled && styles.disabled]}>
       {Icon ? <Icon color={danger ? colors.rose : colors.text} size={20} /> : null}
       <Text style={[styles.secondaryButtonText, danger && {color: colors.rose}]}>{label}</Text>
     </Pressable>
