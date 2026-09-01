@@ -1,4 +1,6 @@
 export type UserRole = 'participant' | 'clinician' | 'researcher';
+export type AuthStatus = 'initializing' | 'signed-out' | 'authenticating' | 'authenticated' | 'error';
+export type DataSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 export type ConnectionState = 'idle' | 'scanning' | 'connecting' | 'connected' | 'disconnected' | 'error';
 export type VrStatus = 'not-paired' | 'pairing' | 'ready' | 'waiting' | 'active' | 'disconnected';
 export type SessionStatus = 'ready' | 'active' | 'paused' | 'ending' | 'complete';

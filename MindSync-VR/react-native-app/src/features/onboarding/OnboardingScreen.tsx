@@ -12,6 +12,8 @@ const sensitivities = ['Avoid intense sounds', 'Avoid sudden transitions', 'Avoi
 
 export function OnboardingScreen({navigation}: any) {
   const [step, setStep] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const profile = useMindSyncStore(state => state.onboarding);
   const update = useMindSyncStore(state => state.updateOnboarding);
   const complete = useMindSyncStore(state => state.completeOnboarding);
@@ -19,7 +21,18 @@ export function OnboardingScreen({navigation}: any) {
     const current = profile[key];
     update({[key]: current.includes(value) ? current.filter(item => item !== value) : [...current, value]});
   };
-  const finish = () => { complete(); navigation.reset({index: 0, routes: [{name: 'MainTabs'}]}); };
+  const finish = async () => {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await complete();
+      navigation.reset({index: 0, routes: [{name: 'MainTabs'}]});
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Unable to save onboarding');
+    } finally {
+      setSaving(false);
+    }
+  };
   return (
     <Screen>
       <Header title="Personalize your space" subtitle={`Step ${step + 1} of ${steps.length} · ${steps[step]}`} />
@@ -33,8 +46,9 @@ export function OnboardingScreen({navigation}: any) {
       {step === 6 ? <Card><Text style={uiStyles.value}>Consent and privacy</Text><Text style={uiStyles.body}>Physiological readings are used to support the active session and research workflow. You stay in control of session exit and optional research participation.</Text><ChoiceChip label="I acknowledge the privacy notice" selected={profile.consentAccepted} onPress={() => update({consentAccepted: !profile.consentAccepted})} /><ChoiceChip label="I consent to research participation" selected={profile.researchConsent} onPress={() => update({researchConsent: !profile.researchConsent})} /></Card> : null}
       <View style={uiStyles.row}>
         {step > 0 ? <View style={{flex: 1}}><SecondaryButton label="Back" onPress={() => setStep(value => value - 1)} /></View> : null}
-        <View style={{flex: 1}}><PrimaryButton label={step === steps.length - 1 ? 'Complete' : 'Continue'} disabled={step === steps.length - 1 && !profile.consentAccepted} onPress={step === steps.length - 1 ? finish : () => setStep(value => value + 1)} /></View>
+        <View style={{flex: 1}}><PrimaryButton label={step === steps.length - 1 ? (saving ? 'Saving...' : 'Complete') : 'Continue'} disabled={saving || step === steps.length - 1 && !profile.consentAccepted} onPress={step === steps.length - 1 ? finish : () => setStep(value => value + 1)} /></View>
       </View>
+      {saveError ? <Text style={[uiStyles.label, {color: colors.rose, textAlign: 'center'}]}>{saveError}</Text> : null}
     </Screen>
   );
 }
