@@ -75,7 +75,7 @@ export function SignUpScreen({navigation}: any) {
   const busy = authStatus === 'authenticating';
   return (
     <Screen>
-      <Header title="Create your account" subtitle="Your preferences remain editable and your optional answers can be skipped." onBack={navigation.goBack} />
+      <Header title="Create your account" subtitle="After account creation, we’ll ask for your usual Temple Pond garden preferences." onBack={navigation.goBack} />
       <Card>
         <Controller control={control} name="name" render={({field: {onChange, value}}) => <Field label="Preferred name" value={value} onChangeText={onChange} error={errors.name?.message} />} />
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />

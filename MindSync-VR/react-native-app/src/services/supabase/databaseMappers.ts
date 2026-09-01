@@ -5,6 +5,11 @@ import type {
   QuestionnaireSubmission,
   UserProfile,
 } from '../../types/domain';
+import {
+  isPreferredEnvironment,
+  isSessionContext,
+  TEMPLE_POND_SAFE_DEFAULT,
+} from '../preferences/preferenceProfile';
 
 type ProfileRow = Database['public']['Tables']['profiles']['Row'];
 type OnboardingRow = Database['public']['Tables']['onboarding_profiles']['Row'];
@@ -33,6 +38,14 @@ export function onboardingFromRow(row: OnboardingRow, name: string): OnboardingP
     audioPreferences: row.audio_preferences,
     environmentPreferences: row.environment_preferences,
     sensitivities: row.sensitivities,
+    preferredIllumination: row.preferred_illumination ?? TEMPLE_POND_SAFE_DEFAULT.illumination,
+    preferredWarmth: row.preferred_warmth ?? TEMPLE_POND_SAFE_DEFAULT.warmth,
+    preferredAtmosphericSoftness: row.preferred_atmospheric_softness ?? TEMPLE_POND_SAFE_DEFAULT.atmosphericSoftness,
+    preferredColorRichness: row.preferred_color_richness ?? TEMPLE_POND_SAFE_DEFAULT.colorRichness,
+    preferredAmbientMotion: row.preferred_ambient_motion ?? TEMPLE_POND_SAFE_DEFAULT.ambientMotion,
+    particlePreference: row.particle_preference,
+    lightSensitivity: row.light_sensitivity,
+    motionSensitivity: row.motion_sensitivity ?? 0.5,
     consentAccepted: row.consent_accepted,
     researchConsent: row.research_consent,
   };
@@ -50,6 +63,10 @@ export function sessionFromRow(row: SessionRow): MeditationSession {
     moodBefore: row.mood_before,
     moodAfter: row.mood_after,
     validationComplete: row.validation_complete,
+    sessionContext: isSessionContext(row.session_context) ? row.session_context : null,
+    effectiveEnvironmentPreference: isPreferredEnvironment(row.effective_environment_preference)
+      ? row.effective_environment_preference
+      : null,
   };
 }
 

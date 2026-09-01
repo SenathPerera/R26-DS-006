@@ -44,6 +44,14 @@ export type Database = {
           audio_preferences: string[];
           environment_preferences: string[];
           sensitivities: string[];
+          preferred_illumination: number | null;
+          preferred_warmth: number | null;
+          preferred_atmospheric_softness: number | null;
+          preferred_color_richness: number | null;
+          preferred_ambient_motion: number | null;
+          particle_preference: 'none' | 'subtle' | 'moderate' | null;
+          light_sensitivity: 'none' | 'mild' | 'high' | null;
+          motion_sensitivity: number | null;
           consent_accepted: boolean;
           research_consent: boolean;
           privacy_notice_version: string;
@@ -60,6 +68,14 @@ export type Database = {
           audio_preferences?: string[];
           environment_preferences?: string[];
           sensitivities?: string[];
+          preferred_illumination?: number | null;
+          preferred_warmth?: number | null;
+          preferred_atmospheric_softness?: number | null;
+          preferred_color_richness?: number | null;
+          preferred_ambient_motion?: number | null;
+          particle_preference?: 'none' | 'subtle' | 'moderate' | null;
+          light_sensitivity?: 'none' | 'mild' | 'high' | null;
+          motion_sensitivity?: number | null;
           consent_accepted?: boolean;
           research_consent?: boolean;
           privacy_notice_version?: string;
@@ -102,6 +118,8 @@ export type Database = {
           mood_before: number;
           mood_after: number;
           validation_complete: boolean;
+          session_context: Json | null;
+          effective_environment_preference: Json | null;
           status: string;
           created_at: string;
           updated_at: string;
@@ -118,6 +136,8 @@ export type Database = {
           mood_before?: number;
           mood_after?: number;
           validation_complete?: boolean;
+          session_context?: Json | null;
+          effective_environment_preference?: Json | null;
           status?: string;
           created_at?: string;
           updated_at?: string;
