@@ -1,6 +1,6 @@
 import React from 'react';
 import {Text} from 'react-native';
-import {Headset, Link} from 'lucide-react-native';
+import {Headset} from 'lucide-react-native';
 import {Card, Header, PrimaryButton, Screen, StatusPill, uiStyles} from '../../components/ui';
 import {useMindSyncStore} from '../../store/useMindSyncStore';
 import {colors} from '../../theme/theme';
@@ -8,8 +8,6 @@ import {colors} from '../../theme/theme';
 export function VrScreen({navigation}: any) {
   const status = useMindSyncStore(state => state.vrStatus);
   const code = useMindSyncStore(state => state.pairingCode);
-  const pair = useMindSyncStore(state => state.pairVr);
-  const create = useMindSyncStore(state => state.createSession);
   return (
     <Screen>
       <Header title="VR connection" subtitle="Pair the Unity meditation environment with this controller." onBack={navigation.goBack} />
@@ -17,14 +15,14 @@ export function VrScreen({navigation}: any) {
         <Headset color={colors.violet} size={32} />
         <Text style={uiStyles.value}>Setup guide</Text>
         <Text style={uiStyles.body}>Open MindSync in the headset, keep both devices on the same research network, then enter the pairing code.</Text>
-        <PrimaryButton label="Generate pairing code" icon={Link} onPress={pair} />
+        <PrimaryButton label="Begin pre-session check-in" onPress={() => navigation.navigate('VoiceCheckIn')} />
       </Card>
       <Card>
-        <Text style={{fontSize: 38, color: colors.text, fontWeight: '900', textAlign: 'center'}}>{code ?? 'MSVR-____'}</Text>
+        <Text style={{fontSize: 38, color: colors.text, fontWeight: '900', textAlign: 'center', letterSpacing: 8}}>{code ?? '------'}</Text>
         <StatusPill label={status === 'ready' ? 'Ready for handoff' : 'Waiting for pairing'} tone={status === 'ready' ? 'good' : 'warning'} />
         <Text style={uiStyles.label}>Transport boundary: native Unity module or backend-mediated session bridge.</Text>
       </Card>
-      <PrimaryButton label="Continue to session" disabled={status !== 'ready'} onPress={() => { create(); navigation.navigate('PreSession'); }} />
+      <PrimaryButton label="Return to your session" disabled={!code} onPress={() => navigation.navigate('VoiceCheckIn')} />
     </Screen>
   );
 }
