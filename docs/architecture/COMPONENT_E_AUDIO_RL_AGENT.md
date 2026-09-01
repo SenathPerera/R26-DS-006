@@ -141,6 +141,20 @@ Cache keys include the environment ID, personalized strategy, prompt weights, st
 
 ## Component B Boundary
 
-The shared Component B transport is intentionally not implemented in this change. A future adapter should validate Component B JSON and construct `SignalPacket` with the extended constructor. `PrototypeBootstrap` can then pass that packet to `AudioRLAgent.Evaluate` instead of the simulator packet. No audio-policy code needs to parse backend JSON.
+The shared `ComponentBPhysiologyBridge` owns transport, JSON parsing, schema validation, connection recovery, and delivery on Unity's main thread. The audio-side `ComponentBStressSignalReceiver` subscribes to its accepted-payload event and maps each validated window into the existing `SignalPacket` input port. The RL policy therefore remains transport-neutral and never parses backend JSON.
 
-Required production fields are stress normalized from `continuous_score / 3`, confidence, signal quality, heart rate, RMSSD, SDNN, source timestamp, window start/end, and a monotonically increasing sequence ID.
+The adapter maps stress as `continuous_score / 3`, confidence, signal quality, heart rate, RMSSD, SDNN, source timestamp, window start/end, and an audio-local monotonically increasing sequence ID. It rejects duplicate or out-of-order window ends before switching `SignalSimulator` to `External` mode. Until the first live window arrives, the configured simulator remains the fallback input. If live delivery stops, the packet timestamp ages normally and `AudioRLAgent` enters stale-signal baseline recovery.
+
+```text
+Component B WebSocket -> shared parser/validator -> ComponentBPhysiologyBridge
+                                                        |
+                                                        v
+                                    ComponentBStressSignalReceiver
+                                      (map + order guard + sequence)
+                                                        |
+                                                        v
+                            SignalSimulator external input / simulator fallback
+                                                        |
+                                                        v
+                         PrototypeBootstrap -> AudioRLAgent -> safety -> mixer
+```

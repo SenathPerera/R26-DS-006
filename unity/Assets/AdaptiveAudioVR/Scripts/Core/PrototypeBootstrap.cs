@@ -18,6 +18,7 @@ namespace AdaptiveAudioVR.Core
         [SerializeField] private PreferenceManager preferenceManager;
         [SerializeField] private ProfileEngine profileEngine;
         [SerializeField] private SignalSimulator signalSimulator;
+        [SerializeField] private ComponentBStressSignalReceiver componentBSignalReceiver;
         [SerializeField] private RLPersonalizationAgent rlPersonalizationAgent;
         [SerializeField] private AudioRLAgent audioRLAgent;
         [SerializeField] private RLAdaptiveController rlAdaptiveController;
@@ -59,6 +60,10 @@ namespace AdaptiveAudioVR.Core
         public AudioRLRewardBreakdown CurrentRewardBreakdown => audioRLAgent != null ? audioRLAgent.CurrentRewardBreakdown : AudioRLRewardBreakdown.Zero;
         public bool IsPrepared { get; private set; }
         public bool IsSessionRunning { get; private set; }
+        public string CurrentSignalSource => componentBSignalReceiver != null
+                                             && componentBSignalReceiver.HasLiveSignal
+            ? "Component B live physiology"
+            : "Signal simulator";
 
         private PersonalizationStrategy activeStrategy;
         private int consumedRewardVersion;
@@ -294,6 +299,7 @@ namespace AdaptiveAudioVR.Core
             preferenceManager ??= FindAnyObjectByType<PreferenceManager>();
             profileEngine ??= FindAnyObjectByType<ProfileEngine>();
             signalSimulator ??= FindAnyObjectByType<SignalSimulator>();
+            componentBSignalReceiver ??= FindAnyObjectByType<ComponentBStressSignalReceiver>();
             rlPersonalizationAgent ??= FindAnyObjectByType<RLPersonalizationAgent>();
             audioRLAgent ??= FindAnyObjectByType<AudioRLAgent>();
             rlAdaptiveController ??= FindAnyObjectByType<RLAdaptiveController>();

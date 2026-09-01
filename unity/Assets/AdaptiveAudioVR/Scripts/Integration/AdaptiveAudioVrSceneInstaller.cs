@@ -163,6 +163,7 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(bootstrap, "preferenceManager", preferenceManager);
             SetPrivateField(bootstrap, "profileEngine", profileEngine);
             SetPrivateField(bootstrap, "signalSimulator", signalSimulator);
+            SetPrivateField(bootstrap, "componentBSignalReceiver", componentBSignalReceiver);
             SetPrivateField(bootstrap, "rlPersonalizationAgent", rlPersonalizationAgent);
             SetPrivateField(bootstrap, "audioRLAgent", audioRLAgent);
             SetPrivateField(bootstrap, "rlAdaptiveController", rlAdaptiveController);

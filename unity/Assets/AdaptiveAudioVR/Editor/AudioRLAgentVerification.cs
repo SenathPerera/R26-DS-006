@@ -3,8 +3,12 @@ using System.IO;
 using System.Reflection;
 using AdaptiveAudioVR.Audio;
 using AdaptiveAudioVR.Core;
+using AdaptiveAudioVR.Integration;
 using AdaptiveAudioVR.RL;
 using AdaptiveAudioVR.RL.Agent;
+using AdaptiveAudioVR.Signals;
+using LaminarVR.AdaptiveMeditation.Physiology;
+using LaminarVR.AdaptiveMeditation.Runtime.Networking;
 using UnityEditor;
 using UnityEngine;
 
@@ -53,6 +57,7 @@ namespace AdaptiveAudioVR.Editor
             VerifySafetyGating();
             VerifyDelayedRewardDirection();
             VerifyReplayCapacity();
+            VerifyComponentBSignalMapping();
             VerifyJapaneseTempleGenerationContext();
             VerifyGeneratedClipStartGate();
         }
@@ -214,6 +219,68 @@ namespace AdaptiveAudioVR.Editor
             Ensure(replay.Count == 2, "Replay buffer did not enforce its capacity.");
             Ensure(replay.Snapshot()[0].sessionId == "2", "Replay buffer did not retain transitions in chronological order.");
             Ensure(replay.Snapshot()[1].sessionId == "3", "Replay buffer did not retain the newest transition.");
+        }
+
+        private static void VerifyComponentBSignalMapping()
+        {
+            const double windowStart = 1787282838.4d;
+            const double windowEnd = 1787282898.4d;
+            StressDecision stress = new StressDecision(
+                StressDecisionMode.Band,
+                null,
+                1,
+                2,
+                "mild-to-moderate",
+                0.54d,
+                true,
+                new StressProbabilityVector(0.08d, 0.36d, 0.54d, 0.02d),
+                1.5d);
+            PhysiologyWindow window = new PhysiologyWindow(
+                windowEnd,
+                windowStart,
+                windowEnd,
+                78.4d,
+                34.1d,
+                42d,
+                stress,
+                0.92d);
+            AcceptedComponentBStressPayload payload =
+                new AcceptedComponentBStressPayload("{\"test\":true}", window);
+
+            SignalPacket mapped = ComponentBStressSignalReceiver.CreateSignalPacket(
+                payload,
+                7L,
+                12.5f);
+            Ensure(Approximately(mapped.stress, 0.5f), "Component B continuous stress was not normalized from [0,3] to [0,1].");
+            Ensure(Approximately(mapped.confidence, 0.54f), "Component B confidence was not mapped.");
+            Ensure(Approximately(mapped.signalQuality, 0.92f), "Component B signal quality was not mapped.");
+            Ensure(Approximately(mapped.heartRate, 78.4f), "Component B heart rate was not mapped.");
+            Ensure(Approximately(mapped.rmssd, 34.1f), "Component B RMSSD was not mapped.");
+            Ensure(Approximately(mapped.sdnn, 42f), "Component B SDNN was not mapped.");
+            Ensure(mapped.hasPhysiologyWindow, "Mapped Component B input was not marked as a physiology window.");
+            Ensure(mapped.sequenceId == 7L, "Mapped Component B sequence ID was not retained.");
+            Ensure(Math.Abs(mapped.windowStart - windowStart) < 0.001d, "Component B window start was not mapped.");
+            Ensure(Math.Abs(mapped.windowEnd - windowEnd) < 0.001d, "Component B window end was not mapped.");
+
+            GameObject owner = new GameObject("ComponentBReceiver_Verification");
+            try
+            {
+                SignalSimulator simulator = owner.AddComponent<SignalSimulator>();
+                ComponentBStressSignalReceiver receiver =
+                    owner.AddComponent<ComponentBStressSignalReceiver>();
+                receiver.Configure(null, simulator);
+
+                Ensure(receiver.TryProcessPayload(payload), "The first Component B window was not accepted by audio.");
+                Ensure(!receiver.TryProcessPayload(payload), "A duplicate Component B window was accepted by audio.");
+                Ensure(receiver.ReceivedPayloadCount == 1, "Audio receiver accepted an unexpected payload count.");
+                Ensure(receiver.DuplicateOrOutOfOrderPayloadCount == 1, "Audio receiver did not record the duplicate window.");
+                Ensure(simulator.CurrentMode == SignalSimulator.SimulationMode.External, "Component B input did not activate external-signal mode.");
+                Ensure(simulator.CurrentSignal.sequenceId == 1L, "Audio input port did not retain the live packet sequence.");
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(owner);
+            }
         }
 
         private static void VerifyJapaneseTempleGenerationContext()
