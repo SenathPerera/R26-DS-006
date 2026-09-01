@@ -138,9 +138,9 @@ def test_ingest_socket_rejects_bad_frame_then_accepts_next(client, monkeypatch):
             "status": "accepted",
             "timestamp": 1787282838.4,
             "samples": 960,
+            "temperature": 33.7,
+            "temperature_source": "synthetic_backend",
         }
-        waiting = websocket.receive_json()
-        assert waiting["status"] == "waiting_for_temperature"
 
 
 def test_latest_is_503_before_first_window(client):

@@ -130,7 +130,7 @@ PYTHONPATH=src .venv/Scripts/python -m uvicorn server.main:app \
 Then one every ~4 s. Silence before that is correct, not a fault.
 
 Failure replies to expect on `/ingest`, all non-fatal:
-`waiting_for_temperature` (no real TMP117 value yet — the server refuses
+`waiting_for_temperature` (temperature is absent and the synthetic fallback was explicitly disabled — the server refuses
 to infer without one), `invalid_batch` (frame is not exactly 960 finite
 samples at 64.0 Hz), `processing_error` (beat detection failed on that
 frame), `model_unavailable` (artifacts did not load).
@@ -218,7 +218,7 @@ in a replay it can read 99%; over a full 200-window loop it converges to
 | driver prints `accepted 0` | server unreachable | check the port, then `/health` |
 | no predictions after 60 s | fewer than 60 beats buffered | `--speed 0`, watch the frame counter |
 | dashboard blank | opened as `file://`, or port taken | must be served over HTTP; try 5599 |
-| `waiting_for_temperature` | first frame had `temperature: null` | driver always sends one; check the payload |
+| `waiting_for_temperature` | frame had `temperature: null` and `COMPONENT_B_SYNTHETIC_TEMPERATURE=false` | enable the development fallback or repair the wearable sensor |
 | dashboard stuck | server restarted | it reconnects itself every 1.5 s |
 
 Everything degrades to `demo/drive_beats.py`, which needs no network, no

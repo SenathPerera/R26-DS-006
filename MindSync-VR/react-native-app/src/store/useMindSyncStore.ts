@@ -51,6 +51,8 @@ const emptyComponentB: ComponentBPipelineState = {
   framesSent: 0,
   framesAcknowledged: 0,
   lastFrameTimestamp: null,
+  lastTemperatureC: null,
+  temperatureSource: null,
   lastBackendMessage: null,
   lastError: null,
   logs: [],

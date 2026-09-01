@@ -16,6 +16,7 @@ from componentb.signal.ppg import clean_rr, ppg_to_rr
 from server.engine import new_stream, unavailable_reason
 from server.schemas.messages import PPGBatch, StressPrediction
 from server.state import latest
+from server.temperature import TemperatureResolver
 
 app = FastAPI(title="Component B — Stress Inference")
 log = logging.getLogger(__name__)
@@ -65,7 +66,7 @@ async def ingest(ws: WebSocket):
     """
     await ws.accept()
     engine = new_stream()
-    last_temperature = None
+    temperature_resolver = TemperatureResolver()
     if engine is None:
         await ws.send_json({"status": "model_unavailable",
                             "detail": unavailable_reason()})
@@ -82,18 +83,22 @@ async def ingest(ws: WebSocket):
                 await ws.send_json({"status": "invalid_batch", "detail": detail})
                 continue
 
+            temperature = temperature_resolver.resolve(
+                batch.temperature,
+                batch.timestamp,
+            )
             await ws.send_json({
                 "status": "accepted",
                 "timestamp": batch.timestamp,
                 "samples": len(batch.ppg),
+                "temperature": temperature.value_c,
+                "temperature_source": temperature.source,
             })
 
-            if batch.temperature is not None:
-                last_temperature = float(batch.temperature)
-            if last_temperature is None:
+            if temperature.value_c is None:
                 await ws.send_json({
                     "status": "waiting_for_temperature",
-                    "detail": "a real TMP117 value is required before inference",
+                    "detail": "temperature is unavailable and synthetic fallback is disabled",
                 })
                 continue
 
@@ -117,7 +122,7 @@ async def ingest(ws: WebSocket):
 
             for beat, offset, usable in zip(rr, ts, ok):
                 # buffering is per beat; inference only at step boundaries
-                if engine.observe(beat, last_temperature,
+                if engine.observe(beat, temperature.value_c,
                                   ts=batch.timestamp + float(offset),
                                   ok=bool(usable)):
                     out = engine.predict()
