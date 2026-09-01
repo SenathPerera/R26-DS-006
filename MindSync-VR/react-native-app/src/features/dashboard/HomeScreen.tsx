@@ -44,7 +44,7 @@ export function HomeScreen({navigation}: any) {
       </Card>
       <Card>
         <View style={uiStyles.row}><Activity color={colors.teal} size={22} /><Text style={styles.cardTitle}>Recommended focus</Text></View>
-        <Text style={uiStyles.body}>15-minute Ocean Dusk with warm pads, restrained motion, and post-session Component D validation.</Text>
+        <Text style={uiStyles.body}>15-minute Ocean Dusk with warm pads and restrained motion, plus a short voice check-in before and after.</Text>
       </Card>
       <SectionHeader title="Control hub" subtitle="Device setup, session control, validation, and research insights." />
       <View style={styles.grid}>

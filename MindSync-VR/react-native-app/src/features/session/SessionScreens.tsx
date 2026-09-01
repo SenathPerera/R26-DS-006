@@ -3,7 +3,6 @@ import {Alert, Text, View} from 'react-native';
 import {CirclePause, CirclePlay, ShieldAlert, Square} from 'lucide-react-native';
 import {BreathingVisual, Card, Header, Metric, PrimaryButton, Screen, SecondaryButton, StatusPill, uiStyles} from '../../components/ui';
 import {useMindSyncStore} from '../../store/useMindSyncStore';
-import {unityBridge} from '../../services/unity/unityBridge';
 import {colors} from '../../theme/theme';
 
 export function PreSessionScreen({navigation}: any) {
@@ -32,6 +31,7 @@ export function LiveSessionScreen({navigation}: any) {
   const [elapsed, setElapsed] = useState(0);
   const status = useMindSyncStore(state => state.sessionStatus);
   const setStatus = useMindSyncStore(state => state.setSessionStatus);
+  const sendVrCommand = useMindSyncStore(state => state.sendVrCommand);
   const wearable = useMindSyncStore(state => state.wearableState);
   const telemetry = useMindSyncStore(state => state.ble.telemetry);
   const vr = useMindSyncStore(state => state.vrStatus);
@@ -43,9 +43,10 @@ export function LiveSessionScreen({navigation}: any) {
   }, [status]);
   const stop = () => Alert.alert('End this session?', 'The VR environment will stop gently and your post-session check-in will remain available.', [
     {text: 'Continue session', style: 'cancel'},
-    {text: 'End session', style: 'destructive', onPress: () => { setStatus('complete'); void unityBridge.stop(); navigation.replace('SessionComplete'); }},
+    {text: 'End session', style: 'destructive', onPress: () => { setStatus('complete'); sendVrCommand('stop'); navigation.replace('SessionComplete'); }},
   ]);
-  const pause = () => { const next = status === 'paused' ? 'active' : 'paused'; setStatus(next); if (next === 'paused') void unityBridge.pause(); };
+  const pause = () => { const next = status === 'paused' ? 'active' : 'paused'; setStatus(next); sendVrCommand(next === 'paused' ? 'pause' : 'resume'); };
+  const emergency = () => { setStatus('complete'); sendVrCommand('emergency_stop'); navigation.replace('SessionComplete'); };
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const seconds = String(elapsed % 60).padStart(2, '0');
   return (
@@ -60,17 +61,26 @@ export function LiveSessionScreen({navigation}: any) {
         <View style={{flex: 1}}><SecondaryButton label={status === 'paused' ? 'Resume' : 'Pause'} icon={status === 'paused' ? CirclePlay : CirclePause} onPress={pause} /></View>
         <View style={{flex: 1}}><SecondaryButton label="Stop" danger icon={Square} onPress={stop} /></View>
       </View>
-      <SecondaryButton label="Ground and exit" danger icon={ShieldAlert} onPress={stop} />
+      <SecondaryButton label="Ground and exit" danger icon={ShieldAlert} onPress={emergency} />
     </Screen>
   );
 }
 
 export function SessionCompleteScreen({navigation}: any) {
   const active = useMindSyncStore(state => state.activeSession);
+  const visualLogStatus = useMindSyncStore(state => state.relay.visualLogDeliveryStatus);
+  const visualLogMessageCount = useMindSyncStore(state => state.relay.visualLogMessageCount);
+  const refreshVisualLog = useMindSyncStore(state => state.refreshVisualLog);
+  const logStatusLabel = visualLogStatus === 'acknowledged'
+    ? `Session data secured · ${visualLogMessageCount} messages`
+    : visualLogStatus === 'error'
+      ? 'Session data transfer needs retry'
+      : 'Securing session data…';
   return (
     <Screen style={{justifyContent: 'center'}}>
       <View style={{alignItems: 'center'}}><BreathingVisual size={150} /></View>
-      <Card><Text style={[uiStyles.value, {textAlign: 'center'}]}>Session complete</Text><Text style={[uiStyles.body, {textAlign: 'center'}]}>Take your time before moving. Your reflection helps validate this session without judging how you felt.</Text><Text style={[uiStyles.label, {textAlign: 'center'}]}>{active?.title ?? 'Adaptive meditation'}</Text></Card>
+      <Card><Text style={[uiStyles.value, {textAlign: 'center'}]}>Session complete</Text><Text style={[uiStyles.body, {textAlign: 'center'}]}>Take your time before moving. Your reflection helps validate this session without judging how you felt.</Text><Text style={[uiStyles.label, {textAlign: 'center'}]}>{active?.title ?? 'Adaptive meditation'}</Text><StatusPill label={logStatusLabel} tone={visualLogStatus === 'error' ? 'warning' : 'good'} /></Card>
+      {visualLogStatus === 'error' ? <SecondaryButton label="Retry session data transfer" onPress={() => { refreshVisualLog().catch(() => undefined); }} /> : null}
       <PrimaryButton label="Complete post-session validation" onPress={() => navigation.replace('QuestionnaireForm', {templateId: 'component-d-post-v1'})} />
       <SecondaryButton label="Return home" onPress={() => navigation.navigate('MainTabs')} />
     </Screen>

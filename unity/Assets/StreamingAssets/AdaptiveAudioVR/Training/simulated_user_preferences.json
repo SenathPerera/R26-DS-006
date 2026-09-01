@@ -1,0 +1,10 @@
+{
+  "userId": "SimUser_CalmForest",
+  "preferredInstruments": ["piano", "flute"],
+  "mood": "calm",
+  "tempoPreference": "slow",
+  "preferredAmbience": "forest",
+  "audioIntensity": 0.25,
+  "noveltyTolerance": 0.20,
+  "avoidDissonance": true
+}

@@ -1,0 +1,22 @@
+{
+    "name": "LaminarVR.AdaptiveMeditation.PlayModeTests",
+    "rootNamespace": "LaminarVR.AdaptiveMeditation.Tests.PlayMode",
+    "references": [
+        "LaminarVR.AdaptiveMeditation.Core",
+        "LaminarVR.AdaptiveMeditation.Runtime",
+        "Unity.RenderPipelines.Core.Runtime",
+        "Unity.RenderPipelines.Universal.Runtime"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ],
+    "noEngineReferences": false
+}
