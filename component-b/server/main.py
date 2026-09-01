@@ -71,7 +71,12 @@ async def ingest(ws: WebSocket):
         # several seconds. Keep it off the ASGI event loop so prediction
         # subscribers and additional handshakes remain responsive.
         engine = await asyncio.to_thread(new_stream)
-        last_temperature = None
+        # Per connection for the same reason as `engine`: the resolver
+        # caches this wearer's last measured temperature and anchors the
+        # synthetic curve's phase to when this session started. A shared
+        # instance would leak one wearer's skin temperature into another's
+        # window during the 60 s cache period.
+        temperature_resolver = TemperatureResolver()
         if engine is None:
             await ws.send_json({"status": "model_unavailable",
                                 "detail": unavailable_reason()})

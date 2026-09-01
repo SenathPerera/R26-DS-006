@@ -143,6 +143,39 @@ def test_ingest_socket_rejects_bad_frame_then_accepts_next(client, monkeypatch):
         }
 
 
+def test_temperature_does_not_leak_between_ingest_connections(client, monkeypatch):
+    """The resolver is per connection, exactly like the inference engine.
+
+    It caches the last measured temperature for WEARABLE_CACHE_SECONDS. A
+    module-level instance would satisfy every other test in this file while
+    silently serving one wearer's skin temperature to the next wearer who
+    connects inside that window — and the frame would still be reported as
+    `wearable_cached`, so nothing downstream could tell.
+    """
+    monkeypatch.setattr("server.main.new_stream", lambda: None)
+    monkeypatch.setattr("server.main.unavailable_reason", lambda: "test unavailable")
+    monkeypatch.setattr("server.main.ppg_to_rr", lambda _ppg, _rate: (None, None, None))
+
+    frame = {"timestamp": 1787282838.4, "sample_rate": 64.0, "ppg": [1834.2] * 960}
+
+    with client.websocket_connect("/ingest") as first:
+        assert first.receive_json()["status"] == "model_unavailable"
+        first.send_json({**frame, "temperature": 36.9})
+        accepted = first.receive_json()
+        assert accepted["temperature"] == 36.9
+        assert accepted["temperature_source"] == "wearable"
+
+    # 10 s later: well inside the 60 s cache window a shared resolver would
+    # still be serving 36.9 from the connection above.
+    with client.websocket_connect("/ingest") as second:
+        assert second.receive_json()["status"] == "model_unavailable"
+        second.send_json({**frame, "timestamp": frame["timestamp"] + 10.0,
+                          "temperature": None})
+        accepted = second.receive_json()
+        assert accepted["temperature_source"] == "synthetic_backend"
+        assert accepted["temperature"] != 36.9
+
+
 def test_ingest_initializes_model_off_the_asgi_event_loop(client, monkeypatch):
     calls = []
 
