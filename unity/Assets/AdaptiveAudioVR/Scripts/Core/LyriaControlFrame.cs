@@ -7,6 +7,8 @@ namespace AdaptiveAudioVR.Core
     [Serializable]
     public class LyriaControlFrame
     {
+        public string environmentId;
+        public string environmentDisplayName;
         public string strategyName;
         public string actionName;
         [TextArea(3, 8)] public string promptSummary;
@@ -16,6 +18,10 @@ namespace AdaptiveAudioVR.Core
 
         public void Normalize()
         {
+            environmentId = string.IsNullOrWhiteSpace(environmentId) ? "default" : environmentId.Trim().ToLowerInvariant();
+            environmentDisplayName = string.IsNullOrWhiteSpace(environmentDisplayName)
+                ? "Meditation Environment"
+                : environmentDisplayName.Trim();
             strategyName = string.IsNullOrWhiteSpace(strategyName) ? "Neutral Baseline" : strategyName.Trim();
             actionName = string.IsNullOrWhiteSpace(actionName) ? "Stabilize" : actionName.Trim();
             promptSummary = string.IsNullOrWhiteSpace(promptSummary) ? "Instrumental meditation." : promptSummary.Trim();
