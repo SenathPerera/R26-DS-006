@@ -9,7 +9,8 @@ namespace AdaptiveAudioVR.Signals
         {
             Manual,
             Oscillation,
-            RandomWalk
+            RandomWalk,
+            External
         }
 
         [Header("Mode")]
@@ -47,6 +48,11 @@ namespace AdaptiveAudioVR.Signals
 
         private void Update()
         {
+            if (mode == SimulationMode.External)
+            {
+                return;
+            }
+
             UpdateTargets();
 
             float stress = Mathf.Lerp(CurrentSignal.stress, Mathf.Clamp01(targetStress), Time.deltaTime * outputSmoothSpeed);
@@ -88,6 +94,17 @@ namespace AdaptiveAudioVR.Signals
         {
             mode = SimulationMode.RandomWalk;
             nextRandomWalkTime = 0f;
+        }
+
+        public void SetExternalSignal(float stress, float confidence)
+        {
+            mode = SimulationMode.External;
+            targetStress = Mathf.Clamp01(stress);
+            targetConfidence = Mathf.Clamp01(confidence);
+            CurrentSignal = new SignalPacket(
+                targetStress,
+                targetConfidence,
+                Time.time);
         }
 
         private void UpdateTargets()
