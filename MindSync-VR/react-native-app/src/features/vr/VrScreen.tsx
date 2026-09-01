@@ -15,7 +15,7 @@ export function VrScreen({navigation}: any) {
         <Headset color={colors.violet} size={32} />
         <Text style={uiStyles.value}>Setup guide</Text>
         <Text style={uiStyles.body}>Open MindSync in the headset, keep both devices on the same research network, then enter the pairing code.</Text>
-        <PrimaryButton label="Begin pre-session check-in" onPress={() => navigation.navigate('VoiceCheckIn')} />
+        <PrimaryButton label="Begin pre-session check-in" onPress={() => navigation.navigate('SessionContext')} />
       </Card>
       <Card>
         <Text style={{fontSize: 38, color: colors.text, fontWeight: '900', textAlign: 'center', letterSpacing: 8}}>{code ?? '------'}</Text>

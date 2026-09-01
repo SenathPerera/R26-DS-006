@@ -83,6 +83,14 @@ class MindSyncRepository {
       audio_preferences: profile.audioPreferences,
       environment_preferences: profile.environmentPreferences,
       sensitivities: profile.sensitivities,
+      preferred_illumination: profile.preferredIllumination,
+      preferred_warmth: profile.preferredWarmth,
+      preferred_atmospheric_softness: profile.preferredAtmosphericSoftness,
+      preferred_color_richness: profile.preferredColorRichness,
+      preferred_ambient_motion: profile.preferredAmbientMotion,
+      particle_preference: profile.particlePreference,
+      light_sensitivity: profile.lightSensitivity,
+      motion_sensitivity: profile.motionSensitivity,
       consent_accepted: profile.consentAccepted,
       research_consent: profile.researchConsent,
       consented_at: profile.consentAccepted ? now : null,
@@ -125,6 +133,12 @@ class MindSyncRepository {
       mood_before: session.moodBefore,
       mood_after: session.moodAfter,
       validation_complete: session.validationComplete,
+      session_context: session.sessionContext
+        ? JSON.parse(JSON.stringify(session.sessionContext)) as Json
+        : null,
+      effective_environment_preference: session.effectiveEnvironmentPreference
+        ? JSON.parse(JSON.stringify(session.effectiveEnvironmentPreference)) as Json
+        : null,
       status,
     };
     const {error} = await getSupabaseClient().from('meditation_sessions').upsert(row);

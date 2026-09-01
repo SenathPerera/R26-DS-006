@@ -119,6 +119,7 @@ real authentication and database persistence:
 
    ```text
    supabase/migrations/202609010001_initial_mobile_schema.sql
+   supabase/migrations/202609010002_user_and_session_preferences.sql
    ```
 
    Alternatively, link this folder with the Supabase CLI and run `supabase db
@@ -150,9 +151,9 @@ security.
 The migration creates:
 
 - `profiles`: participant identity and onboarding state
-- `onboarding_profiles`: personalization and current consent choices
+- `onboarding_profiles`: persistent personalization, visual preferences, and current consent choices
 - `participant_consents`: append-only privacy and research consent events
-- `meditation_sessions`: session history and outcome metadata
+- `meditation_sessions`: session history, current-session context, effective visual preferences, and outcome metadata
 - `questionnaire_submissions`: Component D response objects stored as JSONB
 - `wearable_devices`: device registration metadata and last connection time
 - `complete_session_records`: combined voice and finalized VR visual records
