@@ -195,11 +195,16 @@ export function QuestionnaireFormScreen({navigation, route}: any) {
   const submit = useMindSyncStore(state => state.submitQuestionnaire);
   const [answers, setAnswers] = useState<Record<string, string | number | string[]>>({});
   const [index, setIndex] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
   const visible = useMemo(() => template.questions.filter(question => branchVisible(question, answers)), [template.questions, answers]);
   const question = visible[index] ?? visible[visible.length - 1];
   const value = answers[question.id];
   const valid = !question.required || value !== undefined && value !== '';
-  const finish = () => { submit(template.id, activeSession?.id ?? null, answers); navigation.navigate('MainTabs', {screen: 'Validate'}); };
+  const finish = async () => {
+    setSubmitting(true);
+    await submit(template.id, activeSession?.id ?? null, answers);
+    navigation.navigate('MainTabs', {screen: 'Validate'});
+  };
   return (
     <Screen>
       <Header title={template.title} subtitle={`Question ${index + 1} of ${visible.length}`} onBack={navigation.goBack} />
@@ -211,9 +216,9 @@ export function QuestionnaireFormScreen({navigation, route}: any) {
       </Card>
       <View style={uiStyles.row}>
         {index > 0 ? <View style={{flex: 1}}><SecondaryButton label="Back" onPress={() => setIndex(value => value - 1)} /></View> : null}
-        <View style={{flex: 1}}><PrimaryButton label={index === visible.length - 1 ? 'Submit securely' : 'Continue'} disabled={!valid} onPress={index === visible.length - 1 ? finish : () => setIndex(value => value + 1)} /></View>
+        <View style={{flex: 1}}><PrimaryButton label={index === visible.length - 1 ? (submitting ? 'Saving...' : 'Submit securely') : 'Continue'} disabled={!valid || submitting} onPress={index === visible.length - 1 ? finish : () => setIndex(value => value + 1)} /></View>
       </View>
-      <Text style={[uiStyles.label, {textAlign: 'center'}]}>Your responses are saved privately on this device.</Text>
+      <Text style={[uiStyles.label, {textAlign: 'center'}]}>Responses are saved locally first and synchronized privately when a connection is available.</Text>
     </Screen>
   );
 }

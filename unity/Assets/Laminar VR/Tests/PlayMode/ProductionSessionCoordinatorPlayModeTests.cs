@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using LaminarVR.AdaptiveMeditation.Environment;
+using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Runtime.Application;
@@ -107,6 +108,73 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 Is.EqualTo(
                     PolicyDecisionCycleResultCode.RewardWindowOpened));
             Assert.That(adapter.LastAppliedState, Is.EqualTo(State(0.5f)));
+        }
+
+        [UnityTest]
+        public IEnumerator VisualBoundary_ForwardsTransportNeutralInputs()
+        {
+            var root = Track(new GameObject("VisualSessionBoundaryHarness"));
+            var adapter = root.AddComponent<RecordingAdapter>();
+            var bootstrap = root.AddComponent<ApplicationBootstrap>();
+            bootstrap.Configure(
+                CreateProfile<SceneParameterProfile>(SceneProfileJson),
+                adapter,
+                StudyPolicyMode.StaticPersonalized);
+
+            var coordinator = root.AddComponent<ProductionSessionCoordinator>();
+            coordinator.enabled = false;
+            coordinator.Configure(
+                bootstrap,
+                CreateProfile<SessionTimingProfile>(TimingProfileJson),
+                CreateProfile<PhysiologyValidationProfile>(
+                    PhysiologyProfileJson),
+                CreateProfile<RewardPipelineProfile>(RewardProfileJson),
+                CreateProfile<StabilizationSelectionProfile>(
+                    StabilizationProfileJson),
+                CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
+                CreateProfile<ProductionCoordinatorProfile>(
+                    CoordinatorProfileJson));
+
+            var boundary = root.AddComponent<VisualSessionBoundary>();
+            boundary.enabled = false;
+            boundary.Configure(coordinator);
+
+            var utcNow = UtcNowUnixSeconds();
+            boundary.ReceiveSessionContext(
+                "playmode-boundary-" + Guid.NewGuid().ToString("N"),
+                "P-PLAYMODE-BOUNDARY",
+                State(0.5f));
+            boundary.ReceiveConnectionState(
+                SessionTransportConnectionState.Connected);
+            boundary.ReceiveCommand("start", SessionCommandType.Start);
+
+            Assert.That(boundary.PendingMessageCount, Is.EqualTo(3));
+            Assert.That(boundary.ProcessPendingMessages(), Is.EqualTo(3));
+            Assert.That(boundary.PendingMessageCount, Is.Zero);
+            Assert.That(boundary.RejectedMessageCount, Is.Zero);
+            Assert.That(boundary.LastDispatchError, Is.Empty);
+
+            Assert.That(
+                coordinator.TryInitialize(out var validationError),
+                Is.True,
+                validationError);
+            telemetryFilePath = coordinator.TelemetryFilePath;
+            var startTime = Time.realtimeSinceStartupAsDouble;
+            coordinator.Advance(
+                startTime,
+                utcNow);
+
+            Assert.That(coordinator.IsNetworkConnected, Is.True);
+            Assert.That(coordinator.LastCommandResult.Applied, Is.True);
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Acclimatization));
+
+            boundary.ReceivePhysiology(CreateWindow(utcNow - 0.5d, 1.4d));
+            Assert.That(boundary.ProcessPendingMessages(), Is.EqualTo(1));
+            coordinator.Advance(startTime + 0.001d, utcNow + 0.001d);
+
+            Assert.That(coordinator.AcceptedBaselineWindowCount, Is.EqualTo(1));
+
+            yield return null;
         }
 
         private T CreateProfile<T>(string json)

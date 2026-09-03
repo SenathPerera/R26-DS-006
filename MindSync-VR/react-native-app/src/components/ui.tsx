@@ -1,6 +1,8 @@
-import React, {ReactNode, useEffect} from 'react';
+import React, {ReactNode, useEffect, useState} from 'react';
 import {
   ActivityIndicator,
+  GestureResponderEvent,
+  LayoutChangeEvent,
   Pressable,
   ScrollView,
   StyleProp,
@@ -77,9 +79,9 @@ export function PrimaryButton({label, onPress, disabled, loading, icon: Icon}: {
   );
 }
 
-export function SecondaryButton({label, onPress, danger = false, icon: Icon}: {label: string; onPress: () => void; danger?: boolean; icon?: LucideIcon}) {
+export function SecondaryButton({label, onPress, danger = false, disabled = false, icon: Icon}: {label: string; onPress: () => void; danger?: boolean; disabled?: boolean; icon?: LucideIcon}) {
   return (
-    <Pressable accessibilityRole="button" onPress={onPress} style={({pressed}) => [styles.secondaryButton, danger && styles.dangerButton, pressed && styles.pressed]}>
+    <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress} style={({pressed}) => [styles.secondaryButton, danger && styles.dangerButton, pressed && styles.pressed, disabled && styles.disabled]}>
       {Icon ? <Icon color={danger ? colors.rose : colors.text} size={20} /> : null}
       <Text style={[styles.secondaryButtonText, danger && {color: colors.rose}]}>{label}</Text>
     </Pressable>
@@ -160,6 +162,72 @@ export function ChoiceChip({label, selected, onPress}: {label: string; selected:
   );
 }
 
+export function PreferenceSlider({
+  label,
+  value,
+  minimum = 0,
+  maximum = 1,
+  step = 0.05,
+  leftLabel,
+  rightLabel,
+  displayValue,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  minimum?: number;
+  maximum?: number;
+  step?: number;
+  leftLabel: string;
+  rightLabel: string;
+  displayValue?: (value: number) => string;
+  onChange: (value: number) => void;
+}) {
+  const [trackWidth, setTrackWidth] = useState(0);
+  const range = maximum - minimum;
+  const ratio = range > 0 ? Math.max(0, Math.min(1, (value - minimum) / range)) : 0;
+  const updateFromEvent = (event: GestureResponderEvent) => {
+    if (trackWidth <= 0 || range <= 0) return;
+    const raw = minimum + Math.max(0, Math.min(1, event.nativeEvent.locationX / trackWidth)) * range;
+    const stepped = minimum + Math.round((raw - minimum) / step) * step;
+    onChange(Number(Math.max(minimum, Math.min(maximum, stepped)).toFixed(4)));
+  };
+  const adjust = (direction: -1 | 1) => {
+    onChange(Number(Math.max(minimum, Math.min(maximum, value + direction * step)).toFixed(4)));
+  };
+  const onLayout = (event: LayoutChangeEvent) => setTrackWidth(event.nativeEvent.layout.width);
+  return (
+    <View style={styles.sliderWrap}>
+      <View style={uiStyles.rowBetween}>
+        <Text style={styles.fieldLabel}>{label}</Text>
+        <Text style={styles.sliderValue}>{displayValue ? displayValue(value) : value.toFixed(2)}</Text>
+      </View>
+      <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel={label}
+        accessibilityValue={{min: minimum, max: maximum, now: value}}
+        accessibilityActions={[{name: 'increment'}, {name: 'decrement'}]}
+        onAccessibilityAction={event => adjust(event.nativeEvent.actionName === 'decrement' ? -1 : 1)}
+        onLayout={onLayout}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={updateFromEvent}
+        onResponderMove={updateFromEvent}
+        style={styles.sliderTrackTouch}>
+        <View style={styles.sliderTrack}>
+          <View style={[styles.sliderFill, {width: `${ratio * 100}%`}]} />
+          <View style={[styles.sliderThumb, {left: `${ratio * 100}%`}]} />
+        </View>
+      </View>
+      <View style={uiStyles.rowBetween}>
+        <Text style={styles.sliderEndLabel}>{leftLabel}</Text>
+        <Text style={[styles.sliderEndLabel, {textAlign: 'right'}]}>{rightLabel}</Text>
+      </View>
+    </View>
+  );
+}
+
 export const uiStyles = StyleSheet.create({
   row: {flexDirection: 'row', alignItems: 'center', gap: spacing.sm},
   rowBetween: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: spacing.md},
@@ -208,4 +276,11 @@ const styles = StyleSheet.create({
   choice: {minHeight: 40, justifyContent: 'center', borderWidth: 1, borderColor: colors.border, borderRadius: radii.pill, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: 'rgba(7,21,37,0.4)'},
   choiceSelected: {borderColor: colors.teal, backgroundColor: `${colors.teal}18`},
   choiceText: {fontSize: 13, color: colors.muted, fontWeight: '700'},
+  sliderWrap: {gap: spacing.xs},
+  sliderValue: {fontSize: 13, color: colors.teal, fontWeight: '800'},
+  sliderTrackTouch: {height: 36, justifyContent: 'center'},
+  sliderTrack: {height: 6, borderRadius: 3, backgroundColor: colors.borderSoft},
+  sliderFill: {height: 6, borderRadius: 3, backgroundColor: colors.teal},
+  sliderThumb: {position: 'absolute', top: -7, width: 20, height: 20, marginLeft: -10, borderRadius: 10, backgroundColor: colors.text, borderWidth: 3, borderColor: colors.teal},
+  sliderEndLabel: {flex: 1, fontSize: 11, color: colors.faint},
 });

@@ -1,7 +1,11 @@
 export type UserRole = 'participant' | 'clinician' | 'researcher';
+export type AuthStatus = 'initializing' | 'signed-out' | 'authenticating' | 'authenticated' | 'error';
+export type DataSyncStatus = 'idle' | 'syncing' | 'synced' | 'offline' | 'error';
 export type ConnectionState = 'idle' | 'scanning' | 'connecting' | 'connected' | 'disconnected' | 'error';
 export type VrStatus = 'not-paired' | 'pairing' | 'ready' | 'waiting' | 'active' | 'disconnected';
 export type SessionStatus = 'ready' | 'active' | 'paused' | 'ending' | 'complete';
+export type SessionRelayConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
+export type VisualLogDeliveryStatus = 'idle' | 'downloading' | 'pending' | 'acknowledged' | 'error';
 export type QuestionType = 'single' | 'multiple' | 'likert' | 'text' | 'numeric' | 'slider' | 'voice';
 
 export interface UserProfile {
@@ -23,9 +27,21 @@ export interface OnboardingProfile {
   audioPreferences: string[];
   environmentPreferences: string[];
   sensitivities: string[];
+  preferredIllumination: number;
+  preferredWarmth: number;
+  preferredAtmosphericSoftness: number;
+  preferredColorRichness: number;
+  preferredAmbientMotion: number;
+  particlePreference: ParticlePreference | null;
+  lightSensitivity: LightSensitivity | null;
+  motionSensitivity: number;
   consentAccepted: boolean;
   researchConsent: boolean;
 }
+
+export type ParticlePreference = 'none' | 'subtle' | 'moderate';
+export type LightSensitivity = 'none' | 'mild' | 'high';
+export type SessionPreferenceMode = 'usual' | 'adjust';
 
 export interface WearableDevice {
   id: string;
@@ -87,6 +103,8 @@ export interface ComponentBPipelineState {
   framesSent: number;
   framesAcknowledged: number;
   lastFrameTimestamp: number | null;
+  lastTemperatureC: number | null;
+  temperatureSource: 'wearable' | 'wearable_cached' | 'synthetic_backend' | 'unavailable' | null;
   lastBackendMessage: string | null;
   lastError: string | null;
   logs: string[];
@@ -103,6 +121,73 @@ export interface MeditationSession {
   moodBefore: number;
   moodAfter: number;
   validationComplete: boolean;
+  sessionContext?: SessionContext | null;
+  effectiveEnvironmentPreference?: PreferredEnvironment | null;
+}
+
+export interface PreferredEnvironment {
+  illumination: number;
+  warmth: number;
+  atmosphericSoftness: number;
+  colorRichness: number;
+  ambientMotion: number;
+}
+
+export interface SessionContext {
+  schemaVersion: 'mindsync-session-context-v1';
+  collectedAt: string;
+  subjectiveStress: number;
+  moodValence: number;
+  fatigue: number;
+  sleepQuality: number;
+  headacheOrEyeStrainToday: boolean;
+  preferenceMode: SessionPreferenceMode;
+  sessionPreferredIllumination: number | null;
+  sessionPreferredWarmth: number | null;
+  sessionPreferredAtmosphericSoftness: number | null;
+  sessionPreferredColorRichness: number | null;
+  sessionPreferredAmbientMotion: number | null;
+  timeOfDayMinutes: number;
+  sessionSequenceNumber: number;
+  daysSincePreviousSession: number | null;
+}
+
+export interface PreparedVrSession {
+  schemaVersion: string;
+  sessionId: string;
+  pairingCode: string;
+  expiresAt: number;
+  mobileToken: string;
+}
+
+export interface RelayEnvelope {
+  schemaVersion: string;
+  messageId: string;
+  messageType: string;
+  payload: Record<string, unknown>;
+}
+
+export interface VisualLogSnapshot {
+  schemaVersion: string;
+  sessionId: string;
+  finalized: boolean;
+  completionPhase: 'completed' | 'aborted' | null;
+  deliveryAcknowledged: boolean;
+  messageCount: number;
+  lastMessageId: string | null;
+  messages: RelayEnvelope[];
+}
+
+export interface SessionRelayState {
+  connectionState: SessionRelayConnectionState;
+  preparedRequestId: string | null;
+  preparedSession: PreparedVrSession | null;
+  questPhase: string | null;
+  visualTelemetryMessages: unknown[];
+  visualLogSnapshot: VisualLogSnapshot | null;
+  visualLogDeliveryStatus: VisualLogDeliveryStatus;
+  visualLogMessageCount: number;
+  lastError: string | null;
 }
 
 export interface BranchRule {

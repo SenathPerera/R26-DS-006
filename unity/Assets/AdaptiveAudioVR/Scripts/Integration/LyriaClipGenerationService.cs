@@ -20,7 +20,7 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private AudioMixerController audioMixerController;
 
         [Header("Backend Connection")]
-        [SerializeField] private string backendBaseUrl = "http://127.0.0.1:8000";
+        [SerializeField] private string backendBaseUrl = string.Empty;
         [SerializeField] private string healthEndpoint = "/health";
         [SerializeField] private string generateEndpoint = "/generate-clip";
         [SerializeField] private string preferredModel = "lyria-3-clip-preview";
@@ -34,6 +34,11 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private float startupDelaySeconds = 2f;
         [SerializeField] private float minimumSecondsBetweenRequests = 45f;
 
+        [Header("Required Session Audio")]
+        [SerializeField] private bool requireGeneratedClipBeforeSession = true;
+        [SerializeField] private string requiredEnvironmentId = "japanese_temple_pond_garden";
+        [SerializeField] private float initialGenerationRetrySeconds = 8f;
+
         [Header("Adaptive Regeneration")]
         [SerializeField] private bool adaptiveRegenerationEnabled = true;
         [SerializeField] private bool autoGenerateInitialClip = false;
@@ -43,6 +48,7 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private float aggregateParameterDeltaThreshold = 0.22f;
         [SerializeField] private float stressBucketSize = 0.10f;
         [SerializeField] private float confidenceBucketSize = 0.10f;
+        [SerializeField] private float adaptiveChangeStabilitySeconds = 4f;
 
         [Header("Prompt Shaping")]
         [SerializeField] private bool instrumentalOnly = true;
@@ -50,10 +56,10 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private bool retryWithSafePromptOnContentBlocked = true;
 
         [Header("Playback")]
-        [SerializeField] private float meditationCrossfadeSeconds = 2.5f;
+        [SerializeField] private float meditationCrossfadeSeconds = 8f;
         [SerializeField] private bool standbyPrefetchEnabled = true;
         [SerializeField] private bool immediateApplyWhenUsingRawClip = true;
-        [SerializeField] private float standbySwapWindowSeconds = 4f;
+        [SerializeField] private float standbySwapWindowSeconds = 10f;
 
         [Header("Cache")]
         [SerializeField] private bool enablePromptCache = true;
@@ -91,6 +97,7 @@ namespace AdaptiveAudioVR.Integration
         public int SuccessfulGenerationCount { get; private set; }
         public int FailedGenerationCount { get; private set; }
         public int CacheHitCount { get; private set; }
+        public bool IsInitialGeneratedClipReady => UsingGeneratedMeditationClip && audioMixerController != null;
 
         private AudioClip originalMeditationClip;
         private AudioClip standbyClip;
@@ -113,6 +120,9 @@ namespace AdaptiveAudioVR.Integration
         private string eventLogPath;
         private StreamWriter eventLogWriter;
         private Dictionary<string, CachedClipRecord> cacheIndex;
+        private string pendingAdaptiveSignature = string.Empty;
+        private string pendingAdaptiveReason = string.Empty;
+        private float pendingAdaptiveSince = float.NegativeInfinity;
 
         private void Awake()
         {
@@ -132,12 +142,21 @@ namespace AdaptiveAudioVR.Integration
 
             UsingGeneratedMeditationClip = false;
 
+            if (requireGeneratedClipBeforeSession)
+            {
+                audioMixerController?.HoldSessionPlayback();
+            }
+
             if (pingBackendOnStart)
             {
                 RequestBackendHealthRefresh();
             }
 
-            if (generateOnStart)
+            if (requireGeneratedClipBeforeSession)
+            {
+                StartCoroutine(PrepareRequiredInitialClipCoroutine());
+            }
+            else if (generateOnStart)
             {
                 StartCoroutine(GenerateAfterDelay(startupDelaySeconds));
             }
@@ -152,7 +171,9 @@ namespace AdaptiveAudioVR.Integration
                 RequestBackendHealthRefresh();
             }
 
-            if (adaptiveRegenerationEnabled || autoGenerateOnActionChange)
+            if ((adaptiveRegenerationEnabled || autoGenerateOnActionChange)
+                && bootstrap != null
+                && bootstrap.IsSessionRunning)
             {
                 EvaluateAdaptiveRegeneration();
             }
@@ -200,6 +221,12 @@ namespace AdaptiveAudioVR.Integration
         {
             ResolveReferences();
 
+            if (requireGeneratedClipBeforeSession)
+            {
+                LastStatusMessage = "The generated meditation requirement is active; raw clip restoration is disabled.";
+                return;
+            }
+
             if (audioMixerController == null || originalMeditationClip == null)
             {
                 return;
@@ -216,7 +243,11 @@ namespace AdaptiveAudioVR.Integration
         {
             ResolveReferences();
 
-            if (bootstrap == null || audioMixerController == null || IsGenerating)
+            if (bootstrap == null
+                || !bootstrap.IsSessionRunning
+                || !UsingGeneratedMeditationClip
+                || audioMixerController == null
+                || IsGenerating)
             {
                 return;
             }
@@ -244,10 +275,25 @@ namespace AdaptiveAudioVR.Integration
             string reason = DetermineAdaptiveReason(context);
             if (string.IsNullOrWhiteSpace(reason))
             {
+                ClearPendingAdaptiveCandidate();
                 return;
             }
 
-            context.reason = reason;
+            if (!string.Equals(context.promptSignature, pendingAdaptiveSignature, StringComparison.Ordinal))
+            {
+                pendingAdaptiveSignature = context.promptSignature;
+                pendingAdaptiveReason = reason;
+                pendingAdaptiveSince = Time.unscaledTime;
+                return;
+            }
+
+            if (Time.unscaledTime - pendingAdaptiveSince < Mathf.Max(0f, adaptiveChangeStabilitySeconds))
+            {
+                return;
+            }
+
+            context.reason = pendingAdaptiveReason;
+            ClearPendingAdaptiveCandidate();
             RequestGeneration(context, true);
         }
 
@@ -311,6 +357,14 @@ namespace AdaptiveAudioVR.Integration
             if (frame == null)
             {
                 LastStatusMessage = "No Lyria control frame is available yet.";
+                return false;
+            }
+
+            frame.Normalize();
+            if (requireGeneratedClipBeforeSession
+                && !string.Equals(frame.environmentId, requiredEnvironmentId, StringComparison.OrdinalIgnoreCase))
+            {
+                LastStatusMessage = $"Generation is blocked because environment '{frame.environmentId}' does not match required environment '{requiredEnvironmentId}'.";
                 return false;
             }
 
@@ -381,6 +435,39 @@ namespace AdaptiveAudioVR.Integration
             if (TryBuildRequestContext("Startup request", out GenerationRequestContext context))
             {
                 RequestGeneration(context, false);
+            }
+        }
+
+        private IEnumerator PrepareRequiredInitialClipCoroutine()
+        {
+            if (startupDelaySeconds > 0f)
+            {
+                yield return new WaitForSecondsRealtime(startupDelaySeconds);
+            }
+
+            while (isActiveAndEnabled && !UsingGeneratedMeditationClip)
+            {
+                ResolveReferences();
+                if (bootstrap == null || audioMixerController == null || !bootstrap.IsPrepared)
+                {
+                    yield return null;
+                    continue;
+                }
+
+                audioMixerController.HoldSessionPlayback();
+                if (TryBuildRequestContext("Required personalized session clip", out GenerationRequestContext context))
+                {
+                    yield return GenerateCurrentClipCoroutine(context, false);
+                }
+
+                if (UsingGeneratedMeditationClip)
+                {
+                    bootstrap.TryBeginPreparedSession();
+                    yield break;
+                }
+
+                LastStatusMessage = "Waiting to retry personalized meditation generation.";
+                yield return new WaitForSecondsRealtime(Mathf.Max(2f, initialGenerationRetrySeconds));
             }
         }
 
@@ -682,10 +769,20 @@ namespace AdaptiveAudioVR.Integration
             string promptUsedOverride)
         {
             AudioClip previousClip = audioMixerController.CurrentMeditationClip;
-            bool clipChanged = audioMixerController.CrossfadeToMeditationClip(newClip, meditationCrossfadeSeconds);
-            if (!clipChanged)
+            bool sessionIsWaitingForInitialClip = requireGeneratedClipBeforeSession
+                                                  && bootstrap != null
+                                                  && !bootstrap.IsSessionRunning;
+            if (sessionIsWaitingForInitialClip)
             {
-                audioMixerController.ReplaceMeditationClip(newClip);
+                audioMixerController.ReplaceMeditationClip(newClip, false);
+            }
+            else
+            {
+                bool clipChanged = audioMixerController.CrossfadeToMeditationClip(newClip, meditationCrossfadeSeconds);
+                if (!clipChanged)
+                {
+                    audioMixerController.ReplaceMeditationClip(newClip);
+                }
             }
 
             if (previousClip != null
@@ -726,6 +823,11 @@ namespace AdaptiveAudioVR.Integration
                 generationDuration,
                 LastGenerationOutcome,
                 string.Empty);
+
+            if (sessionIsWaitingForInitialClip)
+            {
+                bootstrap.TryBeginPreparedSession();
+            }
         }
 
         private void StageStandbyClip(
@@ -899,8 +1001,11 @@ namespace AdaptiveAudioVR.Integration
             LastGenerationDurationSeconds = generationDuration;
             LastBackendError = errorDetail;
             LastStatusMessage = statusMessage;
-            LastGenerationOutcome = "Generation failed; kept existing clip.";
-            LastCacheState = "Fallback to existing clip.";
+            bool sessionIsGated = requireGeneratedClipBeforeSession && (bootstrap == null || !bootstrap.IsSessionRunning);
+            LastGenerationOutcome = sessionIsGated
+                ? "Generation failed; session remains stopped until personalized generated audio is ready."
+                : "Generation failed; kept the current generated clip.";
+            LastCacheState = sessionIsGated ? "Session start remains gated." : "Continuing current generated clip.";
 
             Debug.LogError($"[LyriaClipGenerationService] {statusMessage} {errorDetail}", this);
             LogClipEvent("generation_failed", context, false, generationDuration, LastGenerationOutcome, errorDetail);
@@ -969,6 +1074,7 @@ namespace AdaptiveAudioVR.Integration
 
             var builder = new StringBuilder();
             builder.Append("Create a 30-second instrumental meditation loop. ");
+            builder.Append($"It must musically fit the {frame.environmentDisplayName} VR environment. ");
             builder.Append("Calm, smooth, seamless, relaxing, and non-distracting. ");
             builder.Append("No vocals. Light or no percussion. Soft transients. Gentle consonant harmony. ");
             builder.Append("Style focus: ");
@@ -1024,6 +1130,7 @@ namespace AdaptiveAudioVR.Integration
 
             string prompt =
                 $"Create a 30-second instrumental ambient meditation loop. " +
+                $"It must musically fit the {frame.environmentDisplayName} VR environment. " +
                 $"Peaceful, gentle, relaxing, seamless, no vocals, no strong percussion. " +
                 $"Use {topFocus}. " +
                 $"Slow tempo around {frame.config.bpm} BPM. " +
@@ -1037,6 +1144,8 @@ namespace AdaptiveAudioVR.Integration
             frame.Normalize();
 
             var builder = new StringBuilder();
+            builder.Append(frame.environmentId.Trim().ToLowerInvariant());
+            builder.Append('|');
             builder.Append(frame.strategyName.Trim().ToLowerInvariant());
             builder.Append('|');
             builder.Append(frame.actionName.Trim().ToLowerInvariant());
@@ -1070,6 +1179,13 @@ namespace AdaptiveAudioVR.Integration
             }
 
             return builder.ToString();
+        }
+
+        private void ClearPendingAdaptiveCandidate()
+        {
+            pendingAdaptiveSignature = string.Empty;
+            pendingAdaptiveReason = string.Empty;
+            pendingAdaptiveSince = float.NegativeInfinity;
         }
 
         private static string BuildPromptCacheKey(string model, string signature)

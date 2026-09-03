@@ -95,6 +95,8 @@ namespace AdaptiveAudioVR.RL
 
             var frame = new LyriaControlFrame
             {
+                environmentId = EnvironmentId,
+                environmentDisplayName = EnvironmentDisplayName,
                 strategyName = strategy.displayName,
                 actionName = string.IsNullOrWhiteSpace(actionName) ? mode.ToString() : actionName,
                 latestReward = latestReward,
@@ -219,8 +221,9 @@ namespace AdaptiveAudioVR.RL
                 }
             }
 
-            int dynamicOffset = Mathf.RoundToInt((parameters.intensity - 0.5f) * 16f);
-            return Mathf.Clamp(baseBpm + strategy.bpmOffset + dynamicOffset, 60, 200);
+            int policyBpm = Mathf.RoundToInt(Mathf.Lerp(60f, 112f, parameters.tempo));
+            int profileAndPolicyBpm = Mathf.RoundToInt((baseBpm + policyBpm) * 0.5f);
+            return Mathf.Clamp(profileAndPolicyBpm + strategy.bpmOffset, 60, 200);
         }
 
         private static float ResolveGuidance(AudioProfile profile, PersonalizationStrategy strategy)
