@@ -24,6 +24,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
 
         [Header("Component B Prediction Stream")]
         [Tooltip(
+            "Optional shared local-development profile. When assigned, its "
+            + "host and Component B port take precedence over the endpoint below.")]
+        [SerializeField]
+        private LocalDevelopmentNetworkProfile developmentNetworkProfile = null;
+
+        [Tooltip(
             "Use ws:// for controlled local development and wss:// for a "
             + "deployed build. Quest cannot reach a PC server through localhost.")]
         [SerializeField]
@@ -47,12 +53,21 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
                 return false;
             }
 
+            string resolvedStreamEndpoint = streamEndpoint;
+            if (developmentNetworkProfile != null
+                && !developmentNetworkProfile.TryGetComponentBStreamEndpoint(
+                    out resolvedStreamEndpoint,
+                    out validationError))
+            {
+                return false;
+            }
+
             try
             {
                 configuration = new ComponentBStreamConnectionConfiguration(
                     configurationId,
                     configurationVersion,
-                    streamEndpoint,
+                    resolvedStreamEndpoint,
                     keepaliveIntervalSeconds,
                     maximumMessageBytes);
                 validationError = string.Empty;

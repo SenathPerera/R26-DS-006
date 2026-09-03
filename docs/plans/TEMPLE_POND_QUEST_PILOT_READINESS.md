@@ -33,7 +33,8 @@ pilot validation.
 To unblock full-system testing, the current implementation uses provisional,
 clearly identified development values:
 
-- Local relay endpoint: `ws://192.168.183.190:8080/realtime?role=quest`.
+- Local relay endpoint: derived from `MINDSYNC_DEVELOPMENT_HOST` using port
+  8080 and path `/realtime?role=quest`.
 - Schema identifier: `mindsync-session-v1`.
 - Pairing-code lifetime: five minutes.
 - Readiness-to-start initialization delay: 30 seconds.
@@ -63,19 +64,22 @@ development identifier above. Confirm the team's permanent reverse-domain
 package ID before distributing a participant APK; changing it later creates a
 different Android application identity and upgrade path.
 
-The current local Component B endpoint uses `ws://192.168.183.190:8000/stream`.
-Confirm Android cleartext-network behavior in a development Quest build, or
-serve Component B through TLS. Production relay communication must use WSS.
+The local Component B endpoint is derived from `MINDSYNC_DEVELOPMENT_HOST`
+using port 8000 and path `/stream`. Confirm Android cleartext-network behavior
+in a development Quest build, or serve Component B through TLS. Production
+relay communication must use WSS.
 
 ## 3. Unity development scene wiring
 
-1. Open `JapaneseTemplePondGarden.unity`.
-2. Run `Adaptive Meditation > Configure Temple Pond Development Relay`.
-3. Save the scene after the installer selects `AdaptiveEnvironment`.
-4. Confirm that `SessionRelayBridge`, `SessionRelayPairingController`, and
+1. Set `MINDSYNC_DEVELOPMENT_HOST` in `services/lyria_backend/.env` to the PC's
+   current LAN host name or IP address.
+2. Open `JapaneseTemplePondGarden.unity`.
+3. Run `Adaptive Meditation > Configure Temple Pond Development Relay`.
+4. Save the scene after the installer selects `AdaptiveEnvironment`.
+5. Confirm that `SessionRelayBridge`, `SessionRelayPairingController`, and
    `QuestPairingRuntimePanel` appear on that object and that all references are
    assigned.
-5. Enter Play Mode and confirm the controller-ray keypad appears, the bootstrap still
+6. Enter Play Mode and confirm the controller-ray keypad appears, the bootstrap still
    initializes, and the Console has no errors before attempting live pairing.
 
 The installer creates only a non-secret connection profile. The one-time code

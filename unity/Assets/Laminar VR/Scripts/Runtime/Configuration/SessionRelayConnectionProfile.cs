@@ -24,6 +24,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
 
         [Header("Session Relay")]
         [Tooltip(
+            "Optional shared local-development profile. When assigned, its "
+            + "host and relay port take precedence over the endpoint below.")]
+        [SerializeField]
+        private LocalDevelopmentNetworkProfile developmentNetworkProfile = null;
+
+        [Tooltip(
             "Use wss:// in deployed builds. ws:// is accepted only when the "
             + "development override below is explicitly enabled.")]
         [SerializeField]
@@ -77,8 +83,17 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
                 return false;
             }
 
+            string resolvedRelayEndpoint = relayEndpoint?.Trim();
+            if (developmentNetworkProfile != null
+                && !developmentNetworkProfile.TryGetSessionRelayEndpoint(
+                    out resolvedRelayEndpoint,
+                    out validationError))
+            {
+                return false;
+            }
+
             if (!Uri.TryCreate(
-                    relayEndpoint?.Trim(),
+                    resolvedRelayEndpoint,
                     UriKind.Absolute,
                     out var endpoint))
             {

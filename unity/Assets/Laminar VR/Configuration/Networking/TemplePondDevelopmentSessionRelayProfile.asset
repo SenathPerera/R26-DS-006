@@ -15,7 +15,8 @@ MonoBehaviour:
   configurationId: temple-pond-session-relay-dev-v1
   configurationVersion: 1
   deploymentConfigurationApproved: 1
-  relayEndpoint: ws://192.168.183.190:8080/realtime?role=quest
+  developmentNetworkProfile: {fileID: 11400000, guid: 9605881a83ec452ea3d710050d82329c, type: 2}
+  relayEndpoint: ''
   schemaVersion: mindsync-session-v1
   maximumMessageBytes: 65536
   maximumTelemetryEventsPerBatch: 32

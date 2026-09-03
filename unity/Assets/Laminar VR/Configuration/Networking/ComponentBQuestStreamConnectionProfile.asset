@@ -15,6 +15,7 @@ MonoBehaviour:
   configurationId: component-b-quest-stream-dev-v1
   configurationVersion: 1
   deploymentConfigurationApproved: 1
-  streamEndpoint: ws://192.168.183.190:8000/stream
+  developmentNetworkProfile: {fileID: 11400000, guid: 9605881a83ec452ea3d710050d82329c, type: 2}
+  streamEndpoint: ''
   keepaliveIntervalSeconds: 20
   maximumMessageBytes: 65536

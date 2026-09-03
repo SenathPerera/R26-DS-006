@@ -1,11 +1,15 @@
+using System;
 using System.IO;
+using AdaptiveAudioVR.Integration;
 using LaminarVR.AdaptiveMeditation.Runtime.Application;
 using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using UnityEditor;
 using UnityEditor.Build;
+using UnityEditor.Build.Reporting;
 using UnityEditor.SceneManagement;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using Object = UnityEngine.Object;
 
 namespace LaminarVR.AdaptiveMeditation.Editor
 {
@@ -19,7 +23,12 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             "Assets/Laminar VR/Configuration/Networking/"
             + "ComponentBQuestStreamConnectionProfile.asset";
 
-        private const string DevelopmentBackendHost = "192.168.183.190";
+        private const string DevelopmentNetworkProfilePath =
+            "Assets/Laminar VR/Configuration/Networking/"
+            + "LocalDevelopmentNetworkProfile.asset";
+
+        private const string DevelopmentHostEnvironmentVariable =
+            "MINDSYNC_DEVELOPMENT_HOST";
 
         private const string InputActionsPath =
             "Assets/Samples/XR Interaction Toolkit/3.0.11/Starter Assets/"
@@ -29,6 +38,22 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             "Adaptive Meditation/Configure Temple Pond Development Relay")]
         public static void Configure()
         {
+            var developmentNetworkProfile =
+                LoadOrCreateDevelopmentNetworkProfile();
+            if (!TrySyncDevelopmentHost(
+                    developmentNetworkProfile,
+                    out string syncMessage)
+                && !developmentNetworkProfile.TryGetLyriaHttpBaseUrl(
+                    out _,
+                    out _))
+            {
+                EditorUtility.DisplayDialog(
+                    "Temple Pond Relay",
+                    syncMessage,
+                    "OK");
+                return;
+            }
+
             var root = GameObject.Find("AdaptiveEnvironment");
             if (root == null)
             {
@@ -54,8 +79,8 @@ namespace LaminarVR.AdaptiveMeditation.Editor
                 return;
             }
 
-            var profile = LoadOrCreateProfile();
-            ConfigureComponentBProfile();
+            var profile = LoadOrCreateProfile(developmentNetworkProfile);
+            ConfigureComponentBProfile(developmentNetworkProfile);
             var inputActions = AssetDatabase.LoadAssetAtPath<InputActionAsset>(
                 InputActionsPath);
             if (inputActions == null)
@@ -72,6 +97,8 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             var bridge = GetOrAdd<SessionRelayBridge>(root);
             var pairing = GetOrAdd<SessionRelayPairingController>(root);
             var panel = GetOrAdd<QuestPairingRuntimePanel>(root);
+            var audioInstaller = Object.FindAnyObjectByType<
+                AdaptiveAudioVrSceneInstaller>();
 
             SetReference(bridge, "applicationBootstrap", bootstrap);
             SetReference(bridge, "productionCoordinator", coordinator);
@@ -80,6 +107,13 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             SetReference(pairing, "sessionRelayBridge", bridge);
             SetReference(panel, "pairingController", pairing);
             SetReference(panel, "inputActions", inputActions);
+            if (audioInstaller != null)
+            {
+                SetReference(
+                    audioInstaller,
+                    "developmentNetworkProfile",
+                    developmentNetworkProfile);
+            }
 
             PlayerSettings.SetApplicationIdentifier(
                 NamedBuildTarget.Android,
@@ -98,7 +132,51 @@ namespace LaminarVR.AdaptiveMeditation.Editor
                 "OK");
         }
 
-        private static SessionRelayConnectionProfile LoadOrCreateProfile()
+        [MenuItem(
+            "Adaptive Meditation/Sync Local Development Host From Environment")]
+        public static void SyncLocalDevelopmentHostFromEnvironment()
+        {
+            var profile = LoadOrCreateDevelopmentNetworkProfile();
+            bool synchronized = TrySyncDevelopmentHost(
+                profile,
+                out string message);
+            EditorUtility.DisplayDialog(
+                "Local Development Host",
+                message,
+                "OK");
+            if (synchronized)
+            {
+                Selection.activeObject = profile;
+            }
+        }
+
+        [InitializeOnLoadMethod]
+        private static void SyncLocalDevelopmentHostAfterScriptReload()
+        {
+            EditorApplication.delayCall += () =>
+            {
+                var profile = AssetDatabase.LoadAssetAtPath<
+                    LocalDevelopmentNetworkProfile>(
+                    DevelopmentNetworkProfilePath);
+                if (profile != null)
+                {
+                    TrySyncDevelopmentHost(profile, out _);
+                }
+            };
+        }
+
+        internal static void SynchronizeLocalDevelopmentHostForBuild()
+        {
+            var profile = LoadOrCreateDevelopmentNetworkProfile();
+            if (!TrySyncDevelopmentHost(profile, out string message)
+                && !profile.TryGetLyriaHttpBaseUrl(out _, out _))
+            {
+                throw new BuildFailedException(message);
+            }
+        }
+
+        private static SessionRelayConnectionProfile LoadOrCreateProfile(
+            LocalDevelopmentNetworkProfile developmentNetworkProfile)
         {
             var profile = AssetDatabase.LoadAssetAtPath<
                 SessionRelayConnectionProfile>(ProfilePath);
@@ -116,8 +194,9 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             serialized.FindProperty("configurationVersion").intValue = 1;
             serialized.FindProperty("deploymentConfigurationApproved")
                 .boolValue = true;
-            serialized.FindProperty("relayEndpoint").stringValue =
-                $"ws://{DevelopmentBackendHost}:8080/realtime?role=quest";
+            serialized.FindProperty("developmentNetworkProfile")
+                .objectReferenceValue = developmentNetworkProfile;
+            serialized.FindProperty("relayEndpoint").stringValue = string.Empty;
             serialized.FindProperty("schemaVersion").stringValue =
                 "mindsync-session-v1";
             serialized.FindProperty("maximumMessageBytes").intValue = 65536;
@@ -131,7 +210,8 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             return profile;
         }
 
-        private static void ConfigureComponentBProfile()
+        private static void ConfigureComponentBProfile(
+            LocalDevelopmentNetworkProfile developmentNetworkProfile)
         {
             var profile = AssetDatabase.LoadAssetAtPath<
                 ComponentBStreamConnectionProfile>(ComponentBProfilePath);
@@ -150,13 +230,136 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             serialized.FindProperty("configurationVersion").intValue = 1;
             serialized.FindProperty("deploymentConfigurationApproved")
                 .boolValue = true;
-            serialized.FindProperty("streamEndpoint").stringValue =
-                $"ws://{DevelopmentBackendHost}:8000/stream";
+            serialized.FindProperty("developmentNetworkProfile")
+                .objectReferenceValue = developmentNetworkProfile;
+            serialized.FindProperty("streamEndpoint").stringValue = string.Empty;
             serialized.FindProperty("keepaliveIntervalSeconds").floatValue = 20f;
             serialized.FindProperty("maximumMessageBytes").intValue = 65536;
             serialized.ApplyModifiedPropertiesWithoutUndo();
             EditorUtility.SetDirty(profile);
             AssetDatabase.SaveAssets();
+        }
+
+        private static LocalDevelopmentNetworkProfile
+            LoadOrCreateDevelopmentNetworkProfile()
+        {
+            var profile = AssetDatabase.LoadAssetAtPath<
+                LocalDevelopmentNetworkProfile>(
+                DevelopmentNetworkProfilePath);
+            if (profile != null)
+            {
+                return profile;
+            }
+
+            Directory.CreateDirectory(
+                Path.GetDirectoryName(DevelopmentNetworkProfilePath));
+            profile = ScriptableObject.CreateInstance<
+                LocalDevelopmentNetworkProfile>();
+            AssetDatabase.CreateAsset(
+                profile,
+                DevelopmentNetworkProfilePath);
+            AssetDatabase.SaveAssets();
+            return profile;
+        }
+
+        private static bool TrySyncDevelopmentHost(
+            LocalDevelopmentNetworkProfile profile,
+            out string message)
+        {
+            string host = System.Environment.GetEnvironmentVariable(
+                DevelopmentHostEnvironmentVariable);
+            string source = "the process environment";
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                string repositoryRoot = Path.GetFullPath(
+                    Path.Combine(UnityEngine.Application.dataPath, "..", ".."));
+                string rootEnvironmentPath = Path.Combine(
+                    repositoryRoot,
+                    ".env");
+                string backendEnvironmentPath = Path.Combine(
+                    repositoryRoot,
+                    "services",
+                    "lyria_backend",
+                    ".env");
+
+                if (TryReadEnvironmentValue(
+                        rootEnvironmentPath,
+                        DevelopmentHostEnvironmentVariable,
+                        out host))
+                {
+                    source = "the repository .env file";
+                }
+                else if (TryReadEnvironmentValue(
+                             backendEnvironmentPath,
+                             DevelopmentHostEnvironmentVariable,
+                             out host))
+                {
+                    source = "the Lyria backend .env file";
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(host))
+            {
+                message =
+                    $"Set {DevelopmentHostEnvironmentVariable}=<your-PC-LAN-IP> "
+                    + "in services/lyria_backend/.env, then run this command again.";
+                return false;
+            }
+
+            var serialized = new SerializedObject(profile);
+            serialized.FindProperty("host").stringValue = host.Trim();
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+
+            if (!profile.TryGetLyriaHttpBaseUrl(
+                    out _,
+                    out string validationError))
+            {
+                message = validationError;
+                return false;
+            }
+
+            EditorUtility.SetDirty(profile);
+            AssetDatabase.SaveAssets();
+            message =
+                $"Local development host synchronized from {source}: "
+                + profile.Host;
+            return true;
+        }
+
+        private static bool TryReadEnvironmentValue(
+            string filePath,
+            string variableName,
+            out string value)
+        {
+            value = string.Empty;
+            if (!File.Exists(filePath))
+            {
+                return false;
+            }
+
+            foreach (string rawLine in File.ReadLines(filePath))
+            {
+                string line = rawLine.Trim();
+                if (line.Length == 0 || line.StartsWith("#"))
+                {
+                    continue;
+                }
+
+                int separatorIndex = line.IndexOf('=');
+                if (separatorIndex <= 0
+                    || !string.Equals(
+                        line.Substring(0, separatorIndex).Trim(),
+                        variableName,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                value = line.Substring(separatorIndex + 1).Trim().Trim('"', '\'');
+                return !string.IsNullOrWhiteSpace(value);
+            }
+
+            return false;
         }
 
         private static T GetOrAdd<T>(GameObject root)
@@ -174,6 +377,18 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             serialized.FindProperty(propertyName).objectReferenceValue = value;
             serialized.ApplyModifiedProperties();
             EditorUtility.SetDirty(owner);
+        }
+    }
+
+    public sealed class LocalDevelopmentNetworkBuildProcessor
+        : IPreprocessBuildWithReport
+    {
+        public int callbackOrder => 0;
+
+        public void OnPreprocessBuild(BuildReport report)
+        {
+            TemplePondDevelopmentRelayInstaller
+                .SynchronizeLocalDevelopmentHostForBuild();
         }
     }
 }

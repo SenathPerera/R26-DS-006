@@ -27,9 +27,10 @@ python -m venv .venv-relay
 .venv-relay/Scripts/python -m uvicorn services.session_relay.app:app --host 0.0.0.0 --port 8080
 ```
 
-Use `http://192.168.183.190:8080` from local devices on the current development
-network. Change the host when the development machine address changes. A
-deployed pilot must put this service behind HTTPS/WSS and authentication.
+Unity derives the local relay endpoint from `MINDSYNC_DEVELOPMENT_HOST` in
+`services/lyria_backend/.env`. Change that one value when the development
+machine address changes. A deployed pilot must put this service behind
+HTTPS/WSS and authentication.
 
 The default access-code lifetime is five minutes. Override it through
 `SESSION_RELAY_CODE_LIFETIME_SECONDS`. Quest messages are durably appended

@@ -174,7 +174,8 @@ end-to-end Component B validation remain pending.
 
 Approved local pilot connection configuration:
 
-- Component B stream: `ws://192.168.183.190:8000/stream`.
+- Component B stream: derived from `MINDSYNC_DEVELOPMENT_HOST` using port 8000
+  and path `/stream`.
 - Keepalive interval: 20 seconds.
 - Maximum inbound message size: 65,536 bytes.
 - Reconnect schedule: eight attempts, one-second initial delay, multiplier 2,

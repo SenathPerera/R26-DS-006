@@ -11,6 +11,7 @@ using AdaptiveAudioVR.Safety;
 using AdaptiveAudioVR.Signals;
 using AdaptiveAudioVR.UI;
 using LaminarVR.AdaptiveMeditation.Runtime.Application;
+using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -30,8 +31,9 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private AudioClip fallbackMeditationClip;
 
         [Header("Backend")]
-        [SerializeField] private string backendBaseUrl = "http://127.0.0.1:8000";
-        [SerializeField] private string realtimeWebsocketBaseUrl = "ws://127.0.0.1:8000/live-music";
+        [SerializeField] private LocalDevelopmentNetworkProfile developmentNetworkProfile;
+        [SerializeField] private string backendBaseUrl = string.Empty;
+        [SerializeField] private string realtimeWebsocketBaseUrl = string.Empty;
 
         [Header("Runtime Options")]
         [SerializeField] private bool installOnAwake = true;
@@ -66,6 +68,10 @@ namespace AdaptiveAudioVR.Integration
         [ContextMenu("Install Adaptive Audio Runtime")]
         public void InstallAdaptiveAudioRuntime()
         {
+            ResolveBackendEndpoints(
+                out string resolvedBackendBaseUrl,
+                out string resolvedRealtimeWebsocketBaseUrl);
+
             GameObject appRoot = GetOrCreateNamedObject(AppRootName);
             GameObject signalSystem = GetOrCreateNamedObject(SignalSystemName);
             GameObject controllerSystem = GetOrCreateNamedObject(ControllerSystemName);
@@ -132,7 +138,10 @@ namespace AdaptiveAudioVR.Integration
 
             SetPrivateField(clipGenerationService, "bootstrap", bootstrap);
             SetPrivateField(clipGenerationService, "audioMixerController", audioMixerController);
-            SetPrivateField(clipGenerationService, "backendBaseUrl", backendBaseUrl);
+            SetPrivateField(
+                clipGenerationService,
+                "backendBaseUrl",
+                resolvedBackendBaseUrl);
             SetPrivateField(clipGenerationService, "generateOnStart", autoGenerateMeditationClipOnStart);
             SetPrivateField(clipGenerationService, "autoGenerateOnActionChange", autoGenerateOnActionChange);
             SetPrivateField(clipGenerationService, "requireGeneratedClipBeforeSession", requireGeneratedMeditationBeforeSession);
@@ -144,7 +153,10 @@ namespace AdaptiveAudioVR.Integration
                 SetPrivateField(realtimeStreamingService, "audioMixerController", audioMixerController);
                 SetPrivateField(realtimeStreamingService, "clipGenerationService", clipGenerationService);
                 SetPrivateField(realtimeStreamingService, "pcmAudioPlayer", pcmAudioPlayer);
-                SetPrivateField(realtimeStreamingService, "websocketBaseUrl", realtimeWebsocketBaseUrl);
+                SetPrivateField(
+                    realtimeStreamingService,
+                    "websocketBaseUrl",
+                    resolvedRealtimeWebsocketBaseUrl);
                 SetPrivateField(realtimeStreamingService, "autoCheckCapabilityOnStart", autoCheckRealtimeCapabilityOnStart);
             }
 
@@ -191,6 +203,37 @@ namespace AdaptiveAudioVR.Integration
             }
 
             Debug.Log("[AdaptiveAudioVrSceneInstaller] Adaptive audio runtime is installed in the current VR scene.", this);
+        }
+
+        private void ResolveBackendEndpoints(
+            out string resolvedBackendBaseUrl,
+            out string resolvedRealtimeWebsocketBaseUrl)
+        {
+            resolvedBackendBaseUrl = backendBaseUrl?.Trim() ?? string.Empty;
+            resolvedRealtimeWebsocketBaseUrl =
+                realtimeWebsocketBaseUrl?.Trim() ?? string.Empty;
+
+            if (developmentNetworkProfile == null)
+            {
+                return;
+            }
+
+            bool hasHttpEndpoint =
+                developmentNetworkProfile.TryGetLyriaHttpBaseUrl(
+                    out resolvedBackendBaseUrl,
+                    out string httpValidationError);
+            bool hasWebsocketEndpoint =
+                developmentNetworkProfile.TryGetLyriaRealtimeWebsocketUrl(
+                    out resolvedRealtimeWebsocketBaseUrl,
+                    out string websocketValidationError);
+            if (!hasHttpEndpoint || !hasWebsocketEndpoint)
+            {
+                Debug.LogError(
+                    "[AdaptiveAudioVrSceneInstaller] The shared development "
+                    + $"network profile is invalid. HTTP: {httpValidationError} "
+                    + $"WebSocket: {websocketValidationError}",
+                    this);
+            }
         }
 
         private string ResolveEnvironmentId()

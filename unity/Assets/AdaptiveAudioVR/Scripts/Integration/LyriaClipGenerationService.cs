@@ -20,7 +20,7 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private AudioMixerController audioMixerController;
 
         [Header("Backend Connection")]
-        [SerializeField] private string backendBaseUrl = "http://127.0.0.1:8000";
+        [SerializeField] private string backendBaseUrl = string.Empty;
         [SerializeField] private string healthEndpoint = "/health";
         [SerializeField] private string generateEndpoint = "/generate-clip";
         [SerializeField] private string preferredModel = "lyria-3-clip-preview";

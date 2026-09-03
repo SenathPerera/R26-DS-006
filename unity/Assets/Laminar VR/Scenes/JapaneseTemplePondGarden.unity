@@ -710,7 +710,7 @@ MonoBehaviour:
   audioMixerController: {fileID: 419444994}
   clipGenerationService: {fileID: 419444992}
   pcmAudioPlayer: {fileID: 419444990}
-  websocketBaseUrl: ws://127.0.0.1:8000/live-music
+  websocketBaseUrl: ''
   realtimeModel: models/lyria-realtime-exp
   autoStartOnPlay: 0
   autoCheckCapabilityOnStart: 1
@@ -736,7 +736,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   bootstrap: {fileID: 992556971}
   audioMixerController: {fileID: 419444994}
-  backendBaseUrl: http://127.0.0.1:8000
+  backendBaseUrl: ''
   healthEndpoint: /health
   generateEndpoint: /generate-clip
   preferredModel: lyria-3-clip-preview
@@ -7959,8 +7959,9 @@ MonoBehaviour:
     music only, no pond, wind, bird, rain, or other environmental sound effects
   fixedAmbientClip: {fileID: 8300000, guid: d7374584d1816384db29efcb46f49b67, type: 3}
   fallbackMeditationClip: {fileID: 8300000, guid: ab9df6b19812d7b40957c39c8d45aa40, type: 3}
-  backendBaseUrl: http://127.0.0.1:8000
-  realtimeWebsocketBaseUrl: ws://127.0.0.1:8000/live-music
+  developmentNetworkProfile: {fileID: 11400000, guid: 9605881a83ec452ea3d710050d82329c, type: 2}
+  backendBaseUrl: ''
+  realtimeWebsocketBaseUrl: ''
   installOnAwake: 1
   includeValidationDashboard: 1
   includeRealtimeBridge: 1
