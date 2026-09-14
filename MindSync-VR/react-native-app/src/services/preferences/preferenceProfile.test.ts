@@ -10,7 +10,7 @@ const profile: OnboardingProfile = {
   audioPreferences: [], environmentPreferences: [], sensitivities: [],
   preferredIllumination: 0.25, preferredWarmth: 0.6,
   preferredAtmosphericSoftness: 0.1, preferredColorRichness: 0.7,
-  preferredAmbientMotion: 0.35, particlePreference: 'subtle',
+  preferredAmbientMotion: 0.35,
   lightSensitivity: 'mild', motionSensitivity: 0.4,
   consentAccepted: true, researchConsent: false,
 };

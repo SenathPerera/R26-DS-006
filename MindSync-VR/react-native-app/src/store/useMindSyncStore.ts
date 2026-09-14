@@ -44,7 +44,7 @@ const emptyOnboarding: OnboardingProfile = {
   preferredAtmosphericSoftness: TEMPLE_POND_SAFE_DEFAULT.atmosphericSoftness,
   preferredColorRichness: TEMPLE_POND_SAFE_DEFAULT.colorRichness,
   preferredAmbientMotion: TEMPLE_POND_SAFE_DEFAULT.ambientMotion,
-  particlePreference: null, lightSensitivity: null, motionSensitivity: 0.5,
+  lightSensitivity: null, motionSensitivity: 0.5,
   consentAccepted: false, researchConsent: false,
 };
 

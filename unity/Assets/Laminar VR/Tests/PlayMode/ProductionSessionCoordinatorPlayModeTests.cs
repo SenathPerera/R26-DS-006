@@ -111,6 +111,67 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Coordinator_AppliesSafeParticipantPreferenceAtInitialization()
+        {
+            var root = Track(new GameObject("PreferenceInitializationHarness"));
+            var adapter = root.AddComponent<RecordingAdapter>();
+            var bootstrap = root.AddComponent<ApplicationBootstrap>();
+            bootstrap.Configure(
+                CreateProfile<SceneParameterProfile>(SceneProfileJson),
+                adapter,
+                StudyPolicyMode.StaticPersonalized);
+
+            var coordinator = root.AddComponent<ProductionSessionCoordinator>();
+            coordinator.enabled = false;
+            coordinator.Configure(
+                bootstrap,
+                CreateProfile<SessionTimingProfile>(TimingProfileJson),
+                CreateProfile<PhysiologyValidationProfile>(
+                    PhysiologyProfileJson),
+                CreateProfile<RewardPipelineProfile>(RewardProfileJson),
+                CreateProfile<StabilizationSelectionProfile>(
+                    StabilizationProfileJson),
+                CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
+                CreateProfile<ProductionCoordinatorProfile>(
+                    CoordinatorProfileJson));
+            var preference = new EnvironmentState(
+                0.7f,
+                0.3f,
+                0.6f,
+                0.2f,
+                0.8f);
+            coordinator.ConfigureSessionContext(
+                "playmode-preference-" + Guid.NewGuid().ToString("N"),
+                "P-PLAYMODE-PREFERENCE",
+                preference);
+
+            Assert.That(
+                coordinator.TryInitialize(out var validationError),
+                Is.True,
+                validationError);
+            telemetryFilePath = coordinator.TelemetryFilePath;
+            Assert.That(
+                bootstrap.EnvironmentManager.IsTransitionActive,
+                Is.True);
+            Assert.That(
+                bootstrap.EnvironmentManager.TargetState,
+                Is.EqualTo(preference));
+
+            var now = Time.realtimeSinceStartupAsDouble;
+            coordinator.Advance(now + 0.1d, UtcNowUnixSeconds() + 0.1d);
+
+            Assert.That(
+                bootstrap.EnvironmentManager.IsTransitionActive,
+                Is.False);
+            Assert.That(
+                bootstrap.EnvironmentManager.CurrentState,
+                Is.EqualTo(preference));
+            Assert.That(adapter.LastAppliedState, Is.EqualTo(preference));
+
+            yield return null;
+        }
+
+        [UnityTest]
         public IEnumerator VisualBoundary_ForwardsTransportNeutralInputs()
         {
             var root = Track(new GameObject("VisualSessionBoundaryHarness"));

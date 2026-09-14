@@ -32,14 +32,12 @@ export interface OnboardingProfile {
   preferredAtmosphericSoftness: number;
   preferredColorRichness: number;
   preferredAmbientMotion: number;
-  particlePreference: ParticlePreference | null;
   lightSensitivity: LightSensitivity | null;
   motionSensitivity: number;
   consentAccepted: boolean;
   researchConsent: boolean;
 }
 
-export type ParticlePreference = 'none' | 'subtle' | 'moderate';
 export type LightSensitivity = 'none' | 'mild' | 'high';
 export type SessionPreferenceMode = 'usual' | 'adjust';
 

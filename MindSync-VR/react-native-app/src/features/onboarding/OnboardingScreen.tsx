@@ -31,8 +31,7 @@ export function OnboardingScreen({navigation}: any) {
       setSaving(false);
     }
   };
-  const canContinue = (step !== 4 || profile.particlePreference !== null)
-    && (step !== 5 || profile.lightSensitivity !== null);
+  const canContinue = step !== 5 || profile.lightSensitivity !== null;
   return (
     <Screen>
       <Header title="Personalize your space" subtitle={`Step ${step + 1} of ${steps.length} · ${steps[step]}`} />
@@ -50,12 +49,6 @@ export function OnboardingScreen({navigation}: any) {
           <PreferenceSlider label="Atmospheric softness" value={profile.preferredAtmosphericSoftness} leftLabel="Clear / Crisp" rightLabel="Soft / Misty" onChange={preferredAtmosphericSoftness => update({preferredAtmosphericSoftness})} />
           <PreferenceSlider label="Color richness" value={profile.preferredColorRichness} leftLabel="Muted" rightLabel="Rich / Vivid" onChange={preferredColorRichness => update({preferredColorRichness})} />
           <PreferenceSlider label="Ambient motion" value={profile.preferredAmbientMotion} leftLabel="Very Still" rightLabel="Gently Active" onChange={preferredAmbientMotion => update({preferredAmbientMotion})} />
-          <Text style={uiStyles.label}>Subtle visual particles</Text>
-          <View style={uiStyles.wrap}>
-            {([['none', 'None'], ['subtle', 'Subtle'], ['moderate', 'Moderate']] as const).map(([value, label]) => (
-              <ChoiceChip key={value} label={label} selected={profile.particlePreference === value} onPress={() => update({particlePreference: value})} />
-            ))}
-          </View>
         </Card>
       ) : null}
       {step === 5 ? (
