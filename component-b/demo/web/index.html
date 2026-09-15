@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Component B — Live Stress</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --line: #262b36;
+    --text: #e8ecf3; --dim: #8b93a3;
+    --relaxed: #34d399; --mild: #fbbf24; --moderate: #fb923c; --high: #f87171;
+    --band: #fb923c;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 2.5rem; background: var(--bg); color: var(--text);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
+           border-bottom: 1px solid var(--line); padding-bottom: .9rem; }
+  h1 { font-size: 1.05rem; font-weight: 600; margin: 0; letter-spacing: .01em; }
+  #endpoint { color: var(--dim); font-size: .82rem;
+              font-family: ui-monospace, "Cascadia Code", monospace; }
+  #conn { margin-left: auto; font-size: .8rem; font-weight: 600;
+          padding: .25rem .7rem; border-radius: 999px;
+          border: 1px solid var(--line); color: var(--dim); }
+  #conn.up   { color: var(--relaxed); border-color: #1f6b52; }
+  #conn.down { color: var(--high);    border-color: #6b2020; }
+
+  main { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,1fr);
+         gap: 1.6rem; margin-top: 1.6rem; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--panel); border: 1px solid var(--line);
+           border-radius: 14px; padding: 1.4rem 1.5rem; }
+  .cap { font-size: .7rem; letter-spacing: .13em; text-transform: uppercase;
+         color: var(--dim); margin-bottom: .8rem; }
+
+  #level { font-size: clamp(2.4rem, 6.5vw, 4.4rem); font-weight: 700;
+           line-height: 1.05; letter-spacing: -.02em; }
+  #mode  { font-size: .78rem; letter-spacing: .12em; text-transform: uppercase;
+           color: var(--dim); margin-top: .5rem; }
+  #bandnote { display: none; margin-top: .9rem; font-size: .88rem;
+              color: var(--band); border-left: 2px solid var(--band);
+              padding-left: .8rem; line-height: 1.5; }
+  body.band #bandnote { display: block; }
+
+  .rows { display: grid; gap: .55rem; }
+  .row { display: grid; grid-template-columns: 5.5rem 1fr 3.2rem;
+         align-items: center; gap: .8rem; font-size: .92rem; }
+  .row span:first-child { color: var(--dim); }
+  .track { height: 9px; background: #0c0e13; border-radius: 999px;
+           overflow: hidden; }
+  .fill { height: 100%; width: 0; border-radius: 999px;
+          transition: width .35s ease; }
+  .num { font-variant-numeric: tabular-nums; text-align: right;
+         color: var(--dim); font-size: .85rem; }
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr);
+           gap: 1rem; margin-top: 1.5rem; padding-top: 1.3rem;
+           border-top: 1px solid var(--line); }
+  .stat b { display: block; font-size: 1.35rem; font-weight: 650;
+            font-variant-numeric: tabular-nums; }
+  .stat span { font-size: .68rem; letter-spacing: .1em; color: var(--dim);
+               text-transform: uppercase; }
+
+  #history { width: 100%; height: 120px; display: block; }
+  #hint { margin-top: 1.1rem; color: var(--dim); font-size: .82rem;
+          line-height: 1.6; }
+  code { font-family: ui-monospace, "Cascadia Code", monospace;
+         color: #a5b4fc; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Component B — live stress inference</h1>
+  <span id="endpoint"></span>
+  <span id="conn" class="down">connecting</span>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="cap">Current level</div>
+    <div id="level">—</div>
+    <div id="mode">waiting for the first full window</div>
+    <div id="bandnote">
+      The top two classes are within <code>CONFIDENCE_TAU</code>.
+      The merged band is the answer — a single label here would be
+      false precision.
+    </div>
+    <div id="truth" style="display:none;margin-top:.9rem;font-size:.9rem"></div>
+    <div class="stats">
+      <div class="stat"><b id="hr">—</b><span>bpm</span></div>
+      <div class="stat"><b id="rmssd">—</b><span>RMSSD ms</span></div>
+      <div class="stat"><b id="sdnn">—</b><span>SDNN ms</span></div>
+      <div class="stat"><b id="sq">—</b><span>signal quality</span></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="cap">Class distribution</div>
+    <div class="rows" id="rows"></div>
+    <div class="cap" style="margin-top:1.6rem">Recent history</div>
+    <canvas id="history"></canvas>
+    <div id="hint">
+      <code>stress.label</code> and <code>stress.mode</code> are authoritative.
+      These bars are shown for transparency — taking their argmax would
+      bypass the confidence gate.
+    </div>
+  </section>
+</main>
+
+<script>
+const CLASSES = ['relaxed', 'mild', 'moderate', 'high'];
+const COLOUR  = {relaxed:'#34d399', mild:'#fbbf24', moderate:'#fb923c', high:'#f87171'};
+
+// ?port=8000 points the same page at the hardware server.
+const port = new URLSearchParams(location.search).get('port') || '8001';
+const host = location.hostname || 'localhost';
+const url  = `ws://${host}:${port}/stream`;
+
+const el = id => document.getElementById(id);
+el('endpoint').textContent = url;
+
+let seen = 0, hits = 0;
+const rows = {};
+for (const name of CLASSES) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  row.innerHTML = `<span>${name}</span>
+    <div class="track"><div class="fill" style="background:${COLOUR[name]}"></div></div>
+    <div class="num">0.000</div>`;
+  el('rows').appendChild(row);
+  rows[name] = {fill: row.querySelector('.fill'), num: row.querySelector('.num')};
+}
+
+const history = [];
+const canvas = el('history'), ctx = canvas.getContext('2d');
+
+function drawHistory() {
+  const w = canvas.clientWidth, h = canvas.clientHeight, dpr = devicePixelRatio || 1;
+  canvas.width = w * dpr; canvas.height = h * dpr;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+
+  ctx.strokeStyle = '#262b36'; ctx.lineWidth = 1;
+  for (let i = 0; i < 4; i++) {
+    const y = h - 8 - (i / 3) * (h - 20);
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+  }
+  if (!history.length) return;
+
+  const n = Math.max(history.length, 2);
+  const x = i => (i / (n - 1)) * (w - 6) + 3;
+  const y = v => h - 8 - (v / 3) * (h - 20);
+
+  // continuous_score: the expected level under the distribution
+  ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 2; ctx.beginPath();
+  history.forEach((p, i) => i ? ctx.lineTo(x(i), y(p.score)) : ctx.moveTo(x(i), y(p.score)));
+  ctx.stroke();
+
+  history.forEach((p, i) => {
+    ctx.fillStyle = p.mode === 'band' ? '#fb923c' : COLOUR[p.label] || '#8b93a3';
+    ctx.beginPath(); ctx.arc(x(i), y(p.score), p.mode === 'band' ? 4 : 3, 0, 7); ctx.fill();
+  });
+}
+addEventListener('resize', drawHistory);
+drawHistory();
+
+let ws;
+function connect() {
+  ws = new WebSocket(url);
+  ws.onopen = () => { el('conn').textContent = 'connected'; el('conn').className = 'up'; };
+  ws.onclose = () => {
+    el('conn').textContent = 'disconnected'; el('conn').className = 'down';
+    setTimeout(connect, 1500);           // survive a server restart mid-demo
+  };
+  ws.onmessage = ev => {
+    let d; try { d = JSON.parse(ev.data); } catch { return; }
+    if (!d || !d.stress) return;
+    const s = d.stress;
+
+    // s.label is authoritative — never argmax s.probabilities
+    el('level').textContent = s.label;
+    el('level').style.color = s.mode === 'band' ? 'var(--band)' : (COLOUR[s.label] || '');
+    el('mode').textContent = `${s.mode}  ·  margin ${s.confidence.toFixed(3)}  ·  score ${s.continuous_score.toFixed(2)}`;
+    document.body.classList.toggle('band', s.mode === 'band');
+
+    for (const name of CLASSES) {
+      const p = s.probabilities[name] ?? 0;
+      rows[name].fill.style.width = (p * 100).toFixed(1) + '%';
+      rows[name].num.textContent = p.toFixed(3);
+    }
+
+    el('hr').textContent    = d.heartRate.toFixed(1);
+    el('rmssd').textContent = d.rmssd.toFixed(1);
+    el('sdnn').textContent  = d.sdnn.toFixed(1);
+
+    // null on the fixture replay: those windows carry no per-beat artefact
+    // mask, so there is nothing to derive signalQuality from. Show it as
+    // unavailable rather than inventing a number.
+    if (typeof d.signalQuality === 'number') {
+      el('sq').textContent = d.signalQuality.toFixed(2);
+      el('sq').style.color = d.signalQuality >= 0.95 ? 'var(--relaxed)'
+                           : d.signalQuality >= 0.8  ? 'var(--mild)' : 'var(--high)';
+    } else {
+      el('sq').textContent = 'n/a';
+      el('sq').style.color = 'var(--dim)';
+    }
+
+    // replay-only: ground truth travels alongside so accuracy is visible
+    if (d.trueLabel) {
+      const hit = s.label.includes(d.trueLabel);
+      seen++; if (hit) hits++;
+      el('truth').style.display = 'block';
+      el('truth').innerHTML =
+        `ground truth <b style="color:${COLOUR[d.trueLabel]}">${d.trueLabel}</b>` +
+        ` — <b style="color:${hit ? 'var(--relaxed)' : 'var(--high)'}">` +
+        `${hit ? 'correct' : 'wrong'}</b>` +
+        ` <span style="color:var(--dim)">(${hits}/${seen} = ` +
+        `${Math.round(100 * hits / seen)}%)</span>`;
+    }
+
+    history.push({score: s.continuous_score, label: s.label, mode: s.mode});
+    if (history.length > 90) history.shift();
+    drawHistory();
+  };
+}
+connect();
+</script>
+</body>
+</html>

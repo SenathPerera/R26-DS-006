@@ -21,7 +21,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
     [AddComponentMenu(
         "Adaptive Meditation/Application/Production Session Coordinator")]
     [DisallowMultipleComponent]
-    public sealed class ProductionSessionCoordinator : MonoBehaviour
+    public sealed class ProductionSessionCoordinator : MonoBehaviour,
+        IRecordedTelemetrySource
     {
         [Header("Composition Root")]
         [SerializeField]
@@ -72,12 +73,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private PolicyController policyController;
         private TelemetryRecorder telemetryRecorder;
         private LocalJsonLinesTelemetrySink telemetrySink;
+        private DurableTelemetryBufferingSink telemetryBufferingSink;
         private Task activeOperation;
         private bool previousNetworkConnected;
         private volatile bool networkConnected;
         private bool rewardCheckRequested;
         private bool stabilizationSelectionRequested;
         private bool stabilizationTransitionStarted;
+        private bool preferenceInitializationTransitionStarted;
         private RewardAttributionInvalidationReason? pendingInvalidation;
         private long pausePhysiologySequenceNumber;
         private int decisionIdSequence;
@@ -91,17 +94,27 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private EnvironmentState preferredEnvironment;
         private bool hasSessionContext;
 
+        public event Action<SessionPhaseTransition> PhaseChanged;
+
         public bool IsInitialized { get; private set; }
 
         public string LastValidationError { get; private set; } = string.Empty;
 
         public string TelemetryFilePath => telemetrySink?.FilePath;
 
+        public int PendingEventCount =>
+            telemetryBufferingSink?.PendingEventCount ?? 0;
+
         public VrSessionPhase Phase => session == null
             ? VrSessionPhase.Boot
             : session.Phase;
 
         public bool IsNetworkConnected => networkConnected;
+
+        public double ExpectedPhysiologyOutputIntervalSeconds =>
+            coordinatorConfiguration
+                ?.ExpectedPhysiologyOutputIntervalSeconds
+            ?? 0d;
 
         public PhysiologyIngestionResult LastPhysiologyIngestionResult
         {
@@ -192,6 +205,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             telemetrySink = null;
+            telemetryBufferingSink = null;
         }
 
         public void Configure(
@@ -321,12 +335,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 telemetrySink = new LocalJsonLinesTelemetrySink(
                     telemetryPath,
                     telemetryConfiguration);
+                telemetryBufferingSink =
+                    new DurableTelemetryBufferingSink(telemetrySink);
                 telemetryRecorder = new TelemetryRecorder(
                     telemetryConfiguration,
                     new TelemetrySessionIdentity(
                         sessionId,
                         participantPseudonym),
-                    telemetrySink);
+                    telemetryBufferingSink);
                 lifetimeCancellation = new CancellationTokenSource();
 
                 session = new SessionStateMachine();
@@ -346,6 +362,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     throw new InvalidOperationException(
                         "Session state machine failed to reach Ready.");
                 }
+
+                preferenceInitializationTransitionStarted =
+                    BeginPreferenceInitialization(now);
             }
             catch (Exception exception) when (
                 exception is ArgumentException
@@ -380,8 +399,45 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     TelemetryField.Number(
                         "expected_physiology_output_interval_seconds",
                         coordinatorConfiguration
-                            .ExpectedPhysiologyOutputIntervalSeconds)
+                            .ExpectedPhysiologyOutputIntervalSeconds),
+                    TelemetryField.Number(
+                        "preferred_illumination",
+                        preferredEnvironment.Illumination),
+                    TelemetryField.Number(
+                        "preferred_warmth",
+                        preferredEnvironment.Warmth),
+                    TelemetryField.Number(
+                        "preferred_atmospheric_softness",
+                        preferredEnvironment.AtmosphericSoftness),
+                    TelemetryField.Number(
+                        "preferred_color_richness",
+                        preferredEnvironment.ColorRichness),
+                    TelemetryField.Number(
+                        "preferred_ambient_motion",
+                        preferredEnvironment.AmbientMotion),
+                    TelemetryField.Boolean(
+                        "preference_initialization_transition_started",
+                        preferenceInitializationTransitionStarted)
                 });
+            if (preferenceInitializationTransitionStarted)
+            {
+                QueueTelemetry(
+                    TelemetryEventTypes.TransitionStarted,
+                    true,
+                    new[]
+                    {
+                        TelemetryField.String(
+                            "transition_id",
+                            PreferenceInitializationTransitionId()),
+                        TelemetryField.String(
+                            "transition_reason",
+                            "participant_preference_initialization"),
+                        TelemetryField.Number(
+                            "duration_seconds",
+                            applicationBootstrap.SceneProfile
+                                .TransitionDurationSeconds)
+                    });
+            }
 
             var conservativeWait = coordinatorConfiguration
                     .ExpectedPhysiologyOutputIntervalSeconds
@@ -426,6 +482,17 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public void SetNetworkConnected(bool connected)
         {
             networkConnected = connected;
+        }
+
+        public bool TryDequeue(out TelemetryEvent telemetryEvent)
+        {
+            if (telemetryBufferingSink == null)
+            {
+                telemetryEvent = null;
+                return false;
+            }
+
+            return telemetryBufferingSink.TryDequeue(out telemetryEvent);
         }
 
         public void Advance(
@@ -656,6 +723,32 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     baselineAccumulator.TryAdd(snapshot);
                 }
             }
+        }
+
+        private bool BeginPreferenceInitialization(
+            double monotonicTimeSeconds)
+        {
+            var environmentManager = applicationBootstrap.EnvironmentManager;
+            if (environmentManager.CurrentState.Equals(preferredEnvironment))
+            {
+                return false;
+            }
+
+            // The session boundary accepts only a normalized preference that
+            // was already checked against this scene's approved limits. Apply
+            // that safe target through the same gradual manager used for
+            // policy transitions; it is not a policy decision or reward event.
+            environmentManager.BeginTransition(
+                PreferenceInitializationTransitionId(),
+                preferredEnvironment,
+                monotonicTimeSeconds,
+                applicationBootstrap.SceneProfile.TransitionDurationSeconds);
+            return true;
+        }
+
+        private string PreferenceInitializationTransitionId()
+        {
+            return sessionId + "-preference-initialization";
         }
 
         private void TryCreatePolicyController()
@@ -976,6 +1069,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         Array.Empty<TelemetryField>());
                     break;
             }
+
+            PhaseChanged?.Invoke(transition);
         }
 
         private void RequestInvalidation(
@@ -1025,6 +1120,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             lifetimeCancellation = null;
             telemetrySink?.Dispose();
             telemetrySink = null;
+            telemetryBufferingSink = null;
             telemetryRecorder = null;
         }
 

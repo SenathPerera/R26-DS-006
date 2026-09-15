@@ -17,6 +17,8 @@ export interface SavedVoiceSession {
   pre: StressResult;
   post: StressResult;
   full: FullSessionResult;
+  vrSessionId?: string;
+  visualTelemetryMessages?: unknown[];
 }
 
 export async function loadSessions(): Promise<SavedVoiceSession[]> {

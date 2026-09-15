@@ -142,7 +142,7 @@ namespace AdaptiveAudioVR.RL
         public string GetDisplayLabel()
         {
             return IsLoaded
-                ? $"{data.algorithm.ToUpperInvariant()} seed {data.seed} sample policy ({data.samples.Length} states)"
+                ? $"{data.algorithm.ToUpperInvariant()}-derived sampled policy, seed {data.seed} ({data.samples.Length} states)"
                 : "No imported policy loaded";
         }
 

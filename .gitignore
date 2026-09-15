@@ -65,6 +65,17 @@ Thumbs.db
 
 /unity/.utmp/
 /debug.log
+/.demo-runtime/
+
+# Python environments, caches, and local secrets
+**/.env
+**/.venv/
+**/.venv_*/
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
 
 #Context Bandit Research Contract
 #/docs/architecture/ADAPTIVE_VR_LEARNING_RESEARCH_CONTRACT.md
