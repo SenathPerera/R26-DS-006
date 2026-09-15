@@ -43,7 +43,7 @@ export function LoginScreen({navigation}: any) {
   const busy = authStatus === 'authenticating';
   return (
     <Screen>
-      <Header title="Welcome back" subtitle="Continue to your private MindSync workspace." onBack={navigation.goBack} />
+      <Header stacked title="Welcome back" subtitle="Continue to your private Laminar VR workspace." onBack={navigation.goBack} />
       <Card>
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
         <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
