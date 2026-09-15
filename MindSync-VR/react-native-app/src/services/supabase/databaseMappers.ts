@@ -43,7 +43,6 @@ export function onboardingFromRow(row: OnboardingRow, name: string): OnboardingP
     preferredAtmosphericSoftness: row.preferred_atmospheric_softness ?? TEMPLE_POND_SAFE_DEFAULT.atmosphericSoftness,
     preferredColorRichness: row.preferred_color_richness ?? TEMPLE_POND_SAFE_DEFAULT.colorRichness,
     preferredAmbientMotion: row.preferred_ambient_motion ?? TEMPLE_POND_SAFE_DEFAULT.ambientMotion,
-    particlePreference: row.particle_preference,
     lightSensitivity: row.light_sensitivity,
     motionSensitivity: row.motion_sensitivity ?? 0.5,
     consentAccepted: row.consent_accepted,

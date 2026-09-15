@@ -88,7 +88,6 @@ class MindSyncRepository {
       preferred_atmospheric_softness: profile.preferredAtmosphericSoftness,
       preferred_color_richness: profile.preferredColorRichness,
       preferred_ambient_motion: profile.preferredAmbientMotion,
-      particle_preference: profile.particlePreference,
       light_sensitivity: profile.lightSensitivity,
       motion_sensitivity: profile.motionSensitivity,
       consent_accepted: profile.consentAccepted,

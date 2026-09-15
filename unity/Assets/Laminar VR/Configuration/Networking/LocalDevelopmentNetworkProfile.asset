@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2a6f4974cb234640b659b1cfc8daaf32, type: 3}
   m_Name: LocalDevelopmentNetworkProfile
   m_EditorClassIdentifier: 
-  host: 192.168.0.178
+  host: 192.168.1.23
   componentBPort: 8000
   lyriaBackendPort: 8002
   sessionRelayPort: 8080

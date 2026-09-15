@@ -80,6 +80,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private bool rewardCheckRequested;
         private bool stabilizationSelectionRequested;
         private bool stabilizationTransitionStarted;
+        private bool preferenceInitializationTransitionStarted;
         private RewardAttributionInvalidationReason? pendingInvalidation;
         private long pausePhysiologySequenceNumber;
         private int decisionIdSequence;
@@ -361,6 +362,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     throw new InvalidOperationException(
                         "Session state machine failed to reach Ready.");
                 }
+
+                preferenceInitializationTransitionStarted =
+                    BeginPreferenceInitialization(now);
             }
             catch (Exception exception) when (
                 exception is ArgumentException
@@ -395,8 +399,45 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     TelemetryField.Number(
                         "expected_physiology_output_interval_seconds",
                         coordinatorConfiguration
-                            .ExpectedPhysiologyOutputIntervalSeconds)
+                            .ExpectedPhysiologyOutputIntervalSeconds),
+                    TelemetryField.Number(
+                        "preferred_illumination",
+                        preferredEnvironment.Illumination),
+                    TelemetryField.Number(
+                        "preferred_warmth",
+                        preferredEnvironment.Warmth),
+                    TelemetryField.Number(
+                        "preferred_atmospheric_softness",
+                        preferredEnvironment.AtmosphericSoftness),
+                    TelemetryField.Number(
+                        "preferred_color_richness",
+                        preferredEnvironment.ColorRichness),
+                    TelemetryField.Number(
+                        "preferred_ambient_motion",
+                        preferredEnvironment.AmbientMotion),
+                    TelemetryField.Boolean(
+                        "preference_initialization_transition_started",
+                        preferenceInitializationTransitionStarted)
                 });
+            if (preferenceInitializationTransitionStarted)
+            {
+                QueueTelemetry(
+                    TelemetryEventTypes.TransitionStarted,
+                    true,
+                    new[]
+                    {
+                        TelemetryField.String(
+                            "transition_id",
+                            PreferenceInitializationTransitionId()),
+                        TelemetryField.String(
+                            "transition_reason",
+                            "participant_preference_initialization"),
+                        TelemetryField.Number(
+                            "duration_seconds",
+                            applicationBootstrap.SceneProfile
+                                .TransitionDurationSeconds)
+                    });
+            }
 
             var conservativeWait = coordinatorConfiguration
                     .ExpectedPhysiologyOutputIntervalSeconds
@@ -682,6 +723,32 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     baselineAccumulator.TryAdd(snapshot);
                 }
             }
+        }
+
+        private bool BeginPreferenceInitialization(
+            double monotonicTimeSeconds)
+        {
+            var environmentManager = applicationBootstrap.EnvironmentManager;
+            if (environmentManager.CurrentState.Equals(preferredEnvironment))
+            {
+                return false;
+            }
+
+            // The session boundary accepts only a normalized preference that
+            // was already checked against this scene's approved limits. Apply
+            // that safe target through the same gradual manager used for
+            // policy transitions; it is not a policy decision or reward event.
+            environmentManager.BeginTransition(
+                PreferenceInitializationTransitionId(),
+                preferredEnvironment,
+                monotonicTimeSeconds,
+                applicationBootstrap.SceneProfile.TransitionDurationSeconds);
+            return true;
+        }
+
+        private string PreferenceInitializationTransitionId()
+        {
+            return sessionId + "-preference-initialization";
         }
 
         private void TryCreatePolicyController()
