@@ -17,13 +17,9 @@ export function WelcomeScreen({navigation}: any) {
     <Screen style={{justifyContent: 'space-between'}}>
       <View style={{alignItems: 'center', paddingTop: spacing.xl, gap: spacing.md}}>
         <BreathingVisual size={170} />
-        <StatusPill label="Adaptive wellness system" />
-        <Text style={{fontSize: typography.display, color: colors.text, fontWeight: '900'}}>MindSync VR</Text>
-        <Text style={[uiStyles.body, {textAlign: 'center', maxWidth: 330}]}>A calm control hub for your wearable, adaptive VR environment, and post-session research validation.</Text>
+        <Text style={{fontSize: typography.display, color: colors.text, fontWeight: '900'}}>Laminar VR</Text>
       </View>
       <Card>
-        <Text style={uiStyles.value}>Research-grade wellness control</Text>
-        <Text style={uiStyles.body}>Prepare your devices, begin a supported session, and return for a private reflection.</Text>
         <PrimaryButton label="Log in" icon={LogIn} onPress={() => navigation.navigate('Login')} />
         <SecondaryButton label="Create account" icon={UserPlus} onPress={() => navigation.navigate('SignUp')} />
       </Card>
