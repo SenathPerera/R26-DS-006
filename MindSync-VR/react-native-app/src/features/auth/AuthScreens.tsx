@@ -17,13 +17,9 @@ export function WelcomeScreen({navigation}: any) {
     <Screen style={{justifyContent: 'space-between'}}>
       <View style={{alignItems: 'center', paddingTop: spacing.xl, gap: spacing.md}}>
         <BreathingVisual size={170} />
-        <StatusPill label="Adaptive wellness system" />
-        <Text style={{fontSize: typography.display, color: colors.text, fontWeight: '900'}}>MindSync VR</Text>
-        <Text style={[uiStyles.body, {textAlign: 'center', maxWidth: 330}]}>A calm control hub for your wearable, adaptive VR environment, and post-session research validation.</Text>
+        <Text style={{fontSize: typography.display, color: colors.text, fontWeight: '900'}}>Laminar VR</Text>
       </View>
       <Card>
-        <Text style={uiStyles.value}>Research-grade wellness control</Text>
-        <Text style={uiStyles.body}>Prepare your devices, begin a supported session, and return for a private reflection.</Text>
         <PrimaryButton label="Log in" icon={LogIn} onPress={() => navigation.navigate('Login')} />
         <SecondaryButton label="Create account" icon={UserPlus} onPress={() => navigation.navigate('SignUp')} />
       </Card>
@@ -47,7 +43,7 @@ export function LoginScreen({navigation}: any) {
   const busy = authStatus === 'authenticating';
   return (
     <Screen>
-      <Header title="Welcome back" subtitle="Continue to your private MindSync workspace." onBack={navigation.goBack} />
+      <Header stacked title="Welcome back" subtitle="Continue to your private Laminar VR workspace." onBack={navigation.goBack} />
       <Card>
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
         <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
@@ -75,9 +71,14 @@ export function SignUpScreen({navigation}: any) {
   const busy = authStatus === 'authenticating';
   return (
     <Screen>
-      <Header title="Create your account" subtitle="After account creation, we’ll ask for your usual Temple Pond garden preferences." onBack={navigation.goBack} />
+      <Header
+        stacked
+        title={<>Welcome to <Text style={{color: colors.cyan}}>Laminar VR</Text></>}
+        subtitle="Create an account to get started"
+        onBack={navigation.goBack}
+      />
       <Card>
-        <Controller control={control} name="name" render={({field: {onChange, value}}) => <Field label="Preferred name" value={value} onChangeText={onChange} error={errors.name?.message} />} />
+        <Controller control={control} name="name" render={({field: {onChange, value}}) => <Field label="Username" value={value} onChangeText={onChange} error={errors.name?.message} />} />
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
         <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
         {errors.root?.message ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root.message}</Text> : null}

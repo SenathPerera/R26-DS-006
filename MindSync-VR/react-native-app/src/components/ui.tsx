@@ -39,9 +39,9 @@ export function Screen({children, scroll = true, style}: {children: ReactNode; s
   );
 }
 
-export function Header({title, subtitle, onBack}: {title: string; subtitle?: string; onBack?: () => void}) {
+export function Header({title, subtitle, onBack, stacked = false}: {title: ReactNode; subtitle?: string; onBack?: () => void; stacked?: boolean}) {
   return (
-    <View style={styles.header}>
+    <View style={[styles.header, stacked && styles.headerStacked]}>
       {onBack ? (
         <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={onBack} style={styles.backButton}>
           <ChevronLeft color={colors.text} size={24} />
@@ -242,6 +242,7 @@ const styles = StyleSheet.create({
   scroll: {flexGrow: 1},
   screenContent: {paddingHorizontal: spacing.lg, paddingTop: spacing.md, paddingBottom: 112, gap: spacing.md},
   header: {flexDirection: 'row', alignItems: 'flex-start', gap: spacing.sm, marginBottom: spacing.xs},
+  headerStacked: {flexDirection: 'column'},
   backButton: {width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderRadius: radii.md, borderWidth: 1, borderColor: colors.borderSoft, marginTop: 2},
   headerCopy: {flex: 1},
   title: {fontSize: typography.title, color: colors.text, fontWeight: '800', letterSpacing: 0},
