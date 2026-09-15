@@ -71,9 +71,14 @@ export function SignUpScreen({navigation}: any) {
   const busy = authStatus === 'authenticating';
   return (
     <Screen>
-      <Header title="Create your account" subtitle="After account creation, we’ll ask for your usual Temple Pond garden preferences." onBack={navigation.goBack} />
+      <Header
+        stacked
+        title={<>Welcome to <Text style={{color: colors.cyan}}>Laminar VR</Text></>}
+        subtitle="Create an account to get started"
+        onBack={navigation.goBack}
+      />
       <Card>
-        <Controller control={control} name="name" render={({field: {onChange, value}}) => <Field label="Preferred name" value={value} onChangeText={onChange} error={errors.name?.message} />} />
+        <Controller control={control} name="name" render={({field: {onChange, value}}) => <Field label="Username" value={value} onChangeText={onChange} error={errors.name?.message} />} />
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
         <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
         {errors.root?.message ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root.message}</Text> : null}
