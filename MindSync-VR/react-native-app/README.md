@@ -120,10 +120,14 @@ real authentication and database persistence:
    ```text
    supabase/migrations/202609010001_initial_mobile_schema.sql
    supabase/migrations/202609010002_user_and_session_preferences.sql
+   supabase/migrations/202609030003_remove_particle_preference.sql
    ```
 
    Alternatively, link this folder with the Supabase CLI and run `supabase db
    push`.
+   Run the migrations against the same Supabase project URL configured in
+   `.env`. An authenticated account alone does not create these application
+   tables; onboarding requires all three migrations.
 3. Copy `.env.example` to `.env` and set the project URL and publishable key:
 
    ```dotenv

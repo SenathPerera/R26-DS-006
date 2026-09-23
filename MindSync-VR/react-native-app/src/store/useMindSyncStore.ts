@@ -14,6 +14,7 @@ import {sessionRecordOutbox} from '../services/session/sessionRecordOutbox';
 import {isSupabaseConfigured} from '../services/supabase/supabaseClient';
 import {supabaseAuthService} from '../services/supabase/supabaseAuthService';
 import {mindSyncRepository} from '../services/supabase/mindSyncRepository';
+import {describeSupabaseError} from '../services/supabase/supabaseError';
 import {
   effectiveEnvironmentPreference,
   TEMPLE_POND_SAFE_DEFAULT,
@@ -258,9 +259,11 @@ export const useMindSyncStore = create<MindSyncStore>()(
         const state = get();
         if (!state.user) throw new Error('Sign in before completing onboarding');
         const localUser = {...state.user, name: state.onboarding.name || state.user.name, onboardingComplete: true};
-        set({user: localUser, dataSyncError: null});
-        if (!isSupabaseConfigured) return;
-        set({dataSyncStatus: 'syncing'});
+        if (!isSupabaseConfigured) {
+          set({user: localUser, dataSyncError: null});
+          return;
+        }
+        set({dataSyncStatus: 'syncing', dataSyncError: null});
         try {
           const savedUser = await mindSyncRepository.saveOnboarding(state.user.id, state.onboarding);
           set({user: savedUser, dataSyncStatus: 'synced', lastSyncedAt: new Date().toISOString()});
@@ -553,7 +556,7 @@ async function applySupabaseSession(session: Session | null): Promise<void> {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unexpected Supabase error';
+  return describeSupabaseError(error);
 }
 
 async function syncCompleteSessionRecords(userId: string): Promise<void> {
