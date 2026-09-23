@@ -2,6 +2,7 @@ import React, {useState} from 'react';
 import {Text, View} from 'react-native';
 import {Card, ChoiceChip, Field, Header, PreferenceSlider, PrimaryButton, Screen, SecondaryButton, uiStyles} from '../../components/ui';
 import {useMindSyncStore} from '../../store/useMindSyncStore';
+import {describeSupabaseError} from '../../services/supabase/supabaseError';
 import {colors} from '../../theme/theme';
 
 const steps = ['Profile', 'Practice', 'Goals', 'Sound', 'Garden', 'Comfort', 'Consent'];
@@ -26,7 +27,7 @@ export function OnboardingScreen({navigation}: any) {
       await complete();
       navigation.reset({index: 0, routes: [{name: 'MainTabs'}]});
     } catch (error) {
-      setSaveError(error instanceof Error ? error.message : 'Unable to save onboarding');
+      setSaveError(describeSupabaseError(error));
     } finally {
       setSaving(false);
     }
