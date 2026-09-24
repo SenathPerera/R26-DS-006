@@ -760,6 +760,8 @@ namespace AdaptiveAudioVR.RL
                 intensity = safeState[StateIntensity],
                 density = safeState[StateDensity],
                 brightness = safeState[StateBrightness],
+                tempo = safeState[StateTempo],
+                fade = safeState[StateFade],
                 musicMix = safeState[StateMusicMix],
                 ambientMix = safeState[StateAmbientMix]
             };

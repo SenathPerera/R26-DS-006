@@ -11,6 +11,12 @@ namespace AdaptiveAudioVR.Core
         public string mood = "calm";
         public string tempoPreference = "slow";
         public string preferredAmbience = "forest";
+        public string ambientMusicBalance = "balanced";
+        public string brightnessPreference = "soft_dark";
+        public string rhythmPreference = "minimal";
+        public string natureSoundPreference = "medium";
+        public string reverbPreference = "spacious";
+        public string volumePreference = "low";
         [Range(0f, 1f)] public float audioIntensity = 0.3f;
         [Range(0f, 1f)] public float noveltyTolerance = 0.2f;
         public bool avoidDissonance = true;
@@ -21,6 +27,12 @@ namespace AdaptiveAudioVR.Core
             mood = NormalizeKeyword(mood, "calm");
             tempoPreference = NormalizeKeyword(tempoPreference, "slow");
             preferredAmbience = NormalizeKeyword(preferredAmbience, "forest");
+            ambientMusicBalance = NormalizeKeyword(ambientMusicBalance, "balanced");
+            brightnessPreference = NormalizeKeyword(brightnessPreference, "soft_dark");
+            rhythmPreference = NormalizeKeyword(rhythmPreference, "minimal");
+            natureSoundPreference = NormalizeKeyword(natureSoundPreference, "medium");
+            reverbPreference = NormalizeKeyword(reverbPreference, "spacious");
+            volumePreference = NormalizeKeyword(volumePreference, "low");
             audioIntensity = Mathf.Clamp01(audioIntensity);
             noveltyTolerance = Mathf.Clamp01(noveltyTolerance);
 
