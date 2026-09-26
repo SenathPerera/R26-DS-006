@@ -499,7 +499,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
       },
       partialize: state => ({user: state.user, onboarding: state.onboarding, sessions: state.sessions, questionnaireSubmissions: state.questionnaireSubmissions, pendingValidationCount: state.pendingValidationCount, componentB: {...emptyComponentB, endpoint: state.componentB.endpoint}}),
       merge: (persistedState, currentState) => {
-        const persisted = persistedState as Partial<MindSyncStore>;
+        const persisted = (persistedState ?? {}) as Partial<MindSyncStore>;
         return {
           ...currentState,
           ...persisted,
@@ -507,8 +507,9 @@ export const useMindSyncStore = create<MindSyncStore>()(
           sessionContext: null,
         };
       },
-      onRehydrateStorage: () => state => {
-        state?.setHydrated(true);
+      onRehydrateStorage: () => (state, error) => {
+        if (error) console.warn('MindSync state hydration failed; using safe defaults', error);
+        useMindSyncStore.setState({hydrated: true});
         componentBPipelineService.setEndpoint(resolvePersistedComponentBEndpoint(state?.componentB.endpoint));
       },
     },
