@@ -1,6 +1,7 @@
 import type {Session, User} from '@supabase/supabase-js';
 import {apiClient} from '../api/apiClient';
 import {getSupabaseClient, startSupabaseAuthRefresh} from './supabaseClient';
+import {PASSWORD_RECOVERY_REDIRECT_URL} from './passwordRecovery';
 
 export type AuthSessionListener = (session: Session | null) => Promise<void> | void;
 
@@ -54,7 +55,27 @@ class SupabaseAuthService {
   async sendPasswordReset(email: string): Promise<void> {
     const {error} = await getSupabaseClient().auth.resetPasswordForEmail(
       email.trim().toLowerCase(),
+      {redirectTo: PASSWORD_RECOVERY_REDIRECT_URL},
     );
+    if (error) throw error;
+  }
+
+  async establishPasswordRecoverySession(
+    accessToken: string,
+    refreshToken: string,
+  ): Promise<Session> {
+    const {data, error} = await getSupabaseClient().auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (error) throw error;
+    if (!data.session) throw new Error('Supabase did not return a recovery session');
+    apiClient.setAccessToken(data.session.access_token);
+    return data.session;
+  }
+
+  async updatePassword(password: string): Promise<void> {
+    const {error} = await getSupabaseClient().auth.updateUser({password});
     if (error) throw error;
   }
 

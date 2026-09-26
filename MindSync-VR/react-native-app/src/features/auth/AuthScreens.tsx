@@ -11,6 +11,13 @@ import {useMindSyncStore} from '../../store/useMindSyncStore';
 const loginSchema = z.object({email: z.string().email('Enter a valid email'), password: z.string().min(6, 'Use at least 6 characters')});
 const signUpSchema = loginSchema.extend({name: z.string().min(2, 'Tell us what to call you')});
 const resetSchema = z.object({email: z.string().email('Enter a valid email')});
+const updatePasswordSchema = z.object({
+  password: z.string().min(6, 'Use at least 6 characters'),
+  confirmPassword: z.string().min(6, 'Confirm your new password'),
+}).refine(values => values.password === values.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
+});
 
 export function WelcomeScreen({navigation}: any) {
   return (
@@ -46,7 +53,7 @@ export function LoginScreen({navigation}: any) {
       <Header stacked title="Welcome back" subtitle="Continue to your private Laminar VR workspace." onBack={navigation.goBack} />
       <Card>
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
-        <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
+        <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="current-password" textContentType="password" value={value} onChangeText={onChange} error={errors.password?.message} />} />
         {errors.root?.message || authError ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root?.message ?? authError}</Text> : null}
         <PrimaryButton label={busy ? 'Signing in...' : 'Log in'} icon={LogIn} disabled={busy} onPress={submit} />
         <SecondaryButton label="Forgot password" onPress={() => navigation.navigate('ForgotPassword')} />
@@ -80,7 +87,7 @@ export function SignUpScreen({navigation}: any) {
       <Card>
         <Controller control={control} name="name" render={({field: {onChange, value}}) => <Field label="Username" value={value} onChangeText={onChange} error={errors.name?.message} />} />
         <Controller control={control} name="email" render={({field: {onChange, value}}) => <Field label="Email" autoCapitalize="none" keyboardType="email-address" value={value} onChangeText={onChange} error={errors.email?.message} />} />
-        <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry value={value} onChangeText={onChange} error={errors.password?.message} />} />
+        <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="Password" secureTextEntry autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="new-password" textContentType="newPassword" value={value} onChangeText={onChange} error={errors.password?.message} />} />
         {errors.root?.message ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root.message}</Text> : null}
         <PrimaryButton label={busy ? 'Creating account...' : 'Continue'} disabled={busy} onPress={submit} />
       </Card>
@@ -111,6 +118,59 @@ export function ForgotPasswordScreen({navigation}: any) {
         <PrimaryButton label={isSubmitting ? 'Sending...' : 'Send recovery email'} disabled={isSubmitting || !configured} onPress={submit} />
       </Card>
       {!configured ? <Text style={[uiStyles.label, {textAlign: 'center'}]}>Password recovery becomes available when Supabase is configured.</Text> : null}
+    </Screen>
+  );
+}
+
+export function UpdatePasswordScreen() {
+  const recoveryStatus = useMindSyncStore(state => state.passwordRecoveryStatus);
+  const recoveryError = useMindSyncStore(state => state.passwordRecoveryError);
+  const updateRecoveredPassword = useMindSyncStore(state => state.updateRecoveredPassword);
+  const clearPasswordRecovery = useMindSyncStore(state => state.clearPasswordRecovery);
+  const {control, handleSubmit, setError, formState: {errors}} = useForm<z.infer<typeof updatePasswordSchema>>({
+    resolver: zodResolver(updatePasswordSchema),
+    defaultValues: {password: '', confirmPassword: ''},
+  });
+  const submit = handleSubmit(async values => {
+    try {
+      await updateRecoveredPassword(values.password);
+    } catch (error) {
+      setError('root', {message: error instanceof Error ? error.message : 'Unable to update your password'});
+    }
+  });
+
+  if (recoveryStatus === 'opening') {
+    return (
+      <Screen>
+        <Header title="Reset password" subtitle="Securely opening your recovery link." />
+        <Card><StatusPill label="Verifying recovery link..." tone="neutral" /></Card>
+      </Screen>
+    );
+  }
+
+  if (recoveryStatus === 'error') {
+    return (
+      <Screen>
+        <Header title="Recovery link unavailable" subtitle="This link could not be used to reset your password." />
+        <Card>
+          <StatusPill label="Recovery link failed" tone="danger" />
+          <Text style={[uiStyles.body, {color: colors.rose}]}>{recoveryError}</Text>
+          <SecondaryButton label="Back to login" onPress={clearPasswordRecovery} />
+        </Card>
+      </Screen>
+    );
+  }
+
+  const busy = recoveryStatus === 'updating';
+  return (
+    <Screen>
+      <Header title="Choose a new password" subtitle="Enter the new password you want to use for MindSync VR." />
+      <Card>
+        <Controller control={control} name="password" render={({field: {onChange, value}}) => <Field label="New password" secureTextEntry autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="new-password" textContentType="newPassword" value={value} onChangeText={onChange} error={errors.password?.message} />} />
+        <Controller control={control} name="confirmPassword" render={({field: {onChange, value}}) => <Field label="Confirm new password" secureTextEntry autoCapitalize="none" autoCorrect={false} spellCheck={false} autoComplete="new-password" textContentType="newPassword" value={value} onChangeText={onChange} error={errors.confirmPassword?.message} />} />
+        {errors.root?.message || recoveryError ? <Text style={[uiStyles.label, {color: colors.rose}]}>{errors.root?.message ?? recoveryError}</Text> : null}
+        <PrimaryButton label={busy ? 'Updating password...' : 'Update password'} disabled={busy} onPress={submit} />
+      </Card>
     </Screen>
   );
 }
