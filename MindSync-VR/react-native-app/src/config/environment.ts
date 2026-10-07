@@ -1,5 +1,5 @@
 import {generatedEnvironment} from './generatedEnvironment';
-export const developmentBackendHost = '172.28.10.78';
+export const developmentBackendHost = '192.168.1.23';
 
 export function buildDevelopmentEndpoints(host: string) {
   const normalizedHost = host.trim();

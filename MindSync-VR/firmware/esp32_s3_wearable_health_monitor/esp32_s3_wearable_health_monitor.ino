@@ -214,6 +214,7 @@ void readMicrophone() {
 void setupBLE() {
   NimBLEDevice::init(DEVICE_NAME);
   NimBLEDevice::setMTU(185);
+  const bool powerConfigured = NimBLEDevice::setPower(9);
 
   bleServer = NimBLEDevice::createServer();
   bleServer->setCallbacks(new ServerCallbacks());
@@ -231,11 +232,34 @@ void setupBLE() {
   telemetryCharacteristic->setValue(
     "{\"t\":0,\"ir\":0,\"red\":0,\"noiseAvg\":0,\"noisePeak\":0,\"temp\":null,\"flags\":0}"
   );
-  NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
-  advertising->addServiceUUID(SERVICE_UUID);
-  advertising->setName(DEVICE_NAME);
-  advertising->start();
+  service->start();
 
+  NimBLEAdvertising* advertising = NimBLEDevice::getAdvertising();
+  advertising->setMinInterval(160);  // 100 ms (units are 0.625 ms).
+  advertising->setMaxInterval(240);  // 150 ms.
+
+  // A 128-bit UUID and the full device name do not fit together in one
+  // 31-byte legacy advertisement. The BLE-only diagnostic proved that this
+  // board is reliably discoverable when the name is in the primary packet.
+  // Add the name before enabling scan response so the service UUID falls back
+  // to the scan-response packet.
+  const bool nameAdded = advertising->setName(DEVICE_NAME);
+  advertising->enableScanResponse(true);
+  const bool serviceAdded = advertising->addServiceUUID(SERVICE_UUID);
+  const bool advertisingStarted = advertising->start();
+
+  if (!powerConfigured || !serviceAdded || !nameAdded || !advertisingStarted) {
+    Serial.printf(
+      "BLE ERROR: advertising setup failed (power=%s, service=%s, name=%s, start=%s)\n",
+      powerConfigured ? "ok" : "failed",
+      serviceAdded ? "ok" : "failed",
+      nameAdded ? "ok" : "failed",
+      advertisingStarted ? "ok" : "failed"
+    );
+  }
+
+  Serial.print("BLE: address ");
+  Serial.println(NimBLEDevice::getAddress().toString().c_str());
   Serial.print("BLE: advertising as ");
   Serial.println(DEVICE_NAME);
   Serial.print("BLE: service ");
@@ -401,6 +425,8 @@ void loop() {
 
   if (now - lastSerialAt >= SERIAL_INTERVAL_MS) {
     lastSerialAt = now;
+    const bool advertisingActive =
+      !bleConnected && NimBLEDevice::getAdvertising()->isAdvertising();
     Serial.printf(
       "IR: %u | RED: %u | NOISE AVG: %lu | NOISE PEAK: %lu | RAW PACKETS: %lu | BLE: %s | TEMP: \n",
       latestIR,
@@ -408,7 +434,7 @@ void loop() {
       static_cast<unsigned long>(latestNoiseAvg),
       static_cast<unsigned long>(latestNoisePeak),
       static_cast<unsigned long>(rawPpgPacketsSent),
-      bleConnected ? "connected" : "advertising"
+      bleConnected ? "connected" : (advertisingActive ? "advertising" : "stopped")
     );
   }
 
