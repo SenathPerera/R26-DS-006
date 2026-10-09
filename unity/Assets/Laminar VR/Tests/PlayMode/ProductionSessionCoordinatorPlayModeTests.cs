@@ -238,6 +238,77 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator LocalEmergencyStop_AbortsWithoutNetworkTransport()
+        {
+            var root = Track(new GameObject("LocalEmergencyStopHarness"));
+            var adapter = root.AddComponent<RecordingAdapter>();
+            var bootstrap = root.AddComponent<ApplicationBootstrap>();
+            bootstrap.Configure(
+                CreateProfile<SceneParameterProfile>(SceneProfileJson),
+                adapter,
+                StudyPolicyMode.StaticPersonalized);
+
+            var coordinator = root.AddComponent<ProductionSessionCoordinator>();
+            coordinator.enabled = false;
+            coordinator.Configure(
+                bootstrap,
+                CreateProfile<SessionTimingProfile>(TimingProfileJson),
+                CreateProfile<PhysiologyValidationProfile>(
+                    PhysiologyProfileJson),
+                CreateProfile<RewardPipelineProfile>(RewardProfileJson),
+                CreateProfile<StabilizationSelectionProfile>(
+                    StabilizationProfileJson),
+                CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
+                CreateProfile<ProductionCoordinatorProfile>(
+                    CoordinatorProfileJson));
+
+            var boundary = root.AddComponent<VisualSessionBoundary>();
+            boundary.enabled = false;
+            boundary.Configure(coordinator);
+            boundary.ReceiveSessionContext(
+                "playmode-local-emergency-" + Guid.NewGuid().ToString("N"),
+                "P-PLAYMODE-LOCAL-EMERGENCY",
+                State(0.5f));
+            Assert.That(boundary.ProcessPendingMessages(), Is.EqualTo(1));
+            Assert.That(
+                coordinator.TryInitialize(out var validationError),
+                Is.True,
+                validationError);
+            telemetryFilePath = coordinator.TelemetryFilePath;
+
+            var startTime = Time.realtimeSinceStartupAsDouble;
+            var utcNow = UtcNowUnixSeconds();
+            coordinator.SubmitCommand("start", SessionCommandType.Start);
+            coordinator.Advance(startTime, utcNow);
+            Assert.That(
+                coordinator.Phase,
+                Is.EqualTo(VrSessionPhase.Acclimatization));
+
+            var localEmergency = root.AddComponent<
+                LocalEmergencyStopController>();
+            localEmergency.enabled = false;
+            localEmergency.Configure(boundary);
+
+            Assert.That(localEmergency.TryTriggerEmergencyStop(), Is.True);
+            Assert.That(localEmergency.HasTriggered, Is.True);
+            Assert.That(localEmergency.LastCommandId,
+                Does.StartWith("local-emergency-stop-"));
+            Assert.That(localEmergency.TryTriggerEmergencyStop(), Is.False);
+            Assert.That(boundary.PendingMessageCount, Is.EqualTo(1));
+            Assert.That(boundary.ProcessPendingMessages(), Is.EqualTo(1));
+
+            coordinator.Advance(startTime + 0.001d, utcNow + 0.001d);
+
+            Assert.That(coordinator.LastCommandResult.Applied, Is.True);
+            Assert.That(
+                coordinator.LastCommandResult.CommandType,
+                Is.EqualTo(SessionCommandType.EmergencyStop));
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Aborted));
+
+            yield return null;
+        }
+
         private T CreateProfile<T>(string json)
             where T : ScriptableObject
         {

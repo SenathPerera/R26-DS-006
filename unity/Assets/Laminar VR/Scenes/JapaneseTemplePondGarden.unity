@@ -710,7 +710,7 @@ MonoBehaviour:
   audioMixerController: {fileID: 419444994}
   clipGenerationService: {fileID: 419444992}
   pcmAudioPlayer: {fileID: 419444990}
-  websocketBaseUrl: ''
+  websocketBaseUrl: 
   realtimeModel: models/lyria-realtime-exp
   autoStartOnPlay: 0
   autoCheckCapabilityOnStart: 1
@@ -736,7 +736,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   bootstrap: {fileID: 992556971}
   audioMixerController: {fileID: 419444994}
-  backendBaseUrl: ''
+  backendBaseUrl: 
   healthEndpoint: /health
   generateEndpoint: /generate-clip
   preferredModel: lyria-3-clip-preview
@@ -5248,6 +5248,7 @@ GameObject:
   - component: {fileID: 1414086904}
   - component: {fileID: 1414086903}
   - component: {fileID: 1414086902}
+  - component: {fileID: 1414086905}
   m_Layer: 0
   m_Name: AdaptiveEnvironment
   m_TagString: Untagged
@@ -5372,6 +5373,20 @@ MonoBehaviour:
   visualSessionBoundary: {fileID: 1414086900}
   streamConnectionProfile: {fileID: 11400000, guid: d37ea6fd51534a5d91e603b5dd448969, type: 2}
   reconnectBackoffProfile: {fileID: 11400000, guid: d51d5b57a8f74a20b8113d36f2140764, type: 2}
+--- !u!114 &1414086905
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1414086894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e3f89f095d3c45468d01fabb93c3ef94, type: 3}
+  m_Name: ''
+  m_EditorClassIdentifier: ''
+  visualSessionBoundary: {fileID: 1414086900}
+  controllerNode: 4
 --- !u!114 &1414086902
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -7960,10 +7975,10 @@ MonoBehaviour:
   fixedAmbientClip: {fileID: 8300000, guid: d7374584d1816384db29efcb46f49b67, type: 3}
   fallbackMeditationClip: {fileID: 8300000, guid: ab9df6b19812d7b40957c39c8d45aa40, type: 3}
   developmentNetworkProfile: {fileID: 11400000, guid: 9605881a83ec452ea3d710050d82329c, type: 2}
-  backendBaseUrl: ''
-  realtimeWebsocketBaseUrl: ''
+  backendBaseUrl: 
+  realtimeWebsocketBaseUrl: 
   installOnAwake: 1
-  includeValidationDashboard: 1
+  includeValidationDashboard: 0
   includeRealtimeBridge: 1
   autoGenerateMeditationClipOnStart: 0
   autoGenerateOnActionChange: 0
