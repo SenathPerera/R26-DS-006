@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using AdaptiveAudioVR.Audio;
 using AdaptiveAudioVR.Core;
 using AdaptiveAudioVR.Integration;
+using AdaptiveAudioVR.RL.Agent;
 using AdaptiveAudioVR.Safety;
 using AdaptiveAudioVR.Signals;
 using UnityEngine;
@@ -405,11 +406,15 @@ namespace AdaptiveAudioVR.UI
             rewardValueLabel = CreateText(panel, "Reward: 0.00", BodyFontSize, FontStyle.Bold, TextAnchor.MiddleLeft);
             safetyValueLabel = CreateText(panel, "Safety: Normal", BodyFontSize, FontStyle.Bold, TextAnchor.MiddleLeft);
 
+            RectTransform policyModeRow = CreateButtonRow(panel);
+            CreateButton(policyModeRow, "Rule Only", () => bootstrap?.SetRuleOnlyMode());
+            CreateButton(policyModeRow, "PPO Residual", () => bootstrap?.SetPpoResidualMode());
+
             CreateText(panel, "Cause of change", BodyFontSize, FontStyle.Bold, TextAnchor.MiddleLeft);
             causeValueLabel = CreateText(panel, "Waiting for runtime data.", BodyFontSize, FontStyle.Normal, TextAnchor.UpperLeft);
             LayoutElement causeLayout = causeValueLabel.gameObject.AddComponent<LayoutElement>();
             causeLayout.flexibleHeight = 1f;
-            causeLayout.minHeight = 96f;
+            causeLayout.minHeight = 142f;
 
             CreateText(panel, "Lyria Clip Control", BodyFontSize, FontStyle.Bold, TextAnchor.MiddleLeft);
             RectTransform buttonRow = CreateButtonRow(panel);
@@ -449,6 +454,8 @@ namespace AdaptiveAudioVR.UI
             CreateMeterRow(panel, "Intensity", "intensity");
             CreateMeterRow(panel, "Density", "density");
             CreateMeterRow(panel, "Brightness", "brightness");
+            CreateMeterRow(panel, "Tempo", "tempo");
+            CreateMeterRow(panel, "Fade", "fade");
             CreateMeterRow(panel, "Ambient Mix", "ambientMix");
             CreateMeterRow(panel, "Music Mix", "musicMix");
         }
@@ -728,7 +735,7 @@ namespace AdaptiveAudioVR.UI
 
         private void AppendHistorySample()
         {
-            SignalPacket signal = signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
+            SignalPacket signal = bootstrap != null ? bootstrap.CurrentSignal : signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
 
             ShiftAppend(stressHistory, signal.stress);
             ShiftAppend(confidenceHistory, signal.confidence);
@@ -739,7 +746,7 @@ namespace AdaptiveAudioVR.UI
 
         private void UpdateSignalUi()
         {
-            SignalPacket signal = signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
+            SignalPacket signal = bootstrap != null ? bootstrap.CurrentSignal : signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
 
             if (stressValueLabel != null)
             {
@@ -753,8 +760,10 @@ namespace AdaptiveAudioVR.UI
 
             if (simulationModeLabel != null)
             {
-                string mode = signalSimulator != null ? signalSimulator.CurrentMode.ToString() : "Unavailable";
-                simulationModeLabel.text = $"Mode: {mode}";
+                string mode = signal.hasPhysiologyWindow
+                    ? $"Component B window {signal.sequenceId}"
+                    : signalSimulator != null ? $"Simulation {signalSimulator.CurrentMode}" : "Unavailable";
+                simulationModeLabel.text = $"Input: {mode} | Quality {signal.signalQuality:F2}";
             }
 
             if (stressSlider != null && !Mathf.Approximately(stressSlider.value, signal.stress))
@@ -783,7 +792,7 @@ namespace AdaptiveAudioVR.UI
                 return;
             }
 
-            SignalPacket signal = signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
+            SignalPacket signal = bootstrap.CurrentSignal;
             AudioParameters parameters = bootstrap.CurrentParameters;
 
             if (strategyValueLabel != null)
@@ -803,27 +812,29 @@ namespace AdaptiveAudioVR.UI
 
             if (policyValueLabel != null)
             {
-                policyValueLabel.text = $"Policy: {bootstrap.CurrentPolicyStatus}";
+                policyValueLabel.text = $"Policy: {bootstrap.CurrentRLMode} | {bootstrap.CurrentPolicyStatus}";
             }
 
             if (rewardValueLabel != null)
             {
-                rewardValueLabel.text = $"Reward: {bootstrap.CurrentReward:F2}";
+                AudioRLRewardBreakdown reward = bootstrap.CurrentRewardBreakdown;
+                rewardValueLabel.text = $"Reward: {bootstrap.CurrentReward:F2} | Stress {reward.stressImprovement:+0.00;-0.00;0.00} | Preference {reward.preferenceMatch:F2}";
             }
 
             if (safetyValueLabel != null)
             {
-                safetyValueLabel.text = $"Safety: {bootstrap.CurrentSafetyMode}";
+                safetyValueLabel.text = $"Safety: {bootstrap.CurrentSafetyMode} | Replay {bootstrap.CurrentReplayBufferCount}";
             }
 
             if (causeValueLabel != null)
             {
                 causeValueLabel.text =
                     $"Cause chain:\n" +
-                    $"Stress {signal.stress:F2}, Confidence {signal.confidence:F2}, Mode {bootstrap.CurrentControllerMode}.\n" +
-                    $"Policy selected '{bootstrap.CurrentActionName}' with status '{bootstrap.CurrentPolicyStatus}'.\n" +
-                    $"This steers Intensity {parameters.intensity:F2}, Density {parameters.density:F2}, Brightness {parameters.brightness:F2}, Ambient {parameters.ambientMix:F2}, Music {parameters.musicMix:F2}.\n" +
-                    $"Safety state is '{bootstrap.CurrentSafetyMode}', so the panel can see whether changes are normal adaptation or a constrained fallback.";
+                    $"{bootstrap.CurrentRLStateSummary}.\n" +
+                    $"Rule action [{bootstrap.CurrentRuleAction}] + residual [{bootstrap.CurrentResidualAction}].\n" +
+                    $"Final safe action [{bootstrap.CurrentFinalSafeAction}] -> '{bootstrap.CurrentActionName}'.\n" +
+                    $"Targets: I {parameters.intensity:F2}, D {parameters.density:F2}, B {parameters.brightness:F2}, Tempo {parameters.tempo:F2}, Fade {parameters.fade:F2}, Ambient {parameters.ambientMix:F2}, Music {parameters.musicMix:F2}.\n" +
+                    $"Safety: {bootstrap.CurrentSafetyReason}";
             }
 
             if (lyriaClipGenerationService != null)
@@ -953,6 +964,8 @@ namespace AdaptiveAudioVR.UI
             SetMeter("intensity", parameters.intensity);
             SetMeter("density", parameters.density);
             SetMeter("brightness", parameters.brightness);
+            SetMeter("tempo", parameters.tempo);
+            SetMeter("fade", parameters.fade);
             SetMeter("ambientMix", parameters.ambientMix);
             SetMeter("musicMix", parameters.musicMix);
         }
@@ -995,7 +1008,7 @@ namespace AdaptiveAudioVR.UI
 
             if (outputCauseValueLabel != null && bootstrap != null)
             {
-                SignalPacket signal = signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
+                SignalPacket signal = bootstrap.CurrentSignal;
                 AudioParameters parameters = bootstrap.CurrentParameters;
                 outputCauseValueLabel.text =
                     $"Output cause: Stress {signal.stress:F2} and Confidence {signal.confidence:F2} -> RL action '{bootstrap.CurrentActionName}' -> " +

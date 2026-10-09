@@ -44,7 +44,7 @@ namespace AdaptiveAudioVR.Logging
                 string fileName = $"adaptive_audio_session_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
                 CurrentLogPath = Path.Combine(logDirectory, fileName);
                 writer = new StreamWriter(CurrentLogPath, false, Encoding.UTF8);
-                writer.WriteLine("unityTime,stress,confidence,intensity,density,brightness,ambientMix,musicMix,controllerMode,safetyMode,fallbackMode,strategyName,policyStatus,actionName,reward,bpm,guidance,temperature,lyriaPlaybackSource,lyriaGenerationReason,lyriaGenerationOutcome,lyriaCacheState,lyriaClipPath");
+                writer.WriteLine("unityTime,sourceTimestamp,windowStart,windowEnd,stress,confidence,signalQuality,heartRate,rmssd,sdnn,intensity,density,brightness,tempo,fade,ambientMix,musicMix,controllerMode,safetyMode,fallbackMode,strategyName,policyStatus,actionName,reward,bpm,guidance,temperature,lyriaPlaybackSource,lyriaGenerationReason,lyriaGenerationOutcome,lyriaCacheState,lyriaClipPath");
                 writer.Flush();
                 sessionStarted = true;
                 Debug.Log($"[SessionLogger] Logging session to {CurrentLogPath}", this);
@@ -86,32 +86,41 @@ namespace AdaptiveAudioVR.Logging
             string lyriaClipPath = lyriaClipGenerationService != null ? lyriaClipGenerationService.LastGeneratedClipPath : "Unavailable";
 
             lastLogTime = Time.time;
-            string line = string.Format(
-                CultureInfo.InvariantCulture,
-                "{0:F3},{1:F3},{2:F3},{3:F3},{4:F3},{5:F3},{6:F3},{7:F3},{8},{9},{10},{11},{12},{13},{14:F3},{15},{16:F3},{17:F3},{18},{19},{20},{21},{22}",
-                Time.time,
-                signal.stress,
-                signal.confidence,
-                parameters.intensity,
-                parameters.density,
-                parameters.brightness,
-                parameters.ambientMix,
-                parameters.musicMix,
-                controllerMode,
+            string line = string.Join(",", new[]
+            {
+                Time.time.ToString("F3", CultureInfo.InvariantCulture),
+                signal.sourceTimestamp.ToString("F3", CultureInfo.InvariantCulture),
+                signal.windowStart.ToString("F3", CultureInfo.InvariantCulture),
+                signal.windowEnd.ToString("F3", CultureInfo.InvariantCulture),
+                signal.stress.ToString("F3", CultureInfo.InvariantCulture),
+                signal.confidence.ToString("F3", CultureInfo.InvariantCulture),
+                signal.signalQuality.ToString("F3", CultureInfo.InvariantCulture),
+                signal.heartRate.ToString("F3", CultureInfo.InvariantCulture),
+                signal.rmssd.ToString("F3", CultureInfo.InvariantCulture),
+                signal.sdnn.ToString("F3", CultureInfo.InvariantCulture),
+                parameters.intensity.ToString("F3", CultureInfo.InvariantCulture),
+                parameters.density.ToString("F3", CultureInfo.InvariantCulture),
+                parameters.brightness.ToString("F3", CultureInfo.InvariantCulture),
+                parameters.tempo.ToString("F3", CultureInfo.InvariantCulture),
+                parameters.fade.ToString("F3", CultureInfo.InvariantCulture),
+                parameters.ambientMix.ToString("F3", CultureInfo.InvariantCulture),
+                parameters.musicMix.ToString("F3", CultureInfo.InvariantCulture),
+                controllerMode.ToString(),
                 SanitizeCsv(safetyMode),
-                fallbackMode,
+                fallbackMode.ToString(),
                 SanitizeCsv(strategyName),
                 SanitizeCsv(policyStatus),
                 SanitizeCsv(actionName),
-                reward,
-                generationConfig.bpm,
-                generationConfig.guidance,
-                generationConfig.temperature,
+                reward.ToString("F3", CultureInfo.InvariantCulture),
+                generationConfig.bpm.ToString(CultureInfo.InvariantCulture),
+                generationConfig.guidance.ToString("F3", CultureInfo.InvariantCulture),
+                generationConfig.temperature.ToString("F3", CultureInfo.InvariantCulture),
                 SanitizeCsv(lyriaPlaybackSource),
                 SanitizeCsv(lyriaGenerationReason),
                 SanitizeCsv(lyriaGenerationOutcome),
                 SanitizeCsv(lyriaCacheState),
-                SanitizeCsv(lyriaClipPath));
+                SanitizeCsv(lyriaClipPath)
+            });
 
             try
             {

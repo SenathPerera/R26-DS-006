@@ -15,7 +15,7 @@ the Quest and website, so it adds no simplification while duplicating the
 validated Python pipeline in another language.
 
 ```text
-Wearable (PPG + TMP117)
+Wearable (PPG + optional temperature)
       |  BLE
       v
   Mobile app        relays raw PPG, runs no model
