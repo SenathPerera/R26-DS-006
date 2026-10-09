@@ -66,6 +66,7 @@ Thumbs.db
 /unity/.utmp/
 /debug.log
 /.demo-runtime/
+/docs/LOCAL_FULL_SYSTEM_DEMO.md
 
 # Python environments, caches, and local secrets
 **/.env

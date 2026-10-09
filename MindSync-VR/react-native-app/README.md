@@ -139,7 +139,14 @@ real authentication and database persistence:
 4. In Supabase Authentication, enable Email authentication. Decide whether the
    research deployment requires email confirmation before inviting
    participants.
-5. Rebuild the app so the configuration is bundled:
+5. In **Authentication > URL Configuration**, add this exact Redirect URL so
+   password recovery links open the installed app:
+
+   ```text
+   mindsyncvr://auth/recovery
+   ```
+
+6. Rebuild the app so the configuration is bundled:
 
    ```bash
    npm run typecheck

@@ -13,6 +13,7 @@ import {unityBridge} from '../services/unity/unityBridge';
 import {sessionRecordOutbox} from '../services/session/sessionRecordOutbox';
 import {isSupabaseConfigured} from '../services/supabase/supabaseClient';
 import {supabaseAuthService} from '../services/supabase/supabaseAuthService';
+import {parsePasswordRecoveryUrl} from '../services/supabase/passwordRecovery';
 import {mindSyncRepository} from '../services/supabase/mindSyncRepository';
 import {describeSupabaseError} from '../services/supabase/supabaseError';
 import {
@@ -85,6 +86,8 @@ type MindSyncStore = {
   hydrated: boolean;
   authStatus: AuthStatus;
   authError: string | null;
+  passwordRecoveryStatus: 'idle' | 'opening' | 'ready' | 'updating' | 'error';
+  passwordRecoveryError: string | null;
   dataSyncStatus: DataSyncStatus;
   dataSyncError: string | null;
   lastSyncedAt: string | null;
@@ -111,6 +114,9 @@ type MindSyncStore = {
   login: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string) => Promise<{emailConfirmationRequired: boolean}>;
   sendPasswordReset: (email: string) => Promise<void>;
+  handlePasswordRecoveryUrl: (url: string) => Promise<void>;
+  updateRecoveredPassword: (password: string) => Promise<void>;
+  clearPasswordRecovery: () => void;
   logout: () => Promise<void>;
   syncNow: () => Promise<void>;
   updateOnboarding: (patch: Partial<OnboardingProfile>) => void;
@@ -137,6 +143,8 @@ export const useMindSyncStore = create<MindSyncStore>()(
       hydrated: false,
       authStatus: 'initializing',
       authError: null,
+      passwordRecoveryStatus: 'idle',
+      passwordRecoveryError: null,
       dataSyncStatus: 'idle',
       dataSyncError: null,
       lastSyncedAt: null,
@@ -222,6 +230,49 @@ export const useMindSyncStore = create<MindSyncStore>()(
           throw error;
         }
       },
+      handlePasswordRecoveryUrl: async url => {
+        const recoveryLink = parsePasswordRecoveryUrl(url);
+        if (recoveryLink.kind === 'ignored') return;
+        if (recoveryLink.kind === 'error') {
+          set({
+            passwordRecoveryStatus: 'error',
+            passwordRecoveryError: recoveryLink.message,
+          });
+          return;
+        }
+
+        set({passwordRecoveryStatus: 'opening', passwordRecoveryError: null});
+        try {
+          const session = await supabaseAuthService.establishPasswordRecoverySession(
+            recoveryLink.accessToken,
+            recoveryLink.refreshToken,
+          );
+          await applySupabaseSession(session);
+          set({passwordRecoveryStatus: 'ready', passwordRecoveryError: null});
+        } catch (error) {
+          set({
+            passwordRecoveryStatus: 'error',
+            passwordRecoveryError: errorMessage(error),
+          });
+        }
+      },
+      updateRecoveredPassword: async password => {
+        set({passwordRecoveryStatus: 'updating', passwordRecoveryError: null});
+        try {
+          await supabaseAuthService.updatePassword(password);
+          set({passwordRecoveryStatus: 'idle', passwordRecoveryError: null});
+        } catch (error) {
+          set({
+            passwordRecoveryStatus: 'ready',
+            passwordRecoveryError: errorMessage(error),
+          });
+          throw error;
+        }
+      },
+      clearPasswordRecovery: () => set({
+        passwordRecoveryStatus: 'idle',
+        passwordRecoveryError: null,
+      }),
       logout: async () => {
         realtimeService.disconnect();
         if (isSupabaseConfigured) await supabaseAuthService.signOut();

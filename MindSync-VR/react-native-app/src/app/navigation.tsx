@@ -3,7 +3,7 @@ import {NavigationContainer, DarkTheme} from '@react-navigation/native';
 import {createNativeStackNavigator} from '@react-navigation/native-stack';
 import {createBottomTabNavigator} from '@react-navigation/bottom-tabs';
 import {BarChart3, ClipboardCheck, Home, Settings} from 'lucide-react-native';
-import {ForgotPasswordScreen, WelcomeScreen, LoginScreen, SignUpScreen} from '../features/auth/AuthScreens';
+import {ForgotPasswordScreen, WelcomeScreen, LoginScreen, SignUpScreen, UpdatePasswordScreen} from '../features/auth/AuthScreens';
 import {OnboardingScreen} from '../features/onboarding/OnboardingScreen';
 import {HomeScreen} from '../features/dashboard/HomeScreen';
 import {WearableDetailScreen, WearableScreen} from '../features/wearable/WearableScreens';
@@ -24,6 +24,7 @@ export type RootStackParamList = {
   Login: undefined;
   SignUp: undefined;
   ForgotPassword: undefined;
+  UpdatePassword: undefined;
   Onboarding: undefined;
   MainTabs: {screen?: keyof MainTabParamList} | undefined;
   Wearable: undefined;
@@ -78,6 +79,7 @@ export function AppNavigation() {
   const hydrated = useMindSyncStore(state => state.hydrated);
   const authStatus = useMindSyncStore(state => state.authStatus);
   const user = useMindSyncStore(state => state.user);
+  const passwordRecoveryStatus = useMindSyncStore(state => state.passwordRecoveryStatus);
 
   if (!hydrated || authStatus === 'initializing') {
     return (
@@ -91,10 +93,13 @@ export function AppNavigation() {
   }
 
   const authenticated = user !== null;
+  const recovering = passwordRecoveryStatus !== 'idle';
   return (
     <NavigationContainer theme={navigationTheme}>
-      <Stack.Navigator key={authenticated ? 'authenticated' : 'signed-out'} initialRouteName={authenticated ? (user.onboardingComplete ? 'MainTabs' : 'Onboarding') : 'Welcome'} screenOptions={{headerShown: false, animation: 'fade_from_bottom', contentStyle: {backgroundColor: colors.midnight}}}>
-        {authenticated ? <>
+      <Stack.Navigator key={recovering ? 'recovery' : authenticated ? 'authenticated' : 'signed-out'} initialRouteName={recovering ? 'UpdatePassword' : authenticated ? (user.onboardingComplete ? 'MainTabs' : 'Onboarding') : 'Welcome'} screenOptions={{headerShown: false, animation: 'fade_from_bottom', contentStyle: {backgroundColor: colors.midnight}}}>
+        {recovering ? (
+          <Stack.Screen name="UpdatePassword" component={UpdatePasswordScreen} options={{gestureEnabled: false}} />
+        ) : authenticated ? <>
           <Stack.Screen name="Onboarding" component={OnboardingScreen} />
           <Stack.Screen name="MainTabs" component={MainTabs} options={{animation: 'fade'}} />
           <Stack.Screen name="Wearable" component={WearableScreen} />

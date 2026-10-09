@@ -1,5 +1,5 @@
 import React, {useEffect} from 'react';
-import {StatusBar} from 'react-native';
+import {Linking, StatusBar} from 'react-native';
 import {GestureHandlerRootView} from 'react-native-gesture-handler';
 import {SafeAreaProvider} from 'react-native-safe-area-context';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
@@ -21,6 +21,7 @@ const queryClient = new QueryClient({
 export function AppRoot() {
   const hydrated = useMindSyncStore(state => state.hydrated);
   const initializeAuth = useMindSyncStore(state => state.initializeAuth);
+  const handlePasswordRecoveryUrl = useMindSyncStore(state => state.handlePasswordRecoveryUrl);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -35,6 +36,24 @@ export function AppRoot() {
       cleanup?.();
     };
   }, [hydrated, initializeAuth]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let active = true;
+    const handledUrls = new Set<string>();
+    const handleUrl = (url: string | null | undefined) => {
+      if (!active || !url || handledUrls.has(url)) return;
+      handledUrls.add(url);
+      void handlePasswordRecoveryUrl(url);
+    };
+
+    const subscription = Linking.addEventListener('url', event => handleUrl(event.url));
+    Linking.getInitialURL().then(handleUrl).catch(() => undefined);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, [handlePasswordRecoveryUrl, hydrated]);
 
   return (
     <GestureHandlerRootView style={{flex: 1}}>
