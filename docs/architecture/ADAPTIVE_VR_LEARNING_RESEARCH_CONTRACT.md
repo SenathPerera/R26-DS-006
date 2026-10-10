@@ -315,8 +315,8 @@ At each eligible decision point:
 
 1. Build the versioned normalized context.
 2. Generate all eleven actions.
-3. Remove actions disallowed by scene limits, sensitivity constraints,
-   boundaries, cooldowns, repeated-direction limits, or total-variation limits.
+3. Remove actions disallowed by scene limits, boundaries, cooldowns,
+   repeated-direction limits, or total-variation limits.
 4. Retain `NoChange`.
 5. Score eligible candidates.
 6. Select with approved conservative exploration and deterministic tie-breaking.
@@ -779,8 +779,8 @@ At each eligible decision point:
 
 1. Build the versioned normalized context.
 2. Generate all eleven actions.
-3. Remove actions disallowed by scene limits, sensitivity constraints,
-   boundaries, cooldowns, repeated-direction limits, or total-variation limits.
+3. Remove actions disallowed by scene limits, boundaries, cooldowns,
+   repeated-direction limits, or total-variation limits.
 4. Retain `NoChange`.
 5. Score eligible candidates.
 6. Select with approved conservative exploration and deterministic tie-breaking.

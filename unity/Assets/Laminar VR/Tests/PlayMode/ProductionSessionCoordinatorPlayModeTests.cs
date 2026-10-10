@@ -204,7 +204,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             boundary.ReceiveSessionContext(
                 "playmode-boundary-" + Guid.NewGuid().ToString("N"),
                 "P-PLAYMODE-BOUNDARY",
-                State(0.5f));
+                State(0.5f),
+                CreateSessionContext());
             boundary.ReceiveConnectionState(
                 SessionTransportConnectionState.Connected);
             boundary.ReceiveCommand("start", SessionCommandType.Start);
@@ -269,7 +270,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             boundary.ReceiveSessionContext(
                 "playmode-local-emergency-" + Guid.NewGuid().ToString("N"),
                 "P-PLAYMODE-LOCAL-EMERGENCY",
-                State(0.5f));
+                State(0.5f),
+                CreateSessionContext());
             Assert.That(boundary.ProcessPendingMessages(), Is.EqualTo(1));
             Assert.That(
                 coordinator.TryInitialize(out var validationError),
@@ -546,6 +548,21 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         private static EnvironmentState State(float value)
         {
             return new EnvironmentState(value, value, value, value, value);
+        }
+
+        private static SessionContextSnapshot CreateSessionContext()
+        {
+            return new SessionContextSnapshot(
+                SessionContextSnapshot.SupportedSchemaVersion,
+                "2026-10-10T08:30:00.000Z",
+                6d,
+                -0.2d,
+                0.7d,
+                0.4d,
+                false,
+                510,
+                2,
+                3);
         }
 
         private static double UtcNowUnixSeconds()

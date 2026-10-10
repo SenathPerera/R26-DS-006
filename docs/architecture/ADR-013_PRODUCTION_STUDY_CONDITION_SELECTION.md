@@ -26,8 +26,9 @@ The rule-based thresholds remain unapproved under the research contract.
 The mobile build configuration supplies one explicit `STUDY_CONDITION` value
 when preparing a session. The relay validates it, stores it with the prepared
 session, and forwards it to Quest in `session_configuration.studyCondition`.
-The relay contract is versioned as `mindsync-session-v2` because this is a new
-required field.
+The relay contract was versioned as `mindsync-session-v2` for this required
+field. ADR-014 subsequently supersedes the active envelope with
+`mindsync-session-v3` while preserving the same study-condition requirement.
 
 Quest maps the exact wire value to `StudyPolicyMode`, rejects unsupported
 values, selects the policy before `ApplicationBootstrap` initializes, and

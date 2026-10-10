@@ -41,6 +41,7 @@ class SessionRelayAppTests(unittest.TestCase):
                     "colorRichness": 0.5,
                     "ambientMotion": 0.75,
                 },
+                "sessionContext": self._session_context(),
             },
         )
         self.assertEqual(200, prepared.status_code)
@@ -74,6 +75,10 @@ class SessionRelayAppTests(unittest.TestCase):
                 self.assertEqual(
                     "ContextualBandit",
                     configuration["payload"]["studyCondition"],
+                )
+                self.assertEqual(
+                    self._session_context(),
+                    configuration["payload"]["sessionContext"],
                 )
 
                 # A command sent before readiness must arrive before start. This
@@ -205,10 +210,47 @@ class SessionRelayAppTests(unittest.TestCase):
                     "colorRichness": 0.5,
                     "ambientMotion": 0.5,
                 },
+                "sessionContext": self._session_context(),
             },
         )
 
         self.assertEqual(422, response.status_code)
+
+    def test_create_session_rejects_missing_or_invalid_session_context(self) -> None:
+        request = {
+            "requestId": "request-invalid-context",
+            "participantPseudonym": "participant-7",
+            "sceneId": "temple-pond",
+            "studyCondition": "StaticPersonalized",
+            "preferredEnvironment": {
+                "illumination": 0.5,
+                "warmth": 0.5,
+                "atmosphericSoftness": 0.5,
+                "colorRichness": 0.5,
+                "ambientMotion": 0.5,
+            },
+        }
+        self.assertEqual(422, self.client.post("/sessions", json=request).status_code)
+        request["sessionContext"] = {
+            **self._session_context(),
+            "subjectiveStress": 11,
+        }
+        self.assertEqual(422, self.client.post("/sessions", json=request).status_code)
+
+    @staticmethod
+    def _session_context() -> dict:
+        return {
+            "schemaVersion": "mindsync-session-context-v1",
+            "collectedAt": "2026-10-10T08:30:00.000Z",
+            "subjectiveStress": 6,
+            "moodValence": -0.2,
+            "fatigue": 0.7,
+            "sleepQuality": 0.4,
+            "headacheOrEyeStrainToday": False,
+            "timeOfDayMinutes": 510,
+            "sessionSequenceNumber": 2,
+            "daysSincePreviousSession": 3,
+        }
 
     @staticmethod
     def _envelope(message_type: str, payload: dict, message_id: str) -> dict:

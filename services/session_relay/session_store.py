@@ -15,6 +15,7 @@ class PreparedSession:
     scene_id: str
     study_condition: str
     preferred_environment: dict[str, float]
+    session_context: dict[str, object]
     pairing_code: str
     expires_at_unix_seconds: float
     mobile_token: str
@@ -53,6 +54,7 @@ class SessionStore:
         scene_id: str,
         study_condition: str,
         preferred_environment: dict[str, float],
+        session_context: dict[str, object],
     ) -> PreparedSession:
         request_id = self._required(request_id, "request_id")
         participant_pseudonym = self._required(
@@ -61,6 +63,8 @@ class SessionStore:
         scene_id = self._required(scene_id, "scene_id")
         study_condition = self._required(study_condition, "study_condition")
         self._validate_environment(preferred_environment)
+        if not isinstance(session_context, dict):
+            raise ValueError("session_context is required")
 
         with self._lock:
             existing_id = self._session_ids_by_request.get(request_id)
@@ -81,6 +85,7 @@ class SessionStore:
                 scene_id=scene_id,
                 study_condition=study_condition,
                 preferred_environment=dict(preferred_environment),
+                session_context=dict(session_context),
                 pairing_code=code,
                 expires_at_unix_seconds=now + self._code_lifetime_seconds,
                 mobile_token=self._token_factory(),

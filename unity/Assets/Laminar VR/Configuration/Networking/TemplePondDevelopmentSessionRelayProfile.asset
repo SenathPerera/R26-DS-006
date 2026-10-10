@@ -17,7 +17,7 @@ MonoBehaviour:
   deploymentConfigurationApproved: 1
   developmentNetworkProfile: {fileID: 11400000, guid: 9605881a83ec452ea3d710050d82329c, type: 2}
   relayEndpoint: ''
-  schemaVersion: mindsync-session-v2
+  schemaVersion: mindsync-session-v3
   maximumMessageBytes: 65536
   maximumTelemetryEventsPerBatch: 32
   allowInsecureDevelopmentEndpoint: 1

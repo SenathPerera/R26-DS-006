@@ -16,6 +16,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         SchemaVersionMismatch,
         MessageTypeUnsupported,
         PreferredEnvironmentInvalid,
+        SessionContextInvalid,
         CommandTypeUnsupported,
         StudyConditionUnsupported
     }
@@ -41,11 +42,24 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             "sceneId",
             "studyCondition",
             "preferredEnvironment",
+            "sessionContext",
             "illumination",
             "warmth",
             "atmosphericSoftness",
             "colorRichness",
             "ambientMotion"
+        };
+
+        private static readonly string[] RequiredSessionContextProperties =
+        {
+            "collectedAt",
+            "subjectiveStress",
+            "moodValence",
+            "fatigue",
+            "sleepQuality",
+            "headacheOrEyeStrainToday",
+            "timeOfDayMinutes",
+            "sessionSequenceNumber"
         };
 
         private static readonly string[] RequiredCommandProperties =
@@ -159,7 +173,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 || string.IsNullOrWhiteSpace(envelope.payload.sceneId)
                 || string.IsNullOrWhiteSpace(
                     envelope.payload.studyCondition)
-                || envelope.payload.preferredEnvironment == null)
+                || envelope.payload.preferredEnvironment == null
+                || envelope.payload.sessionContext == null)
             {
                 reasonCode =
                     SessionRelayMessageParseReasonCode.RequiredFieldMissing;
@@ -200,6 +215,16 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 return false;
             }
 
+            if (!TryMapSessionContext(
+                    json,
+                    envelope.payload.sessionContext,
+                    out var sessionContext))
+            {
+                reasonCode = SessionRelayMessageParseReasonCode
+                    .SessionContextInvalid;
+                return false;
+            }
+
             try
             {
                 var configuration = new SessionRelayConfigurationMessage(
@@ -209,7 +234,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                     envelope.payload.participantPseudonym,
                     envelope.payload.sceneId,
                     studyPolicyMode,
-                    preference);
+                    preference,
+                    sessionContext);
                 message = SessionRelayInboundMessage.ForConfiguration(
                     configuration);
                 return true;
@@ -218,6 +244,46 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             {
                 reasonCode =
                     SessionRelayMessageParseReasonCode.RequiredFieldMissing;
+                return false;
+            }
+        }
+
+        private static bool TryMapSessionContext(
+            string json,
+            SessionContextDto context,
+            out SessionContextSnapshot snapshot)
+        {
+            snapshot = null;
+            if (context == null
+                || !HasNonNullProperties(
+                    json,
+                    RequiredSessionContextProperties)
+                || !HasProperty(json, "daysSincePreviousSession"))
+            {
+                return false;
+            }
+
+            var daysSincePreviousSession =
+                IsPropertyJsonNull(json, "daysSincePreviousSession")
+                    ? (int?)null
+                    : context.daysSincePreviousSession;
+            try
+            {
+                snapshot = new SessionContextSnapshot(
+                    context.schemaVersion,
+                    context.collectedAt,
+                    context.subjectiveStress,
+                    context.moodValence,
+                    context.fatigue,
+                    context.sleepQuality,
+                    context.headacheOrEyeStrainToday,
+                    context.timeOfDayMinutes,
+                    context.sessionSequenceNumber,
+                    daysSincePreviousSession);
+                return true;
+            }
+            catch (ArgumentException)
+            {
                 return false;
             }
         }
@@ -342,6 +408,52 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             return false;
         }
 
+        private static bool HasProperty(string json, string propertyName)
+        {
+            return FindPropertyValueIndex(json, propertyName) >= 0;
+        }
+
+        private static bool IsPropertyJsonNull(
+            string json,
+            string propertyName)
+        {
+            var valueIndex = FindPropertyValueIndex(json, propertyName);
+            return valueIndex >= 0 && StartsWithJsonNull(json, valueIndex);
+        }
+
+        private static int FindPropertyValueIndex(
+            string json,
+            string propertyName)
+        {
+            var token = "\"" + propertyName + "\"";
+            var propertyIndex = json.IndexOf(token, StringComparison.Ordinal);
+            if (propertyIndex < 0)
+            {
+                return -1;
+            }
+
+            var valueIndex = propertyIndex + token.Length;
+            while (valueIndex < json.Length
+                && char.IsWhiteSpace(json[valueIndex]))
+            {
+                valueIndex++;
+            }
+
+            if (valueIndex >= json.Length || json[valueIndex] != ':')
+            {
+                return -1;
+            }
+
+            valueIndex++;
+            while (valueIndex < json.Length
+                && char.IsWhiteSpace(json[valueIndex]))
+            {
+                valueIndex++;
+            }
+
+            return valueIndex < json.Length ? valueIndex : -1;
+        }
+
         private static bool StartsWithJsonNull(string json, int valueIndex)
         {
             const string NullToken = "null";
@@ -373,6 +485,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             public string sceneId;
             public string studyCondition;
             public PreferredEnvironmentDto preferredEnvironment;
+            public SessionContextDto sessionContext;
             public string command;
         }
 
@@ -384,6 +497,21 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             public float atmosphericSoftness;
             public float colorRichness;
             public float ambientMotion;
+        }
+
+        [Serializable]
+        private sealed class SessionContextDto
+        {
+            public string schemaVersion;
+            public string collectedAt;
+            public double subjectiveStress;
+            public double moodValence;
+            public double fatigue;
+            public double sleepQuality;
+            public bool headacheOrEyeStrainToday;
+            public int timeOfDayMinutes;
+            public int sessionSequenceNumber;
+            public int daysSincePreviousSession;
         }
 #pragma warning restore 0649
     }

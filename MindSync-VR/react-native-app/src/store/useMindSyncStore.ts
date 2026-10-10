@@ -18,6 +18,7 @@ import {mindSyncRepository} from '../services/supabase/mindSyncRepository';
 import {describeSupabaseError} from '../services/supabase/supabaseError';
 import {
   effectiveEnvironmentPreference,
+  questSessionContext,
   TEMPLE_POND_SAFE_DEFAULT,
 } from '../services/preferences/preferenceProfile';
 import {
@@ -46,7 +47,6 @@ const emptyOnboarding: OnboardingProfile = {
   preferredAtmosphericSoftness: TEMPLE_POND_SAFE_DEFAULT.atmosphericSoftness,
   preferredColorRichness: TEMPLE_POND_SAFE_DEFAULT.colorRichness,
   preferredAmbientMotion: TEMPLE_POND_SAFE_DEFAULT.ambientMotion,
-  lightSensitivity: null, motionSensitivity: 0.5,
   consentAccepted: false, researchConsent: false,
 };
 
@@ -381,6 +381,9 @@ export const useMindSyncStore = create<MindSyncStore>()(
           if (!environment.studyCondition) {
             throw new Error('study-condition-not-configured');
           }
+          if (!state.sessionContext) {
+            throw new Error('session-context-not-configured');
+          }
           const createRequestId = prepared && !codeIsFresh ? `${requestId}-${Date.now()}` : requestId;
           const newPrepared = await realtimeService.createPreparedSession({
             requestId: createRequestId,
@@ -391,6 +394,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
               state.onboarding,
               state.sessionContext,
             ),
+            sessionContext: questSessionContext(state.sessionContext),
           });
           const activeSession = state.activeSession ?? get().createSession();
           const preparedActiveSession: MeditationSession = {

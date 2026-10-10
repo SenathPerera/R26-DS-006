@@ -16,6 +16,18 @@ PREFERENCE = {
     "ambientMotion": 0.75,
 }
 STUDY_CONDITION = "StaticPersonalized"
+SESSION_CONTEXT = {
+    "schemaVersion": "mindsync-session-context-v1",
+    "collectedAt": "2026-10-10T08:30:00.000Z",
+    "subjectiveStress": 6,
+    "moodValence": -0.2,
+    "fatigue": 0.7,
+    "sleepQuality": 0.4,
+    "headacheOrEyeStrainToday": False,
+    "timeOfDayMinutes": 510,
+    "sessionSequenceNumber": 2,
+    "daysSincePreviousSession": 3,
+}
 
 
 class SessionStoreTests(unittest.TestCase):
@@ -31,7 +43,8 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_create_is_idempotent_for_request_id(self) -> None:
         first = self.store.create(
-            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE
+            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
+            SESSION_CONTEXT,
         )
         second = self.store.create(
             "request-1",
@@ -39,6 +52,7 @@ class SessionStoreTests(unittest.TestCase):
             "temple-pond",
             "ContextualBandit",
             PREFERENCE,
+            SESSION_CONTEXT,
         )
         self.assertIs(first, second)
         self.assertEqual("123456", first.pairing_code)
@@ -46,7 +60,8 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_only_one_active_session_is_allowed(self) -> None:
         self.store.create(
-            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE
+            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
+            SESSION_CONTEXT,
         )
         with self.assertRaises(ActiveSessionExistsError):
             self.store.create(
@@ -55,11 +70,13 @@ class SessionStoreTests(unittest.TestCase):
                 "temple-pond",
                 STUDY_CONDITION,
                 PREFERENCE,
+                SESSION_CONTEXT,
             )
 
     def test_pairing_code_is_one_time(self) -> None:
         session = self.store.create(
-            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE
+            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
+            SESSION_CONTEXT,
         )
         paired = self.store.pair(session.pairing_code, "quest-1")
         self.assertEqual("quest-1", paired.quest_client_id)
@@ -68,13 +85,15 @@ class SessionStoreTests(unittest.TestCase):
 
     def test_expired_code_is_rejected_and_allows_new_session(self) -> None:
         session = self.store.create(
-            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE
+            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
+            SESSION_CONTEXT,
         )
         self.now = session.expires_at_unix_seconds
         with self.assertRaisesRegex(PairingRejectedError, "code-expired"):
             self.store.pair(session.pairing_code, "quest-1")
         replacement = self.store.create(
-            "request-2", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE
+            "request-2", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
+            SESSION_CONTEXT,
         )
         self.assertEqual("654321", replacement.pairing_code)
 
@@ -82,7 +101,8 @@ class SessionStoreTests(unittest.TestCase):
         self,
     ) -> None:
         session = self.store.create(
-            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE
+            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
+            SESSION_CONTEXT,
         )
         with self.assertRaisesRegex(
             VisualLogAcknowledgementError,

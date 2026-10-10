@@ -255,7 +255,16 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"studyCondition\":\"StaticPersonalized\","
                 + "\"preferredEnvironment\":{\"illumination\":0.3,"
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
-                + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4},"
+                + "\"sessionContext\":{"
+                + "\"schemaVersion\":\"mindsync-session-context-v1\","
+                + "\"collectedAt\":\"2026-10-10T08:30:00.000Z\","
+                + "\"subjectiveStress\":6,\"moodValence\":-0.2,"
+                + "\"fatigue\":0.7,\"sleepQuality\":0.4,"
+                + "\"headacheOrEyeStrainToday\":false,"
+                + "\"timeOfDayMinutes\":510,"
+                + "\"sessionSequenceNumber\":2,"
+                + "\"daysSincePreviousSession\":3}}}";
         }
 
         private static string CreateCommandJson(

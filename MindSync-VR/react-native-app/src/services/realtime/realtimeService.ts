@@ -2,6 +2,7 @@ import {environment} from '../../config/environment';
 import {
   PreferredEnvironment,
   PreparedVrSession,
+  QuestSessionContext,
   RelayEnvelope,
   StudyCondition,
   VisualLogSnapshot,
@@ -9,7 +10,7 @@ import {
 
 export type {RelayEnvelope, VisualLogSnapshot} from '../../types/domain';
 
-export const SESSION_RELAY_SCHEMA_VERSION = 'mindsync-session-v2';
+export const SESSION_RELAY_SCHEMA_VERSION = 'mindsync-session-v3';
 
 export type CreatePreparedSessionInput = {
   requestId: string;
@@ -17,6 +18,7 @@ export type CreatePreparedSessionInput = {
   sceneId: string;
   studyCondition: StudyCondition;
   preferredEnvironment: PreferredEnvironment;
+  sessionContext: QuestSessionContext;
 };
 
 type RelayHandlers = {

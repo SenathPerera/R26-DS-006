@@ -35,7 +35,7 @@ clearly identified development values:
 
 - Local relay endpoint: derived from `MINDSYNC_DEVELOPMENT_HOST` using port
   8080 and path `/realtime?role=quest`.
-- Schema identifier: `mindsync-session-v2`.
+- Schema identifier: `mindsync-session-v3`.
 - Pairing-code lifetime: five minutes.
 - Readiness-to-start initialization delay: 30 seconds.
 - Maximum inbound message size: 65,536 bytes.

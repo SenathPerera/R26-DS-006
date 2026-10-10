@@ -390,7 +390,23 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 "P017",
                 sceneId,
                 policyMode,
-                new EnvironmentState(0.3f, 0.6f, 0.2f, 0.7f, 0.4f));
+                new EnvironmentState(0.3f, 0.6f, 0.2f, 0.7f, 0.4f),
+                CreateSessionContext());
+        }
+
+        private static SessionContextSnapshot CreateSessionContext()
+        {
+            return new SessionContextSnapshot(
+                SessionContextSnapshot.SupportedSchemaVersion,
+                "2026-10-10T08:30:00.000Z",
+                6d,
+                -0.2d,
+                0.7d,
+                0.4d,
+                false,
+                510,
+                2,
+                3);
         }
 
         private sealed class Setup

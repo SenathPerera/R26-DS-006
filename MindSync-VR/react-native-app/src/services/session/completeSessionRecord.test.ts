@@ -102,7 +102,7 @@ function summary(): FullSessionResult {
 
 function visualLog(): VisualLogSnapshot {
   return {
-    schemaVersion: 'mindsync-session-v2',
+    schemaVersion: 'mindsync-session-v3',
     sessionId: 'session-relay-9',
     finalized: true,
     completionPhase: 'completed',
@@ -110,7 +110,7 @@ function visualLog(): VisualLogSnapshot {
     messageCount: 1,
     lastMessageId: 'message-1',
     messages: [{
-      schemaVersion: 'mindsync-session-v2',
+      schemaVersion: 'mindsync-session-v3',
       messageId: 'message-1',
       messageType: 'quest_state',
       payload: {phase: 'completed'},

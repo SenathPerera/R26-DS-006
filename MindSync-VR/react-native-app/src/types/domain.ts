@@ -33,13 +33,10 @@ export interface OnboardingProfile {
   preferredAtmosphericSoftness: number;
   preferredColorRichness: number;
   preferredAmbientMotion: number;
-  lightSensitivity: LightSensitivity | null;
-  motionSensitivity: number;
   consentAccepted: boolean;
   researchConsent: boolean;
 }
 
-export type LightSensitivity = 'none' | 'mild' | 'high';
 export type SessionPreferenceMode = 'usual' | 'adjust';
 
 export interface WearableDevice {
@@ -146,6 +143,19 @@ export interface SessionContext {
   sessionPreferredAtmosphericSoftness: number | null;
   sessionPreferredColorRichness: number | null;
   sessionPreferredAmbientMotion: number | null;
+  timeOfDayMinutes: number;
+  sessionSequenceNumber: number;
+  daysSincePreviousSession: number | null;
+}
+
+export interface QuestSessionContext {
+  schemaVersion: 'mindsync-session-context-v1';
+  collectedAt: string;
+  subjectiveStress: number;
+  moodValence: number;
+  fatigue: number;
+  sleepQuality: number;
+  headacheOrEyeStrainToday: boolean;
   timeOfDayMinutes: number;
   sessionSequenceNumber: number;
   daysSincePreviousSession: number | null;

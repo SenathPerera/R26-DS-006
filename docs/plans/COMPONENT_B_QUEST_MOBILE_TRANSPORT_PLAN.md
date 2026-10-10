@@ -211,12 +211,13 @@ handoff, and full pilot-length validation remain pending.
 - Keep session control operational when Component B is temporarily unavailable.
 
 The current inbound envelope remains version-configurable. The synchronized
-mobile, relay, and Quest implementation uses `mindsync-session-v2`. It contains:
+mobile, relay, and Quest implementation uses `mindsync-session-v3`. It contains:
 
 - `schemaVersion`, `messageId`, `messageType`, and `payload`.
 - `session_configuration` payloads with `sessionId`,
-  `participantPseudonym`, `sceneId`, the required `studyCondition`, and five
-  named normalized values under `preferredEnvironment`.
+  `participantPseudonym`, `sceneId`, the required `studyCondition`, five named
+  normalized values under `preferredEnvironment`, and the required versioned
+  analysis-only `sessionContext` defined by ADR-014.
 - `session_command` payloads with `sessionId` and one of `start`, `pause`,
   `resume`, `stop`, or `emergency_stop`.
 

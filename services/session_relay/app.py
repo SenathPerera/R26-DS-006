@@ -2,15 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime
 from enum import Enum
 import json
 import os
 from pathlib import Path
 import time
+from typing import Literal
 import uuid
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .session_store import (
     ActiveSessionExistsError,
@@ -22,7 +24,7 @@ from .session_store import (
 )
 
 
-SCHEMA_VERSION = "mindsync-session-v2"
+SCHEMA_VERSION = "mindsync-session-v3"
 CODE_LIFETIME_SECONDS = float(os.getenv("SESSION_RELAY_CODE_LIFETIME_SECONDS", "300"))
 INITIALIZATION_DELAY_SECONDS = max(
     0.0,
@@ -34,7 +36,7 @@ DATA_DIRECTORY = Path(
 
 
 class PreferredEnvironment(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     illumination: float = Field(ge=0, le=1)
     warmth: float = Field(ge=0, le=1)
@@ -49,16 +51,51 @@ class StudyCondition(str, Enum):
     CONTEXTUAL_BANDIT = "ContextualBandit"
 
 
+class SessionContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    schema_version: str = Field(
+        alias="schemaVersion",
+        pattern=r"^mindsync-session-context-v1$",
+    )
+    collected_at: str = Field(alias="collectedAt", min_length=1)
+    subjective_stress: float = Field(alias="subjectiveStress", ge=0, le=10)
+    mood_valence: float = Field(alias="moodValence", ge=-1, le=1)
+    fatigue: float = Field(ge=0, le=1)
+    sleep_quality: float = Field(alias="sleepQuality", ge=0, le=1)
+    headache_or_eye_strain_today: bool = Field(
+        alias="headacheOrEyeStrainToday"
+    )
+    time_of_day_minutes: int = Field(alias="timeOfDayMinutes", ge=0, le=1439)
+    session_sequence_number: int = Field(alias="sessionSequenceNumber", ge=1)
+    days_since_previous_session: int | None = Field(
+        alias="daysSincePreviousSession", ge=0
+    )
+
+    @field_validator("collected_at")
+    @classmethod
+    def validate_collected_at(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("collectedAt must be an ISO-8601 timestamp") from error
+        if parsed.tzinfo is None:
+            raise ValueError("collectedAt must include a UTC offset")
+        return normalized
+
+
 class CreateSessionRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     request_id: str = Field(alias="requestId", min_length=1, max_length=128)
     participant_pseudonym: str = Field(
         alias="participantPseudonym", min_length=1, max_length=128
     )
-    scene_id: str = Field(alias="sceneId", min_length=1, max_length=128)
+    scene_id: Literal["temple-pond"] = Field(alias="sceneId")
     study_condition: StudyCondition = Field(alias="studyCondition")
     preferred_environment: PreferredEnvironment = Field(alias="preferredEnvironment")
+    session_context: SessionContext = Field(alias="sessionContext")
 
 
 class CreateSessionResponse(BaseModel):
@@ -138,6 +175,7 @@ async def health() -> dict[str, str]:
 @app.post("/sessions", response_model=CreateSessionResponse)
 async def create_session(request: CreateSessionRequest) -> CreateSessionResponse:
     environment = request.preferred_environment.model_dump(by_alias=True)
+    session_context = request.session_context.model_dump(by_alias=True)
     try:
         session = store.create(
             request.request_id,
@@ -145,6 +183,7 @@ async def create_session(request: CreateSessionRequest) -> CreateSessionResponse
             request.scene_id,
             request.study_condition.value,
             environment,
+            session_context,
         )
     except ActiveSessionExistsError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -366,6 +405,7 @@ def _configuration(session: PreparedSession) -> dict:
             "sceneId": session.scene_id,
             "studyCondition": session.study_condition,
             "preferredEnvironment": session.preferred_environment,
+            "sessionContext": session.session_context,
         },
     )
 

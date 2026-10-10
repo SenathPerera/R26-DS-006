@@ -9,7 +9,13 @@ mobile connection.
 The session creation request must include one exact `studyCondition` value:
 `StaticPersonalized`, `RuleBasedAdaptive`, or `ContextualBandit`. The relay
 stores that assignment and forwards it unchanged under the
-`mindsync-session-v2` schema.
+`mindsync-session-v3` schema.
+
+Session creation also requires a bounded `mindsync-session-context-v1`
+snapshot. The relay forwards the validated snapshot for Quest telemetry; it
+does not derive preferences or policy features from it. The shared request and
+Quest configuration shape is defined in
+`contracts/session/mindsync-session-v3.schema.json`.
 
 The relay does not start a paired session immediately. It waits for Quest to
 publish its validated `ready` phase, then observes a 30-second initialization

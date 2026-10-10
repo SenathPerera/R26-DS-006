@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Application;
 using LaminarVR.AdaptiveMeditation.Environment;
+using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Rewards;
@@ -98,6 +99,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private string sessionId;
         private string participantPseudonym;
         private EnvironmentState preferredEnvironment;
+        private SessionContextSnapshot sessionContextSnapshot;
         private bool hasSessionContext;
 
         public event Action<SessionPhaseTransition> PhaseChanged;
@@ -265,6 +267,19 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             string pseudonymousParticipantId,
             EnvironmentState safePreferredEnvironment)
         {
+            ConfigureSessionContext(
+                activeSessionId,
+                pseudonymousParticipantId,
+                safePreferredEnvironment,
+                null);
+        }
+
+        public void ConfigureSessionContext(
+            string activeSessionId,
+            string pseudonymousParticipantId,
+            EnvironmentState safePreferredEnvironment,
+            SessionContextSnapshot contextSnapshot)
+        {
             if (IsInitialized)
             {
                 throw new InvalidOperationException(
@@ -295,6 +310,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             sessionId = activeSessionId.Trim();
             participantPseudonym = pseudonymousParticipantId.Trim();
             preferredEnvironment = safePreferredEnvironment;
+            sessionContextSnapshot = contextSnapshot;
             hasSessionContext = true;
         }
 
@@ -416,11 +432,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 TelemetryEventTypes.ApplicationStarted,
                 true,
                 Array.Empty<TelemetryField>());
-            QueueTelemetry(
-                TelemetryEventTypes.SessionConfigReceived,
-                true,
-                new[]
-                {
+            var sessionConfigurationFields = new List<TelemetryField>
+            {
                     TelemetryField.String(
                         "coordinator_configuration_id",
                         coordinatorConfiguration.ConfigurationId),
@@ -456,10 +469,21 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     TelemetryField.Number(
                         "preferred_ambient_motion",
                         preferredEnvironment.AmbientMotion),
-                    TelemetryField.Boolean(
-                        "preference_initialization_transition_started",
-                        preferenceInitializationTransitionStarted)
-                });
+                TelemetryField.Boolean(
+                    "preference_initialization_transition_started",
+                    preferenceInitializationTransitionStarted)
+            };
+            if (sessionContextSnapshot != null)
+            {
+                sessionConfigurationFields.AddRange(
+                    CreateSessionContextTelemetryFields(
+                        sessionContextSnapshot));
+            }
+
+            QueueTelemetry(
+                TelemetryEventTypes.SessionConfigReceived,
+                true,
+                sessionConfigurationFields.ToArray());
             if (preferenceInitializationTransitionStarted)
             {
                 QueueTelemetry(
@@ -910,6 +934,47 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 monotonicTimeSeconds,
                 applicationBootstrap.SceneProfile.TransitionDurationSeconds);
             return true;
+        }
+
+        private static TelemetryField[] CreateSessionContextTelemetryFields(
+            SessionContextSnapshot context)
+        {
+            return new[]
+            {
+                TelemetryField.String(
+                    "session_context_schema_version",
+                    context.SchemaVersion),
+                TelemetryField.String(
+                    "session_context_collected_at",
+                    context.CollectedAt),
+                TelemetryField.Number(
+                    "session_context_subjective_stress",
+                    context.SubjectiveStress),
+                TelemetryField.Number(
+                    "session_context_mood_valence",
+                    context.MoodValence),
+                TelemetryField.Number(
+                    "session_context_fatigue",
+                    context.Fatigue),
+                TelemetryField.Number(
+                    "session_context_sleep_quality",
+                    context.SleepQuality),
+                TelemetryField.Boolean(
+                    "session_context_headache_or_eye_strain",
+                    context.HeadacheOrEyeStrainToday),
+                TelemetryField.Integer(
+                    "session_context_time_of_day_minutes",
+                    context.TimeOfDayMinutes),
+                TelemetryField.Integer(
+                    "session_context_session_sequence_number",
+                    context.SessionSequenceNumber),
+                context.DaysSincePreviousSession.HasValue
+                    ? TelemetryField.Integer(
+                        "session_context_days_since_previous_session",
+                        context.DaysSincePreviousSession.Value)
+                    : TelemetryField.Null(
+                        "session_context_days_since_previous_session")
+            };
         }
 
         private string PreferenceInitializationTransitionId()

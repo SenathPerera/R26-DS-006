@@ -355,7 +355,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             visualSessionBoundary.ReceiveSessionContext(
                 configuration.SessionId,
                 configuration.ParticipantPseudonym,
-                configuration.PreferredEnvironment);
+                configuration.PreferredEnvironment,
+                configuration.SessionContext);
         }
 
         private void ProcessCommand(SessionRelayCommandMessage command)

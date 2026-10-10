@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted
+Superseded in part by ADR-014. The persistent and temporary environment
+preference decisions remain accepted; participant light- and motion-sensitivity
+collection is removed.
 
 ## Context
 
@@ -14,8 +16,8 @@ from temporary adjustments.
 
 ## Decision
 
-- Collect the five normalized environment preferences, light sensitivity, and
-  motion sensitivity during account onboarding.
+- Collect the five normalized environment preferences during account
+  onboarding.
 - Persist those long-term values in the participant's Supabase onboarding row.
 - Before every new VR session, collect subjective stress, mood valence, fatigue,
   sleep quality, headache or eye strain, and whether the participant wants their
@@ -45,9 +47,8 @@ from temporary adjustments.
 - Existing onboarding rows can retain null values and are read with the current
   safe Temple Pond defaults for compatibility.
 - Particle preference was removed because the active Temple Pond Unity scene has
-  no particle system. The current relay message still transports only the five
-  normalized environment values. Applying the sensitivity constraints on Quest
-  requires a separately versioned relay/Unity contract change.
+  no particle system. ADR-014 also removes light- and motion-sensitivity fields
+  and versions the relay/Unity session contract.
 
 ## Validation plan
 
