@@ -69,7 +69,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy.ContextualBandit
         }
 
         [Test]
-        public void Restore_RejectsEnabledForgettingAndSchemaMismatch()
+        public void Restore_RejectsForgettingAndSchemaMismatches()
         {
             var model = CreateModel();
             var snapshot = Capture(model);
@@ -86,11 +86,24 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy.ContextualBandit
                 Participant,
                 PolicyId,
                 PolicyVersion);
+            var featureSchema = Copy(
+                snapshot,
+                featureSchemaVersion:
+                    "adaptive-vr-policy-features/0.1-draft");
+            var featureSchemaResult = model.TryRestoreSnapshot(
+                featureSchema,
+                Participant,
+                PolicyId,
+                PolicyVersion);
 
             Assert.That(forgettingResult.Code,
                 Is.EqualTo(LinUcbSnapshotRestoreResultCode.ForgettingUnsupported));
             Assert.That(schemaResult.Code,
                 Is.EqualTo(LinUcbSnapshotRestoreResultCode.SnapshotSchemaMismatch));
+            Assert.That(
+                featureSchemaResult.Code,
+                Is.EqualTo(
+                    LinUcbSnapshotRestoreResultCode.FeatureSchemaMismatch));
         }
 
         [Test]
@@ -153,6 +166,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy.ContextualBandit
         private static LinUcbModelSnapshot Copy(
             LinUcbModelSnapshot source,
             string snapshotSchemaVersion = null,
+            string featureSchemaVersion = null,
             bool? forgettingEnabled = null,
             LinUcbArmStateSnapshot[] armStates = null)
         {
@@ -163,7 +177,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy.ContextualBandit
                 source.PolicyId,
                 source.PolicyVersion,
                 source.ModelVersion,
-                source.FeatureSchemaVersion,
+                featureSchemaVersion ?? source.FeatureSchemaVersion,
                 source.FeatureCount,
                 source.ConfigurationId,
                 source.ConfigurationVersion,

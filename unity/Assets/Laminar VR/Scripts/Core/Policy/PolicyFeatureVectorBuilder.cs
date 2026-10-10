@@ -5,16 +5,45 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 {
     public sealed class PolicyFeatureVectorBuilder : IFeatureVectorBuilder
     {
-        public const string DraftSchemaVersion =
-            "adaptive-vr-policy-features/0.1-draft";
+        public const string ProductionSchemaVersion =
+            "adaptive-vr-policy-features/1.0";
 
-        private const int DraftFeatureCount = 24;
+        public const int ProductionFeatureCount = 24;
+
+        private static readonly string[] ProductionFeatureNames =
+        {
+            "bias",
+            "continuous_stress_score_01",
+            "stress_level_0_probability",
+            "stress_level_1_probability",
+            "stress_level_2_probability",
+            "stress_level_3_probability",
+            "signal_quality",
+            "preferred_illumination",
+            "preferred_warmth",
+            "preferred_atmospheric_softness",
+            "preferred_color_richness",
+            "preferred_ambient_motion",
+            "current_illumination",
+            "current_warmth",
+            "current_atmospheric_softness",
+            "current_color_richness",
+            "current_ambient_motion",
+            "illumination_delta_from_preference",
+            "warmth_delta_from_preference",
+            "atmospheric_softness_delta_from_preference",
+            "color_richness_delta_from_preference",
+            "ambient_motion_delta_from_preference",
+            "distance_from_preference_01",
+            "distance_from_safe_default_01"
+        };
+
         private static readonly double MaximumEnvironmentEuclideanDistance =
             Math.Sqrt(5d);
 
-        public int FeatureCount => DraftFeatureCount;
+        public int FeatureCount => ProductionFeatureCount;
 
-        public string FeatureSchemaVersion => DraftSchemaVersion;
+        public string FeatureSchemaVersion => ProductionSchemaVersion;
 
         public FeatureVector Build(PolicyObservation observation)
         {
@@ -23,14 +52,12 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 throw new ArgumentNullException(nameof(observation));
             }
 
-            // TODO(RESEARCH_DECISION): Freeze schema 1.0 only after baseline,
-            // context, scene, history, and missing-value encodings are approved.
             var stress = observation.Physiology.Window.Stress;
             var probabilities = stress.Probabilities;
             var preferred = observation.PreferredEnvironment;
             var current = observation.CurrentEnvironment;
             var safeDefault = observation.SafeDefaultEnvironment;
-            var values = new double[DraftFeatureCount];
+            var values = new double[ProductionFeatureCount];
 
             values[0] = 1d;
             values[1] = stress.ContinuousScore / 3d;
@@ -53,38 +80,15 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 
         public string GetFeatureName(int index)
         {
-            switch (index)
+            if (index < 0 || index >= ProductionFeatureNames.Length)
             {
-                case 0: return "bias";
-                case 1: return "continuous_stress_score_01";
-                case 2: return "stress_level_0_probability";
-                case 3: return "stress_level_1_probability";
-                case 4: return "stress_level_2_probability";
-                case 5: return "stress_level_3_probability";
-                case 6: return "signal_quality";
-                case 7: return "preferred_illumination";
-                case 8: return "preferred_warmth";
-                case 9: return "preferred_atmospheric_softness";
-                case 10: return "preferred_color_richness";
-                case 11: return "preferred_ambient_motion";
-                case 12: return "current_illumination";
-                case 13: return "current_warmth";
-                case 14: return "current_atmospheric_softness";
-                case 15: return "current_color_richness";
-                case 16: return "current_ambient_motion";
-                case 17: return "illumination_delta_from_preference";
-                case 18: return "warmth_delta_from_preference";
-                case 19: return "atmospheric_softness_delta_from_preference";
-                case 20: return "color_richness_delta_from_preference";
-                case 21: return "ambient_motion_delta_from_preference";
-                case 22: return "distance_from_preference_01";
-                case 23: return "distance_from_safe_default_01";
-                default:
-                    throw new ArgumentOutOfRangeException(
-                        nameof(index),
-                        index,
-                        "Feature index is outside the draft schema.");
+                throw new ArgumentOutOfRangeException(
+                    nameof(index),
+                    index,
+                    "Feature index is outside the production schema.");
             }
+
+            return ProductionFeatureNames[index];
         }
 
         private static void WriteEnvironment(

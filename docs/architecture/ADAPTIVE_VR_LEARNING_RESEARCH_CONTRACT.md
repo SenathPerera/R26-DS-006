@@ -220,9 +220,12 @@ All bandit inputs must be finite, bounded, normalized, and constructed by one
 versioned feature-vector builder. Feature ordering must not be assembled through
 scattered array indexes.
 
-The exact production feature schema remains a research decision. Until it is
-frozen, it must remain clearly marked as draft and must not be treated as a
-compatible `1.0` research schema.
+ADR-012 freezes the Temple Pond MVP production schema as
+`adaptive-vr-policy-features/1.0`: the exact 24-feature ordering,
+normalization, names, and deliberate exclusions recorded there are part of the
+research contract. Any change requires a new schema version; omitted inputs
+must not be fabricated or added without an approved collection and
+normalization contract.
 
 ## 10. Policy interface contract
 
@@ -681,9 +684,12 @@ All bandit inputs must be finite, bounded, normalized, and constructed by one
 versioned feature-vector builder. Feature ordering must not be assembled through
 scattered array indexes.
 
-The exact production feature schema remains a research decision. Until it is
-frozen, it must remain clearly marked as draft and must not be treated as a
-compatible `1.0` research schema.
+ADR-012 freezes the Temple Pond MVP production schema as
+`adaptive-vr-policy-features/1.0`: the exact 24-feature ordering,
+normalization, names, and deliberate exclusions recorded there are part of the
+research contract. Any change requires a new schema version; omitted inputs
+must not be fabricated or added without an approved collection and
+normalization contract.
 
 ## 10. Policy interface contract
 
