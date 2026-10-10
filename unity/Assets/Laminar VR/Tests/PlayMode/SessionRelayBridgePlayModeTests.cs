@@ -69,6 +69,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(
                 setup.Transport.PublishedQuestStates[0].Phase,
                 Is.EqualTo(VrSessionPhase.Boot));
+            Assert.That(
+                setup.Bootstrap.HasExplicitStudyPolicySelection,
+                Is.True);
+            Assert.That(
+                setup.Bootstrap.StudyPolicyMode,
+                Is.EqualTo(StudyPolicyMode.StaticPersonalized));
         }
 
         [UnityTest]
@@ -97,6 +103,37 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(
                 setup.Bridge.LastInboundRejection,
                 Is.EqualTo("session-configuration-required"));
+        }
+
+        [UnityTest]
+        public IEnumerator Bridge_RejectsStudyConditionChangeAfterSelection()
+        {
+            var setup = CreateSetup();
+            var connectTask = setup.Bridge.ConnectAsync(
+                CreateConnectionInfo(),
+                CancellationToken.None);
+            yield return AwaitTask(connectTask);
+
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration(
+                    "production-test-scene",
+                    StudyPolicyMode.StaticPersonalized));
+            setup.Bridge.ProcessPendingMessages();
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration(
+                    "production-test-scene",
+                    StudyPolicyMode.RuleBasedAdaptive));
+            setup.Bridge.ProcessPendingMessages();
+
+            Assert.That(
+                setup.Bridge.RejectedInboundMessageCount,
+                Is.EqualTo(1));
+            StringAssert.StartsWith(
+                "study-condition-invalid:",
+                setup.Bridge.LastInboundRejection);
+            Assert.That(
+                setup.Bootstrap.StudyPolicyMode,
+                Is.EqualTo(StudyPolicyMode.StaticPersonalized));
         }
 
         [UnityTest]
@@ -246,10 +283,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             var root = Track(new GameObject("SessionRelayBridgeHarness"));
             var adapter = root.AddComponent<RecordingAdapter>();
             var bootstrap = root.AddComponent<ApplicationBootstrap>();
-            bootstrap.Configure(
+            bootstrap.ConfigureForSessionSelection(
                 CreateSceneProfile(),
-                adapter,
-                StudyPolicyMode.StaticPersonalized);
+                adapter);
 
             var coordinator = root.AddComponent<ProductionSessionCoordinator>();
             coordinator.enabled = false;
@@ -271,6 +307,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
 
             return new Setup(
                 bridge,
+                bootstrap,
                 boundary,
                 transport,
                 telemetrySource);
@@ -343,7 +380,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         }
 
         private static SessionRelayConfigurationMessage CreateConfiguration(
-            string sceneId)
+            string sceneId,
+            StudyPolicyMode policyMode = StudyPolicyMode.StaticPersonalized)
         {
             return new SessionRelayConfigurationMessage(
                 SchemaVersion,
@@ -351,6 +389,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 "session-42",
                 "P017",
                 sceneId,
+                policyMode,
                 new EnvironmentState(0.3f, 0.6f, 0.2f, 0.7f, 0.4f));
         }
 
@@ -358,17 +397,21 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         {
             public Setup(
                 SessionRelayBridge bridge,
+                ApplicationBootstrap bootstrap,
                 VisualSessionBoundary boundary,
                 FakeSessionRelayTransport transport,
                 FakeRecordedTelemetrySource telemetrySource)
             {
                 Bridge = bridge;
+                Bootstrap = bootstrap;
                 Boundary = boundary;
                 Transport = transport;
                 TelemetrySource = telemetrySource;
             }
 
             public SessionRelayBridge Bridge { get; }
+
+            public ApplicationBootstrap Bootstrap { get; }
 
             public VisualSessionBoundary Boundary { get; }
 

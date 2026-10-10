@@ -431,6 +431,16 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         "expected_physiology_output_interval_seconds",
                         coordinatorConfiguration
                             .ExpectedPhysiologyOutputIntervalSeconds),
+                    TelemetryField.String(
+                        "study_condition",
+                        StudyConditionCodec.ToWireValue(
+                            applicationBootstrap.StudyPolicyMode)),
+                    TelemetryField.String(
+                        "policy_id",
+                        applicationBootstrap.Policy.PolicyId),
+                    TelemetryField.String(
+                        "policy_version",
+                        applicationBootstrap.Policy.PolicyVersion),
                     TelemetryField.Number(
                         "preferred_illumination",
                         preferredEnvironment.Illumination),

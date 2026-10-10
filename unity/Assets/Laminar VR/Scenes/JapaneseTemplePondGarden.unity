@@ -5318,10 +5318,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 475c2ae9362a40249e89c7b0d1b1bb7a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  initializeOnStart: 1
+  initializeOnStart: 0
   sceneParameterProfile: {fileID: 11400000, guid: ca6dfc59d1ea84c468ea22c46f4619f5, type: 2}
   sceneAdapterComponent: {fileID: 1414086895}
-  studyPolicyMode: 2
+  requireExplicitStudyPolicySelection: 1
+  studyPolicyMode: 0
   ruleBasedPolicyProfile: {fileID: 0}
   linUcbPolicyProfile: {fileID: 11400000, guid: b109afea7a4a4b55abde72bfae0d3811, type: 2}
 --- !u!114 &1414086899

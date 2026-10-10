@@ -1,5 +1,6 @@
 using System;
 using LaminarVR.AdaptiveMeditation.Environment;
+using LaminarVR.AdaptiveMeditation.Policy;
 
 namespace LaminarVR.AdaptiveMeditation.Networking
 {
@@ -11,6 +12,7 @@ namespace LaminarVR.AdaptiveMeditation.Networking
             string sessionId,
             string participantPseudonym,
             string sceneId,
+            StudyPolicyMode studyPolicyMode,
             EnvironmentState preferredEnvironment)
         {
             SchemaVersion = RequireIdentifier(
@@ -22,6 +24,13 @@ namespace LaminarVR.AdaptiveMeditation.Networking
                 participantPseudonym,
                 nameof(participantPseudonym));
             SceneId = RequireIdentifier(sceneId, nameof(sceneId));
+            if (!Enum.IsDefined(typeof(StudyPolicyMode), studyPolicyMode))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(studyPolicyMode));
+            }
+
+            StudyPolicyMode = studyPolicyMode;
             if (!preferredEnvironment.IsNormalized)
             {
                 throw new ArgumentException(
@@ -41,6 +50,11 @@ namespace LaminarVR.AdaptiveMeditation.Networking
         public string ParticipantPseudonym { get; }
 
         public string SceneId { get; }
+
+        public StudyPolicyMode StudyPolicyMode { get; }
+
+        public string StudyCondition =>
+            StudyConditionCodec.ToWireValue(StudyPolicyMode);
 
         public EnvironmentState PreferredEnvironment { get; }
 

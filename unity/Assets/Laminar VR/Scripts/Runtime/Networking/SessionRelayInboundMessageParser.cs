@@ -1,6 +1,7 @@
 using System;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Networking;
+using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Session;
 using UnityEngine;
 
@@ -15,7 +16,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         SchemaVersionMismatch,
         MessageTypeUnsupported,
         PreferredEnvironmentInvalid,
-        CommandTypeUnsupported
+        CommandTypeUnsupported,
+        StudyConditionUnsupported
     }
 
     public sealed class SessionRelayInboundMessageParser
@@ -37,6 +39,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             "sessionId",
             "participantPseudonym",
             "sceneId",
+            "studyCondition",
             "preferredEnvironment",
             "illumination",
             "warmth",
@@ -154,10 +157,21 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 || string.IsNullOrWhiteSpace(
                     envelope.payload.participantPseudonym)
                 || string.IsNullOrWhiteSpace(envelope.payload.sceneId)
+                || string.IsNullOrWhiteSpace(
+                    envelope.payload.studyCondition)
                 || envelope.payload.preferredEnvironment == null)
             {
                 reasonCode =
                     SessionRelayMessageParseReasonCode.RequiredFieldMissing;
+                return false;
+            }
+
+            if (!StudyConditionCodec.TryParse(
+                    envelope.payload.studyCondition,
+                    out var studyPolicyMode))
+            {
+                reasonCode = SessionRelayMessageParseReasonCode
+                    .StudyConditionUnsupported;
                 return false;
             }
 
@@ -194,6 +208,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                     envelope.payload.sessionId,
                     envelope.payload.participantPseudonym,
                     envelope.payload.sceneId,
+                    studyPolicyMode,
                     preference);
                 message = SessionRelayInboundMessage.ForConfiguration(
                     configuration);
@@ -356,6 +371,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             public string sessionId;
             public string participantPseudonym;
             public string sceneId;
+            public string studyCondition;
             public PreferredEnvironmentDto preferredEnvironment;
             public string command;
         }

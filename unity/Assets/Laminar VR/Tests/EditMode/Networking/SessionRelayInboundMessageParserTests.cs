@@ -1,4 +1,5 @@
 using LaminarVR.AdaptiveMeditation.Networking;
+using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Runtime.Networking;
 using LaminarVR.AdaptiveMeditation.Session;
 using NUnit.Framework;
@@ -22,6 +23,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\"," 
                 + "\"participantPseudonym\":\"P017\"," 
                 + "\"sceneId\":\"temple-pond\"," 
+                + "\"studyCondition\":\"ContextualBandit\","
                 + "\"preferredEnvironment\":{\"illumination\":0.3," 
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2," 
                 + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
@@ -39,6 +41,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
             Assert.That(message.Configuration.SessionId, Is.EqualTo("session-42"));
             Assert.That(message.Configuration.ParticipantPseudonym, Is.EqualTo("P017"));
             Assert.That(message.Configuration.SceneId, Is.EqualTo("temple-pond"));
+            Assert.That(
+                message.Configuration.StudyPolicyMode,
+                Is.EqualTo(StudyPolicyMode.ContextualBandit));
+            Assert.That(
+                message.Configuration.StudyCondition,
+                Is.EqualTo(StudyConditionCodec.ContextualBandit));
             Assert.That(
                 message.Configuration.PreferredEnvironment.Illumination,
                 Is.EqualTo(0.3f));
@@ -134,6 +142,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\"," 
                 + "\"participantPseudonym\":\"P017\"," 
                 + "\"sceneId\":\"temple-pond\"," 
+                + "\"studyCondition\":\"StaticPersonalized\","
                 + "\"preferredEnvironment\":{\"illumination\":0.3," 
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2," 
                 + "\"colorRichness\":0.7}}}";
@@ -158,6 +167,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\"," 
                 + "\"participantPseudonym\":\"P017\"," 
                 + "\"sceneId\":\"temple-pond\"," 
+                + "\"studyCondition\":\"StaticPersonalized\","
                 + "\"preferredEnvironment\":{\"illumination\":1.1," 
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2," 
                 + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
@@ -189,6 +199,32 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 reason,
                 Is.EqualTo(
                     SessionRelayMessageParseReasonCode.CommandTypeUnsupported));
+        }
+
+        [Test]
+        public void TryParse_RejectsUnsupportedStudyCondition()
+        {
+            const string Json =
+                "{\"schemaVersion\":\"mindsync-relay-test-v1\","
+                + "\"messageId\":\"config-message-1\","
+                + "\"messageType\":\"session_configuration\","
+                + "\"payload\":{\"sessionId\":\"session-42\","
+                + "\"participantPseudonym\":\"P017\","
+                + "\"sceneId\":\"temple-pond\","
+                + "\"studyCondition\":\"ExperimentalPolicy\","
+                + "\"preferredEnvironment\":{\"illumination\":0.3,"
+                + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
+
+            var parsed = parser.TryParse(Json, out var message, out var reason);
+
+            Assert.That(parsed, Is.False);
+            Assert.That(message, Is.Null);
+            Assert.That(
+                reason,
+                Is.EqualTo(
+                    SessionRelayMessageParseReasonCode
+                        .StudyConditionUnsupported));
         }
 
         [Test]

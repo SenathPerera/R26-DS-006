@@ -210,13 +210,13 @@ handoff, and full pilot-length validation remain pending.
 - Make command handling idempotent and use stable message IDs.
 - Keep session control operational when Component B is temporarily unavailable.
 
-The current draft inbound envelope is intentionally version-configurable; a
-production schema identifier has not been invented in code. It contains:
+The current inbound envelope remains version-configurable. The synchronized
+mobile, relay, and Quest implementation uses `mindsync-session-v2`. It contains:
 
 - `schemaVersion`, `messageId`, `messageType`, and `payload`.
 - `session_configuration` payloads with `sessionId`,
-  `participantPseudonym`, `sceneId`, and five named normalized values under
-  `preferredEnvironment`.
+  `participantPseudonym`, `sceneId`, the required `studyCondition`, and five
+  named normalized values under `preferredEnvironment`.
 - `session_command` payloads with `sessionId` and one of `start`, `pause`,
   `resume`, `stop`, or `emergency_stop`.
 
@@ -235,10 +235,10 @@ The current Quest-side transport draft adds these relay messages:
 - `visual_telemetry_batch` from Quest with the existing versioned visual
   telemetry events and their typed fields.
 
-These are draft cross-component field names until the mobile/relay team freezes
-the shared schema. The schema version remains a required runtime input rather
-than a hardcoded production identifier. The pairing code is runtime-only and is
-never written to a ScriptableObject, scene, diagnostic code, or log message.
+The schema version remains a required Quest runtime input even though the
+bundled development profile currently selects v2. The pairing code is
+runtime-only and is never written to a ScriptableObject, scene, diagnostic
+code, or log message.
 
 The transport reports `Connected` only after the WebSocket is open and the
 relay accepts pairing. It rejects messages for a different session and drops

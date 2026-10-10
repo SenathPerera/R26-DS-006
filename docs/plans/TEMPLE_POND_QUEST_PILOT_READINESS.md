@@ -35,7 +35,7 @@ clearly identified development values:
 
 - Local relay endpoint: derived from `MINDSYNC_DEVELOPMENT_HOST` using port
   8080 and path `/realtime?role=quest`.
-- Schema identifier: `mindsync-session-v1`.
+- Schema identifier: `mindsync-session-v2`.
 - Pairing-code lifetime: five minutes.
 - Readiness-to-start initialization delay: 30 seconds.
 - Maximum inbound message size: 65,536 bytes.
@@ -101,7 +101,8 @@ is entered at runtime and the pseudonymous Quest client ID is stored in
 - Reject wrong, expired, and reused pairing codes without leaking credentials.
 - Reject a second active client or participant binding.
 - Accept one valid configuration and reject wrong-scene, wrong-schema,
-  malformed, oversized, and duplicate messages.
+  unsupported/conflicting study-condition, malformed, oversized, and
+  duplicate messages.
 - Verify start, pause, resume, stop, and emergency-stop idempotency.
 - Verify Quest readiness and phase updates reach mobile.
 - Verify telemetry batches preserve ordering and are not lost after a failed

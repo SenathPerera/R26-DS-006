@@ -13,6 +13,7 @@ class PreparedSession:
     session_id: str
     participant_pseudonym: str
     scene_id: str
+    study_condition: str
     preferred_environment: dict[str, float]
     pairing_code: str
     expires_at_unix_seconds: float
@@ -50,6 +51,7 @@ class SessionStore:
         request_id: str,
         participant_pseudonym: str,
         scene_id: str,
+        study_condition: str,
         preferred_environment: dict[str, float],
     ) -> PreparedSession:
         request_id = self._required(request_id, "request_id")
@@ -57,6 +59,7 @@ class SessionStore:
             participant_pseudonym, "participant_pseudonym"
         )
         scene_id = self._required(scene_id, "scene_id")
+        study_condition = self._required(study_condition, "study_condition")
         self._validate_environment(preferred_environment)
 
         with self._lock:
@@ -76,6 +79,7 @@ class SessionStore:
                 session_id=session_id,
                 participant_pseudonym=participant_pseudonym,
                 scene_id=scene_id,
+                study_condition=study_condition,
                 preferred_environment=dict(preferred_environment),
                 pairing_code=code,
                 expires_at_unix_seconds=now + self._code_lifetime_seconds,

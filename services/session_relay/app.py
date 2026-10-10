@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from enum import Enum
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ from .session_store import (
 )
 
 
-SCHEMA_VERSION = "mindsync-session-v1"
+SCHEMA_VERSION = "mindsync-session-v2"
 CODE_LIFETIME_SECONDS = float(os.getenv("SESSION_RELAY_CODE_LIFETIME_SECONDS", "300"))
 INITIALIZATION_DELAY_SECONDS = max(
     0.0,
@@ -42,6 +43,12 @@ class PreferredEnvironment(BaseModel):
     ambient_motion: float = Field(alias="ambientMotion", ge=0, le=1)
 
 
+class StudyCondition(str, Enum):
+    STATIC_PERSONALIZED = "StaticPersonalized"
+    RULE_BASED_ADAPTIVE = "RuleBasedAdaptive"
+    CONTEXTUAL_BANDIT = "ContextualBandit"
+
+
 class CreateSessionRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -50,6 +57,7 @@ class CreateSessionRequest(BaseModel):
         alias="participantPseudonym", min_length=1, max_length=128
     )
     scene_id: str = Field(alias="sceneId", min_length=1, max_length=128)
+    study_condition: StudyCondition = Field(alias="studyCondition")
     preferred_environment: PreferredEnvironment = Field(alias="preferredEnvironment")
 
 
@@ -61,6 +69,7 @@ class CreateSessionResponse(BaseModel):
     pairing_code: str = Field(alias="pairingCode")
     expires_at: float = Field(alias="expiresAt")
     mobile_token: str = Field(alias="mobileToken")
+    study_condition: str = Field(alias="studyCondition")
 
 
 class VisualLogAcknowledgementRequest(BaseModel):
@@ -134,6 +143,7 @@ async def create_session(request: CreateSessionRequest) -> CreateSessionResponse
             request.request_id,
             request.participant_pseudonym,
             request.scene_id,
+            request.study_condition.value,
             environment,
         )
     except ActiveSessionExistsError as error:
@@ -144,6 +154,7 @@ async def create_session(request: CreateSessionRequest) -> CreateSessionResponse
         pairingCode=session.pairing_code,
         expiresAt=session.expires_at_unix_seconds,
         mobileToken=session.mobile_token,
+        studyCondition=session.study_condition,
     )
 
 
@@ -353,6 +364,7 @@ def _configuration(session: PreparedSession) -> dict:
             "sessionId": session.session_id,
             "participantPseudonym": session.participant_pseudonym,
             "sceneId": session.scene_id,
+            "studyCondition": session.study_condition,
             "preferredEnvironment": session.preferred_environment,
         },
     )

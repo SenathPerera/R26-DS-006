@@ -378,11 +378,15 @@ export const useMindSyncStore = create<MindSyncStore>()(
         }
         set({vrStatus: 'pairing', relay: {...emptyRelay, connectionState: 'connecting'}});
         try {
+          if (!environment.studyCondition) {
+            throw new Error('study-condition-not-configured');
+          }
           const createRequestId = prepared && !codeIsFresh ? `${requestId}-${Date.now()}` : requestId;
           const newPrepared = await realtimeService.createPreparedSession({
             requestId: createRequestId,
             participantPseudonym: state.user?.id ?? 'anonymous',
             sceneId: 'temple-pond',
+            studyCondition: environment.studyCondition,
             preferredEnvironment: effectiveEnvironmentPreference(
               state.onboarding,
               state.sessionContext,

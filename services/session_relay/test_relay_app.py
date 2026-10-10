@@ -33,6 +33,7 @@ class SessionRelayAppTests(unittest.TestCase):
                 "requestId": "request-1",
                 "participantPseudonym": "participant-7",
                 "sceneId": "temple-pond",
+                "studyCondition": "ContextualBandit",
                 "preferredEnvironment": {
                     "illumination": 0.319,
                     "warmth": 0.5,
@@ -44,6 +45,7 @@ class SessionRelayAppTests(unittest.TestCase):
         )
         self.assertEqual(200, prepared.status_code)
         session = prepared.json()
+        self.assertEqual("ContextualBandit", session["studyCondition"])
         session_id = session["sessionId"]
 
         mobile_path = (
@@ -69,6 +71,10 @@ class SessionRelayAppTests(unittest.TestCase):
                 configuration = quest.receive_json()
                 self.assertTrue(pairing["payload"]["accepted"])
                 self.assertEqual("session_configuration", configuration["messageType"])
+                self.assertEqual(
+                    "ContextualBandit",
+                    configuration["payload"]["studyCondition"],
+                )
 
                 # A command sent before readiness must arrive before start. This
                 # guards against starting immediately after configuration.
@@ -183,6 +189,26 @@ class SessionRelayAppTests(unittest.TestCase):
             json={"messageCount": 3, "lastMessageId": "telemetry-message"},
         )
         self.assertEqual(409, stale_receipt.status_code)
+
+    def test_create_session_rejects_unknown_study_condition(self) -> None:
+        response = self.client.post(
+            "/sessions",
+            json={
+                "requestId": "request-invalid-condition",
+                "participantPseudonym": "participant-7",
+                "sceneId": "temple-pond",
+                "studyCondition": "ExperimentalPolicy",
+                "preferredEnvironment": {
+                    "illumination": 0.5,
+                    "warmth": 0.5,
+                    "atmosphericSoftness": 0.5,
+                    "colorRichness": 0.5,
+                    "ambientMotion": 0.5,
+                },
+            },
+        )
+
+        self.assertEqual(422, response.status_code)
 
     @staticmethod
     def _envelope(message_type: str, payload: dict, message_id: str) -> dict:

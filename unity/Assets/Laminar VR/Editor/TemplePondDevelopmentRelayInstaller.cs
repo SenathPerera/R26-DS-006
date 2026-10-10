@@ -198,7 +198,7 @@ namespace LaminarVR.AdaptiveMeditation.Editor
                 .objectReferenceValue = developmentNetworkProfile;
             serialized.FindProperty("relayEndpoint").stringValue = string.Empty;
             serialized.FindProperty("schemaVersion").stringValue =
-                "mindsync-session-v1";
+                "mindsync-session-v2";
             serialized.FindProperty("maximumMessageBytes").intValue = 65536;
             serialized.FindProperty("maximumTelemetryEventsPerBatch")
                 .intValue = 32;

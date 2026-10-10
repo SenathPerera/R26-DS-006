@@ -316,23 +316,6 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private void ProcessConfiguration(
             SessionRelayConfigurationMessage configuration)
         {
-            if (!applicationBootstrap.IsInitialized
-                && !applicationBootstrap.TryInitialize(
-                    out var bootstrapError))
-            {
-                RejectInbound("bootstrap-invalid:" + bootstrapError);
-                return;
-            }
-
-            if (!string.Equals(
-                    configuration.SceneId,
-                    applicationBootstrap.SceneProfile.SceneId,
-                    StringComparison.Ordinal))
-            {
-                RejectInbound("scene-id-mismatch");
-                return;
-            }
-
             if (acceptedSessionId != null
                 && !string.Equals(
                     acceptedSessionId,
@@ -340,6 +323,31 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     StringComparison.Ordinal))
             {
                 RejectInbound("session-context-conflict");
+                return;
+            }
+
+            if (!string.Equals(
+                    configuration.SceneId,
+                    applicationBootstrap.ConfiguredSceneId,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("scene-id-mismatch");
+                return;
+            }
+
+            if (!applicationBootstrap.TrySelectStudyPolicy(
+                    configuration.StudyPolicyMode,
+                    out var selectionError))
+            {
+                RejectInbound("study-condition-invalid:" + selectionError);
+                return;
+            }
+
+            if (!applicationBootstrap.IsInitialized
+                && !applicationBootstrap.TryInitialize(
+                    out var bootstrapError))
+            {
+                RejectInbound("bootstrap-invalid:" + bootstrapError);
                 return;
             }
 

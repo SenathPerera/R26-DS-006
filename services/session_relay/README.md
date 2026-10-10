@@ -6,6 +6,11 @@ Quest WebSocket, delivers the Temple Pond configuration and start command,
 persists Quest messages to JSON Lines, and forwards them to the authenticated
 mobile connection.
 
+The session creation request must include one exact `studyCondition` value:
+`StaticPersonalized`, `RuleBasedAdaptive`, or `ContextualBandit`. The relay
+stores that assignment and forwards it unchanged under the
+`mindsync-session-v2` schema.
+
 The relay does not start a paired session immediately. It waits for Quest to
 publish its validated `ready` phase, then observes a 30-second initialization
 delay before sending the single `start` command.

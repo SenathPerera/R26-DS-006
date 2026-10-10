@@ -104,7 +104,7 @@ function record(recordId: string, postStress: number): CompleteSessionRecord {
       },
     },
     visual: {
-      relaySchemaVersion: 'mindsync-session-v1',
+      relaySchemaVersion: 'mindsync-session-v2',
       relaySessionId: 'session-relay-9',
       sceneId: 'temple-pond',
       completionPhase: 'completed',
@@ -112,7 +112,7 @@ function record(recordId: string, postStress: number): CompleteSessionRecord {
       messageCount: 1,
       lastMessageId: 'message-1',
       messages: [{
-        schemaVersion: 'mindsync-session-v1',
+        schemaVersion: 'mindsync-session-v2',
         messageId: 'message-1',
         messageType: 'quest_state',
         payload: {phase: 'completed'},

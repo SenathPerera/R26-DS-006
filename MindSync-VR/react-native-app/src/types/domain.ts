@@ -6,6 +6,7 @@ export type VrStatus = 'not-paired' | 'pairing' | 'ready' | 'waiting' | 'active'
 export type SessionStatus = 'ready' | 'active' | 'paused' | 'ending' | 'complete';
 export type SessionRelayConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 export type VisualLogDeliveryStatus = 'idle' | 'downloading' | 'pending' | 'acknowledged' | 'error';
+export type StudyCondition = 'StaticPersonalized' | 'RuleBasedAdaptive' | 'ContextualBandit';
 export type QuestionType = 'single' | 'multiple' | 'likert' | 'text' | 'numeric' | 'slider' | 'voice';
 
 export interface UserProfile {
@@ -156,6 +157,7 @@ export interface PreparedVrSession {
   pairingCode: string;
   expiresAt: number;
   mobileToken: string;
+  studyCondition: StudyCondition;
 }
 
 export interface RelayEnvelope {
