@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This approval permits runtime
-use for the time-constrained MVP; it does not establish that the reward weights
-or normalization parameters are scientifically optimal.
+Superseded by ADR-015 for production reward-input availability. The baseline,
+timing, physiological, change, and safety weights remain provisional pilot
+values.
 
 ## Context
 

@@ -632,7 +632,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             ""rmssdWeight"": 0.0,
             ""heartRateWeight"": 0.0,
             ""changePenaltyWeight"": 0.1,
-            ""discomfortPenaltyWeight"": 1.0,
+            ""discomfortPenaltyWeight"": 0.0,
             ""safetyPenaltyWeight"": 1.0
         }";
 

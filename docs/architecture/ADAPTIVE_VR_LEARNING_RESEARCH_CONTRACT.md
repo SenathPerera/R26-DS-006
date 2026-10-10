@@ -279,6 +279,13 @@ reward =
 
 The exact weights and normalization method are not approved by this contract.
 
+An online reward component may be enabled only when its action-attributed input
+is actually available. Missing subjective discomfort must remain explicitly
+missing rather than being encoded as an observed zero. The MVP post-session
+comfort response is reserved for offline evaluation; an online discomfort
+penalty requires a separately approved mid-session protocol. Safety severity is
+derived from the recorded safety-validation outcome.
+
 The attribution sequence is:
 
 ```text
@@ -742,6 +749,13 @@ reward =
 ```
 
 The exact weights and normalization method are not approved by this contract.
+
+An online reward component may be enabled only when its action-attributed input
+is actually available. Missing subjective discomfort must remain explicitly
+missing rather than being encoded as an observed zero. The MVP post-session
+comfort response is reserved for offline evaluation; an online discomfort
+penalty requires a separately approved mid-session protocol. Safety severity is
+derived from the recorded safety-validation outcome.
 
 The attribution sequence is:
 

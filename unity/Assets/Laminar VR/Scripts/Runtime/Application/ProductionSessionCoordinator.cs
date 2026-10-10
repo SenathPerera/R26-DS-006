@@ -1156,17 +1156,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             double monotonicTimeSeconds,
             double utcTimestampUnixSeconds)
         {
-            // TODO(RESEARCH_DECISION): Wire approved participant discomfort
-            // and safety-report inputs. Zero means no report was received; it
-            // is not an inferred comfort assessment.
             LastRewardResult = await policyController.TryResolveRewardAsync(
                 monotonicTimeSeconds,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
                 session.Phase,
                 networkConnected,
-                0d,
-                0d,
                 adaptationCancellation.Token);
         }
 
