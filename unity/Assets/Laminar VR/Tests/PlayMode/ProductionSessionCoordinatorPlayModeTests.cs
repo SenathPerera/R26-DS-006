@@ -309,6 +309,202 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator HeadsetLifecycleLoss_PausesAdaptiveSessionAndRequiresFreshResume()
+        {
+            var root = Track(new GameObject("HeadsetLifecycleAdaptiveHarness"));
+            var adapter = root.AddComponent<RecordingAdapter>();
+            var bootstrap = root.AddComponent<ApplicationBootstrap>();
+            bootstrap.Configure(
+                CreateProfile<SceneParameterProfile>(SceneProfileJson),
+                adapter,
+                StudyPolicyMode.StaticPersonalized);
+
+            var coordinator = root.AddComponent<ProductionSessionCoordinator>();
+            coordinator.enabled = false;
+            coordinator.Configure(
+                bootstrap,
+                CreateProfile<SessionTimingProfile>(TimingProfileJson),
+                CreateProfile<PhysiologyValidationProfile>(
+                    PhysiologyProfileJson),
+                CreateProfile<RewardPipelineProfile>(RewardProfileJson),
+                CreateProfile<StabilizationSelectionProfile>(
+                    StabilizationProfileJson),
+                CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
+                CreateProfile<ProductionCoordinatorProfile>(
+                    CoordinatorProfileJson));
+            coordinator.ConfigureSessionContext(
+                "playmode-headset-lifecycle-" + Guid.NewGuid().ToString("N"),
+                "P-PLAYMODE-HEADSET-LIFECYCLE",
+                State(0.5f));
+
+            Assert.That(
+                coordinator.TryInitialize(out var validationError),
+                Is.True,
+                validationError);
+            telemetryFilePath = coordinator.TelemetryFilePath;
+            coordinator.SetNetworkConnected(true);
+
+            var startTime = Time.realtimeSinceStartupAsDouble;
+            var utcNow = UtcNowUnixSeconds();
+            coordinator.SubmitCommand("start", SessionCommandType.Start);
+            coordinator.Advance(startTime + 0.005d, utcNow);
+            coordinator.SubmitPhysiology(CreateWindow(utcNow - 1d, 1.5d));
+            coordinator.SubmitPhysiology(CreateWindow(utcNow - 0.5d, 1.4d));
+            coordinator.Advance(startTime + 0.01d, utcNow);
+            coordinator.Advance(startTime + 0.11d, utcNow + 0.1d);
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Adaptive));
+
+            Assert.That(
+                coordinator.SuspendForHeadsetLifecycle(
+                    HeadsetLifecycleInterruptionReason.ApplicationFocusLost,
+                    startTime + 0.12d,
+                    utcNow + 0.11d),
+                Is.True);
+            Assert.That(coordinator.IsHeadsetLifecycleSuspended, Is.True);
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Paused));
+            Assert.That(
+                coordinator.LastCommandResult.CommandType,
+                Is.EqualTo(SessionCommandType.Pause));
+
+            coordinator.Advance(startTime + 1d, utcNow + 0.99d);
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Paused));
+
+            Assert.That(
+                coordinator.RestoreHeadsetLifecycle(
+                    startTime + 1d,
+                    utcNow + 0.99d),
+                Is.True);
+            Assert.That(coordinator.IsHeadsetLifecycleSuspended, Is.False);
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Paused));
+
+            coordinator.SubmitCommand(
+                "resume-without-fresh-window",
+                SessionCommandType.Resume);
+            coordinator.Advance(startTime + 1.001d, utcNow + 0.991d);
+            Assert.That(
+                coordinator.LastCommandResult.ResultCode,
+                Is.EqualTo(SessionCommandResultCode.FreshPhysiologyRequired));
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Paused));
+
+            var freshUtc = UtcNowUnixSeconds();
+            coordinator.SubmitPhysiology(
+                CreateWindow(freshUtc - 0.05d, 1.3d));
+            coordinator.Advance(startTime + 1.002d, freshUtc);
+            coordinator.SubmitCommand(
+                "resume-with-fresh-window",
+                SessionCommandType.Resume);
+            coordinator.Advance(startTime + 1.003d, freshUtc + 0.001d);
+
+            Assert.That(coordinator.LastCommandResult.Applied, Is.True);
+            Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Adaptive));
+
+            for (var frame = 0; frame < 40; frame++)
+            {
+                yield return null;
+                coordinator.Advance(
+                    startTime + 1.003d,
+                    freshUtc + 0.001d);
+            }
+
+            var recordedEventTypes = new List<string>();
+            while (coordinator.TryDequeue(out var telemetryEvent))
+            {
+                recordedEventTypes.Add(telemetryEvent.EventType);
+            }
+
+            CollectionAssert.Contains(
+                recordedEventTypes,
+                "application.focus_lost");
+            CollectionAssert.Contains(
+                recordedEventTypes,
+                "application.focus_restored");
+        }
+
+        [UnityTest]
+        public IEnumerator HeadsetLifecycleLoss_FreezesAcclimatizationClock()
+        {
+            var root = Track(new GameObject("HeadsetLifecycleClockHarness"));
+            var adapter = root.AddComponent<RecordingAdapter>();
+            var bootstrap = root.AddComponent<ApplicationBootstrap>();
+            bootstrap.Configure(
+                CreateProfile<SceneParameterProfile>(SceneProfileJson),
+                adapter,
+                StudyPolicyMode.StaticPersonalized);
+
+            var coordinator = root.AddComponent<ProductionSessionCoordinator>();
+            coordinator.enabled = false;
+            coordinator.Configure(
+                bootstrap,
+                CreateProfile<SessionTimingProfile>(TimingProfileJson),
+                CreateProfile<PhysiologyValidationProfile>(
+                    PhysiologyProfileJson),
+                CreateProfile<RewardPipelineProfile>(RewardProfileJson),
+                CreateProfile<StabilizationSelectionProfile>(
+                    StabilizationProfileJson),
+                CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
+                CreateProfile<ProductionCoordinatorProfile>(
+                    CoordinatorProfileJson));
+            coordinator.ConfigureSessionContext(
+                "playmode-headset-clock-" + Guid.NewGuid().ToString("N"),
+                "P-PLAYMODE-HEADSET-CLOCK",
+                State(0.5f));
+
+            Assert.That(
+                coordinator.TryInitialize(out var validationError),
+                Is.True,
+                validationError);
+            telemetryFilePath = coordinator.TelemetryFilePath;
+
+            var startTime = Time.realtimeSinceStartupAsDouble;
+            var utcNow = UtcNowUnixSeconds();
+            coordinator.SubmitCommand("start", SessionCommandType.Start);
+            coordinator.Advance(startTime, utcNow);
+            coordinator.SuspendForHeadsetLifecycle(
+                HeadsetLifecycleInterruptionReason.ApplicationPaused,
+                startTime + 0.01d,
+                utcNow + 0.01d);
+
+            coordinator.Advance(startTime + 10d, utcNow + 10d);
+            Assert.That(
+                coordinator.Phase,
+                Is.EqualTo(VrSessionPhase.Acclimatization));
+
+            coordinator.RestoreHeadsetLifecycle(
+                startTime + 10d,
+                utcNow + 10d);
+            coordinator.Advance(startTime + 10.05d, utcNow + 10.05d);
+
+            Assert.That(
+                coordinator.Phase,
+                Is.EqualTo(VrSessionPhase.Acclimatization));
+            yield return null;
+        }
+
+        [Test]
+        public void HeadsetLifecycleController_CoalescesFocusAndPauseCallbacks()
+        {
+            var root = Track(new GameObject("HeadsetLifecycleControllerHarness"));
+            var coordinator = root.AddComponent<ProductionSessionCoordinator>();
+            coordinator.enabled = false;
+            var controller = root.AddComponent<HeadsetLifecycleSafetyController>();
+            controller.enabled = false;
+            controller.Configure(coordinator);
+
+            controller.SetApplicationFocus(false);
+            Assert.That(controller.IsLifecycleUnavailable, Is.True);
+            Assert.That(coordinator.IsHeadsetLifecycleSuspended, Is.True);
+
+            controller.SetApplicationPaused(true);
+            controller.SetApplicationFocus(true);
+            Assert.That(controller.IsLifecycleUnavailable, Is.True);
+            Assert.That(coordinator.IsHeadsetLifecycleSuspended, Is.True);
+
+            controller.SetApplicationPaused(false);
+            Assert.That(controller.IsLifecycleUnavailable, Is.False);
+            Assert.That(coordinator.IsHeadsetLifecycleSuspended, Is.False);
+        }
+
         private T CreateProfile<T>(string json)
             where T : ScriptableObject
         {

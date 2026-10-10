@@ -24,6 +24,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
     public sealed class ProductionSessionCoordinator : MonoBehaviour,
         IRecordedTelemetrySource
     {
+        private const string HeadsetLifecyclePauseCommandPrefix =
+            "headset-lifecycle-pause-";
+
         [Header("Composition Root")]
         [SerializeField]
         private ApplicationBootstrap applicationBootstrap = null;
@@ -64,6 +67,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             new Queue<PendingTelemetry>();
 
         private CancellationTokenSource lifetimeCancellation;
+        private CancellationTokenSource adaptationCancellation;
         private SessionStateMachine session;
         private PhysiologyStateBuffer physiologyBuffer;
         private PhysiologyBaselineAccumulator baselineAccumulator;
@@ -88,6 +92,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private double clockAnchorMonotonicTimeSeconds;
         private double clockAnchorUtcUnixSeconds;
         private bool hasAdvancedClock;
+        private bool headsetLifecycleSuspended;
+        private double headsetLifecycleSuspendedAtMonotonicSeconds;
 
         private string sessionId;
         private string participantPseudonym;
@@ -133,6 +139,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         public bool HasPolicyController => policyController != null;
 
+        public bool IsHeadsetLifecycleSuspended =>
+            headsetLifecycleSuspended;
+
         private void Start()
         {
             if (!initializeWhenSessionContextAvailable || !hasSessionContext)
@@ -152,6 +161,22 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void Update()
         {
+            if (headsetLifecycleSuspended)
+            {
+                if (IsInitialized)
+                {
+                    var suspendedMonotonicTimeSeconds =
+                        Time.realtimeSinceStartupAsDouble;
+                    Advance(
+                        suspendedMonotonicTimeSeconds,
+                        clockAnchorUtcUnixSeconds
+                            + suspendedMonotonicTimeSeconds
+                            - clockAnchorMonotonicTimeSeconds);
+                }
+
+                return;
+            }
+
             if (!IsInitialized)
             {
                 if (initializeWhenSessionContextAvailable && hasSessionContext)
@@ -187,6 +212,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             lifetimeCancellation?.Cancel();
+            adaptationCancellation?.Cancel();
+            adaptationCancellation?.Dispose();
+            adaptationCancellation = null;
             lifetimeCancellation?.Dispose();
             lifetimeCancellation = null;
 
@@ -344,6 +372,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         participantPseudonym),
                     telemetryBufferingSink);
                 lifetimeCancellation = new CancellationTokenSource();
+                adaptationCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        lifetimeCancellation.Token);
 
                 session = new SessionStateMachine();
                 session.PhaseChanged += HandlePhaseChanged;
@@ -484,6 +515,125 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             networkConnected = connected;
         }
 
+        public bool SuspendForHeadsetLifecycle(
+            HeadsetLifecycleInterruptionReason reason,
+            double monotonicTimeSeconds,
+            double utcTimestampUnixSeconds)
+        {
+            ValidateTime(monotonicTimeSeconds, nameof(monotonicTimeSeconds));
+            ValidateTime(
+                utcTimestampUnixSeconds,
+                nameof(utcTimestampUnixSeconds));
+            if (!Enum.IsDefined(
+                    typeof(HeadsetLifecycleInterruptionReason),
+                    reason))
+            {
+                throw new ArgumentOutOfRangeException(nameof(reason));
+            }
+
+            if (headsetLifecycleSuspended)
+            {
+                return false;
+            }
+
+            if (IsInitialized)
+            {
+                ValidateForwardClock(monotonicTimeSeconds);
+            }
+
+            headsetLifecycleSuspended = true;
+            headsetLifecycleSuspendedAtMonotonicSeconds =
+                monotonicTimeSeconds;
+            if (!IsInitialized)
+            {
+                return true;
+            }
+
+            RenewAdaptationCancellation();
+            session.AdvanceTo(monotonicTimeSeconds);
+            hasAdvancedClock = true;
+            lastMonotonicTimeSeconds = monotonicTimeSeconds;
+            var phaseAtLoss = session.Phase;
+
+            if (phaseAtLoss == VrSessionPhase.Adaptive)
+            {
+                var pauseResult = session.ProcessCommand(
+                    HeadsetLifecyclePauseCommandPrefix
+                        + Guid.NewGuid().ToString("N"),
+                    SessionCommandType.Pause,
+                    monotonicTimeSeconds,
+                    false);
+                LastCommandResult = pauseResult;
+                if (pauseResult.Applied)
+                {
+                    pausePhysiologySequenceNumber =
+                        physiologyBuffer.LatestAcceptedSequenceNumber;
+                }
+            }
+
+            QueueTelemetry(
+                TelemetryEventTypes.ApplicationFocusLost,
+                true,
+                new[]
+                {
+                    TelemetryField.String(
+                        "interruption_reason",
+                        reason.ToString()),
+                    TelemetryField.String(
+                        "phase_at_loss",
+                        phaseAtLoss.ToString())
+                });
+            return true;
+        }
+
+        public bool RestoreHeadsetLifecycle(
+            double monotonicTimeSeconds,
+            double utcTimestampUnixSeconds)
+        {
+            ValidateTime(monotonicTimeSeconds, nameof(monotonicTimeSeconds));
+            ValidateTime(
+                utcTimestampUnixSeconds,
+                nameof(utcTimestampUnixSeconds));
+            if (!headsetLifecycleSuspended)
+            {
+                return false;
+            }
+
+            var suspendedDurationSeconds = Math.Max(
+                0d,
+                monotonicTimeSeconds
+                    - headsetLifecycleSuspendedAtMonotonicSeconds);
+            if (!IsInitialized)
+            {
+                headsetLifecycleSuspended = false;
+                return true;
+            }
+
+            ValidateForwardClock(monotonicTimeSeconds);
+            headsetLifecycleSuspended = false;
+            session.ReanchorClockWithoutAdvancing(monotonicTimeSeconds);
+            applicationBootstrap.EnvironmentManager.DelayActiveTransition(
+                suspendedDurationSeconds);
+            hasAdvancedClock = true;
+            lastMonotonicTimeSeconds = monotonicTimeSeconds;
+            QueueTelemetry(
+                TelemetryEventTypes.ApplicationFocusRestored,
+                true,
+                new[]
+                {
+                    TelemetryField.String(
+                        "phase_on_restore",
+                        session.Phase.ToString()),
+                    TelemetryField.Number(
+                        "suspended_duration_seconds",
+                        suspendedDurationSeconds),
+                    TelemetryField.Boolean(
+                        "automatic_resume",
+                        false)
+                });
+            return true;
+        }
+
         public bool TryDequeue(out TelemetryEvent telemetryEvent)
         {
             if (telemetryBufferingSink == null)
@@ -507,18 +657,24 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             ValidateTime(monotonicTimeSeconds, nameof(monotonicTimeSeconds));
             ValidateTime(utcTimestampUnixSeconds, nameof(utcTimestampUnixSeconds));
-            if (hasAdvancedClock
-                && monotonicTimeSeconds < lastMonotonicTimeSeconds)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(monotonicTimeSeconds),
-                    "Monotonic time cannot move backwards.");
-            }
+            ValidateForwardClock(monotonicTimeSeconds);
 
             hasAdvancedClock = true;
             lastMonotonicTimeSeconds = monotonicTimeSeconds;
             ObserveCompletedOperation(monotonicTimeSeconds);
             ObserveNetworkStateChange();
+            if (headsetLifecycleSuspended)
+            {
+                if (activeOperation == null)
+                {
+                    StartNextSuspendedOperation(
+                        monotonicTimeSeconds,
+                        utcTimestampUnixSeconds);
+                }
+
+                return;
+            }
+
             DrainPhysiology(monotonicTimeSeconds);
             DrainCommands(monotonicTimeSeconds);
             session.AdvanceTo(monotonicTimeSeconds);
@@ -861,6 +1017,34 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
         }
 
+        private void StartNextSuspendedOperation(
+            double monotonicTimeSeconds,
+            double utcTimestampUnixSeconds)
+        {
+            if (pendingInvalidation.HasValue && policyController != null)
+            {
+                var reason = pendingInvalidation.Value;
+                pendingInvalidation = null;
+                activeOperation = InvalidateAsync(
+                    reason,
+                    monotonicTimeSeconds,
+                    utcTimestampUnixSeconds);
+                return;
+            }
+
+            if (telemetryQueue.Count > 0)
+            {
+                var pendingTelemetry = telemetryQueue.Dequeue();
+                activeOperation = telemetryRecorder.RecordAsync(
+                    pendingTelemetry.EventType,
+                    utcTimestampUnixSeconds,
+                    session.ActiveSessionElapsedSeconds,
+                    pendingTelemetry.Critical,
+                    pendingTelemetry.Fields,
+                    lifetimeCancellation.Token);
+            }
+        }
+
         private async Task ProcessDecisionAsync(
             SessionDecisionOpportunity opportunity,
             double utcTimestampUnixSeconds)
@@ -875,7 +1059,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 preferredEnvironment,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task CompleteAdaptiveTransitionAsync(
@@ -890,7 +1074,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 session.ActiveSessionElapsedSeconds,
                 session.Phase,
                 networkConnected,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task ResolveRewardAsync(
@@ -908,7 +1092,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 networkConnected,
                 0d,
                 0d,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task InvalidateAsync(
@@ -921,7 +1105,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 monotonicTimeSeconds,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task SelectStabilizationStateAsync(
@@ -933,7 +1117,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 preferredEnvironment,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
             if (result.SelectedState
                 != applicationBootstrap.EnvironmentManager.CurrentState)
             {
@@ -1022,6 +1206,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             switch (transition.CurrentPhase)
             {
                 case VrSessionPhase.Paused:
+                    decisionQueue.Clear();
                     RequestInvalidation(
                         RewardAttributionInvalidationReason.Pause);
                     QueueTelemetry(
@@ -1105,6 +1290,26 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             return false;
         }
 
+        private void ValidateForwardClock(double monotonicTimeSeconds)
+        {
+            if (hasAdvancedClock
+                && monotonicTimeSeconds < lastMonotonicTimeSeconds)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(monotonicTimeSeconds),
+                    "Monotonic time cannot move backwards.");
+            }
+        }
+
+        private void RenewAdaptationCancellation()
+        {
+            adaptationCancellation?.Cancel();
+            adaptationCancellation?.Dispose();
+            adaptationCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    lifetimeCancellation.Token);
+        }
+
         private void CleanUpFailedInitialization()
         {
             if (session != null)
@@ -1116,6 +1321,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             lifetimeCancellation?.Cancel();
+            adaptationCancellation?.Cancel();
+            adaptationCancellation?.Dispose();
+            adaptationCancellation = null;
             lifetimeCancellation?.Dispose();
             lifetimeCancellation = null;
             telemetrySink?.Dispose();
