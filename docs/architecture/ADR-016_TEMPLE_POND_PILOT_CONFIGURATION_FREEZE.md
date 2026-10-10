@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted and frozen for the Temple Pond engineering pilot on 2026-10-10.
+Superseded by ADR-017 for the active Temple Pond engineering-pilot bundle.
+This ADR remains the record of `temple-pond-pilot-freeze-v1`, accepted on
+2026-10-10.
 
 This is a **pilot protocol freeze**, not a claim that the values are
 scientifically optimal or participant-validated. Any change to a frozen value
@@ -76,9 +78,10 @@ exists.
 | Policy feature schema | `adaptive-vr-policy-features/1.0` |
 | Mobile-to-Quest session schema | `mindsync-session-v3` |
 
-The exact numerical values are the values asserted by
-`TemplePondPilotConfigurationFreezeTests`. ADR-001 through ADR-010 and ADR-015
-record the rationale and limitations for each profile.
+The exact `v1` values were asserted by
+`TemplePondPilotConfigurationFreezeTests` when this bundle was accepted.
+ADR-017 records the active telemetry-only successor. ADR-001 through ADR-010
+and ADR-015 record the rationale and limitations for each profile.
 
 ### Model lifetime
 

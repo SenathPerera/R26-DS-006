@@ -318,10 +318,10 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 validationError);
             Assert.That(
                 configuration.ConfigurationId,
-                Is.EqualTo("adaptive-vr-telemetry-pilot-v2"));
-            Assert.That(configuration.ConfigurationVersion, Is.EqualTo(2));
+                Is.EqualTo("adaptive-vr-telemetry-pilot-v3"));
+            Assert.That(configuration.ConfigurationVersion, Is.EqualTo(3));
             Assert.That(configuration.EventSchemaId, Is.EqualTo("adaptive-vr-telemetry"));
-            Assert.That(configuration.EventSchemaVersion, Is.EqualTo("1.0-pilot"));
+            Assert.That(configuration.EventSchemaVersion, Is.EqualTo("1.1-pilot"));
             Assert.That(configuration.FlushEveryEventCount, Is.EqualTo(8));
         }
 

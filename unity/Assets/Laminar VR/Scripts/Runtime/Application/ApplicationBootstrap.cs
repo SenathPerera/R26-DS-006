@@ -51,6 +51,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         public SceneEnvironmentProfile SceneProfile { get; private set; }
 
+        public SceneBindingValidation LastBindingValidation
+        {
+            get;
+            private set;
+        }
+
         public string ConfiguredSceneId =>
             sceneParameterProfile == null
                 ? string.Empty
@@ -192,6 +198,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             var bindingValidation = adapter.ValidateBindings();
+            LastBindingValidation = bindingValidation;
             if (bindingValidation == null || !bindingValidation.IsValid)
             {
                 var detail = bindingValidation == null

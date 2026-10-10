@@ -10,14 +10,18 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Telemetry
         : ITelemetryEventSink, IRecordedTelemetrySource
     {
         private readonly ITelemetryEventSink durableSink;
+        private readonly Func<TelemetryEvent, bool> shouldExposeForTransfer;
         private readonly ConcurrentQueue<TelemetryEvent> recordedEvents =
             new ConcurrentQueue<TelemetryEvent>();
 
         public DurableTelemetryBufferingSink(
-            ITelemetryEventSink durableSink)
+            ITelemetryEventSink durableSink,
+            Func<TelemetryEvent, bool> shouldExposeForTransfer = null)
         {
             this.durableSink = durableSink
                 ?? throw new ArgumentNullException(nameof(durableSink));
+            this.shouldExposeForTransfer = shouldExposeForTransfer
+                ?? (_ => true);
         }
 
         public int PendingEventCount => recordedEvents.Count;
@@ -30,7 +34,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Telemetry
                     telemetryEvent,
                     cancellationToken)
                 .ConfigureAwait(false);
-            recordedEvents.Enqueue(telemetryEvent);
+            if (shouldExposeForTransfer(telemetryEvent))
+            {
+                recordedEvents.Enqueue(telemetryEvent);
+            }
         }
 
         public Task FlushAsync(CancellationToken cancellationToken)

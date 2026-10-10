@@ -436,6 +436,14 @@ Participant identifiers must be pseudonymous. Do not log unnecessary personal
 information. Local logging must continue where possible during connectivity
 loss.
 
+The active Temple Pond pilot uses telemetry configuration
+`adaptive-vr-telemetry-pilot-v3` / `3` and event schema
+`adaptive-vr-telemetry` / `1.1-pilot` as frozen by ADR-017. The schema requires
+null-safe full physiology payloads, startup and scene-binding context,
+non-adaptive transition boundaries, terminal summaries, relay-transfer
+outcomes, and event-driven performance checkpoints. Relay-transfer outcome
+events remain local-only to prevent acknowledgement recursion.
+
 ## 16. Change control
 
 Any change to the following requires an explicit architecture/research review:
@@ -909,6 +917,14 @@ Logs must allow reconstruction of:
 Participant identifiers must be pseudonymous. Do not log unnecessary personal
 information. Local logging must continue where possible during connectivity
 loss.
+
+The active Temple Pond pilot uses telemetry configuration
+`adaptive-vr-telemetry-pilot-v3` / `3` and event schema
+`adaptive-vr-telemetry` / `1.1-pilot` as frozen by ADR-017. The schema requires
+null-safe full physiology payloads, startup and scene-binding context,
+non-adaptive transition boundaries, terminal summaries, relay-transfer
+outcomes, and event-driven performance checkpoints. Relay-transfer outcome
+events remain local-only to prevent acknowledgement recursion.
 
 ## 16. Change control
 

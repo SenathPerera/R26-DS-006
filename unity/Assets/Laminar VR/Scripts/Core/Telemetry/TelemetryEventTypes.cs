@@ -1,6 +1,6 @@
 namespace LaminarVR.AdaptiveMeditation.Telemetry
 {
-    // ADR-016 freezes these names under telemetry schema 1.0-pilot. Changes
+    // ADR-017 freezes these names under telemetry schema 1.1-pilot. Changes
     // require a new schema version.
     public static class TelemetryEventTypes
     {

@@ -2,8 +2,9 @@
 
 ## Status
 
-Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. This freezes
-the pilot event schema without declaring it the final main-study schema.
+Superseded for the active pilot by ADR-017. This ADR records the
+`temple-pond-pilot-freeze-v1` telemetry baseline and remains the history of
+schema `1.0-pilot`; it does not describe the active telemetry profile.
 
 ## Context
 

@@ -304,6 +304,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         + inboundEvent.DiagnosticCode);
                     break;
                 case InboundRelayEventKind.TelemetryAcknowledged:
+                    ReportTelemetryTransferSucceeded(
+                        inboundEvent.AcknowledgedMessageId);
                     activeTelemetryBatch = null;
                     telemetryPublishBlocked = false;
                     LastTelemetryError = string.Empty;
@@ -517,6 +519,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 LastTelemetryError =
                     "telemetry-publish-failed:"
                     + exception.GetType().Name;
+                ReportTelemetryTransferFailed(LastTelemetryError);
                 telemetryPublishBlocked = true;
                 activeTelemetryPublish = null;
             }
@@ -539,6 +542,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             catch (OperationCanceledException)
             {
                 LastTelemetryError = "telemetry-publish-cancelled";
+                ReportTelemetryTransferFailed(LastTelemetryError);
                 telemetryPublishBlocked = true;
             }
             catch (Exception exception)
@@ -546,10 +550,65 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 LastTelemetryError =
                     "telemetry-publish-failed:"
                     + exception.GetType().Name;
+                ReportTelemetryTransferFailed(LastTelemetryError);
                 telemetryPublishBlocked = true;
             }
 
             activeTelemetryPublish = null;
+        }
+
+        private void ReportTelemetryTransferSucceeded(
+            string acknowledgementId)
+        {
+            if (!TryGetActiveTelemetryBatchRange(
+                    out var eventCount,
+                    out var firstSequenceNumber,
+                    out var lastSequenceNumber))
+            {
+                return;
+            }
+
+            productionCoordinator?.ReportTelemetryTransferSucceeded(
+                acknowledgementId,
+                eventCount,
+                firstSequenceNumber,
+                lastSequenceNumber);
+        }
+
+        private void ReportTelemetryTransferFailed(string diagnosticCode)
+        {
+            if (!TryGetActiveTelemetryBatchRange(
+                    out var eventCount,
+                    out var firstSequenceNumber,
+                    out var lastSequenceNumber))
+            {
+                return;
+            }
+
+            productionCoordinator?.ReportTelemetryTransferFailed(
+                diagnosticCode,
+                eventCount,
+                firstSequenceNumber,
+                lastSequenceNumber);
+        }
+
+        private bool TryGetActiveTelemetryBatchRange(
+            out int eventCount,
+            out long firstSequenceNumber,
+            out long lastSequenceNumber)
+        {
+            eventCount = activeTelemetryBatch?.Length ?? 0;
+            if (eventCount == 0)
+            {
+                firstSequenceNumber = 0L;
+                lastSequenceNumber = 0L;
+                return false;
+            }
+
+            firstSequenceNumber = activeTelemetryBatch[0].SequenceNumber;
+            lastSequenceNumber = activeTelemetryBatch[eventCount - 1]
+                .SequenceNumber;
+            return true;
         }
 
         private IRecordedTelemetrySource ResolveTelemetrySource()

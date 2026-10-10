@@ -9,6 +9,7 @@ using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Runtime.Application;
 using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using LaminarVR.AdaptiveMeditation.Session;
+using LaminarVR.AdaptiveMeditation.Telemetry;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
@@ -182,6 +183,140 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator Coordinator_EmitsCompleteStartupAndPhysiologyTelemetry()
+        {
+            var root = Track(new GameObject("TelemetryCoverageHarness"));
+            var adapter = root.AddComponent<RecordingAdapter>();
+            var bootstrap = root.AddComponent<ApplicationBootstrap>();
+            bootstrap.Configure(
+                CreateProfile<SceneParameterProfile>(SceneProfileJson),
+                adapter,
+                StudyPolicyMode.StaticPersonalized);
+
+            var coordinator = root.AddComponent<ProductionSessionCoordinator>();
+            coordinator.enabled = false;
+            coordinator.Configure(
+                bootstrap,
+                CreateProfile<SessionTimingProfile>(TimingProfileJson),
+                CreateProfile<PhysiologyValidationProfile>(
+                    PhysiologyProfileJson),
+                CreateProfile<RewardPipelineProfile>(RewardProfileJson),
+                CreateProfile<StabilizationSelectionProfile>(
+                    StabilizationProfileJson),
+                CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
+                CreateProfile<ProductionCoordinatorProfile>(
+                    CoordinatorProfileJson),
+                CreateProfile<PreferenceInitializationProfile>(
+                    PreferenceProfileJson));
+            coordinator.ConfigureSessionContext(
+                "playmode-telemetry-" + Guid.NewGuid().ToString("N"),
+                "P-PLAYMODE-TELEMETRY",
+                State(0.7f));
+
+            Assert.That(
+                coordinator.TryInitialize(out var validationError),
+                Is.True,
+                validationError);
+            telemetryFilePath = coordinator.TelemetryFilePath;
+
+            var startTime = Time.realtimeSinceStartupAsDouble;
+            var utcNow = UtcNowUnixSeconds();
+            coordinator.SubmitPhysiology(
+                CreateWindow(utcNow - 0.5d, 1.4d));
+            coordinator.SubmitPhysiology(
+                CreateInvalidWindow(utcNow - 0.25d));
+            Assert.That(
+                coordinator.ReportTelemetryTransferSucceeded(
+                    "ack-telemetry-coverage",
+                    4,
+                    10L,
+                    13L),
+                Is.True);
+            Assert.That(
+                coordinator.ReportTelemetryTransferFailed(
+                    "telemetry-publish-failed:Test",
+                    2,
+                    14L,
+                    15L),
+                Is.True);
+
+            var events = new List<TelemetryEvent>();
+            for (var frame = 0; frame < 160; frame++)
+            {
+                yield return null;
+                var offset = 0.1d + (frame * 0.001d);
+                coordinator.Advance(startTime + offset, utcNow + offset);
+                while (coordinator.TryDequeue(out var telemetryEvent))
+                {
+                    events.Add(telemetryEvent);
+                }
+            }
+
+            AssertEventPresent(events, TelemetryEventTypes.ApplicationStarted);
+            AssertEventPresent(events, TelemetryEventTypes.ApplicationVersion);
+            AssertEventPresent(events, TelemetryEventTypes.DeviceInformation);
+            AssertEventPresent(events, TelemetryEventTypes.SceneLoadStarted);
+            var bindingEvent = AssertEventPresent(
+                events,
+                TelemetryEventTypes.SceneBindingValidation);
+            Assert.That(
+                FindField(bindingEvent, "valid").BooleanValue,
+                Is.True);
+            AssertEventPresent(events, TelemetryEventTypes.SceneLoadCompleted);
+            AssertEventPresent(events, TelemetryEventTypes.PerformanceSample);
+
+            var accepted = AssertEventPresent(
+                events,
+                TelemetryEventTypes.PhysiologyReceived);
+            Assert.That(
+                FindField(accepted, "heart_rate_bpm").NumberValue,
+                Is.EqualTo(70d));
+            Assert.That(
+                FindField(accepted, "continuous_stress_score").NumberValue,
+                Is.EqualTo(1.4d));
+
+            var rejected = AssertEventPresent(
+                events,
+                TelemetryEventTypes.PhysiologyRejected);
+            Assert.That(
+                FindField(rejected, "heart_rate_bpm").ValueType,
+                Is.EqualTo(TelemetryFieldValueType.Null));
+            Assert.That(
+                FindField(rejected, "validation_reason").StringValue,
+                Is.EqualTo("HeartRateInvalid"));
+
+            var transitionCompleted = AssertEventPresent(
+                events,
+                TelemetryEventTypes.TransitionCompleted);
+            Assert.That(
+                FindField(
+                    transitionCompleted,
+                    "transition_reason").StringValue,
+                Is.EqualTo("participant_preference_initialization"));
+
+            Assert.That(
+                events.Exists(
+                    telemetryEvent => telemetryEvent.EventType
+                        == TelemetryEventTypes.LocalLogUploadSucceeded),
+                Is.False);
+            Assert.That(
+                events.Exists(
+                    telemetryEvent => telemetryEvent.EventType
+                        == TelemetryEventTypes.LocalLogUploadFailed),
+                Is.False);
+            var durableJsonLines = ReadTextFromActiveTelemetryFile(
+                telemetryFilePath);
+            Assert.That(
+                durableJsonLines,
+                Does.Contain(
+                    "\"eventType\":\"local_log.upload_succeeded\"")
+                    .And.Contain("ack-telemetry-coverage")
+                    .And.Contain(
+                        "\"eventType\":\"local_log.upload_failed\"")
+                    .And.Contain("telemetry-publish-failed:Test"));
+        }
+
+        [UnityTest]
         public IEnumerator VisualBoundary_ForwardsTransportNeutralInputs()
         {
             var root = Track(new GameObject("VisualSessionBoundaryHarness"));
@@ -321,6 +456,33 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 coordinator.LastCommandResult.CommandType,
                 Is.EqualTo(SessionCommandType.EmergencyStop));
             Assert.That(coordinator.Phase, Is.EqualTo(VrSessionPhase.Aborted));
+
+            var events = new List<TelemetryEvent>();
+            for (var frame = 0; frame < 80; frame++)
+            {
+                yield return null;
+                coordinator.Advance(
+                    startTime + 0.002d + (frame * 0.001d),
+                    utcNow + 0.002d + (frame * 0.001d));
+                while (coordinator.TryDequeue(out var telemetryEvent))
+                {
+                    events.Add(telemetryEvent);
+                }
+            }
+
+            var emergencyEvent = AssertEventPresent(
+                events,
+                TelemetryEventTypes.EmergencyStop);
+            Assert.That(
+                FindField(emergencyEvent, "terminal_phase").StringValue,
+                Is.EqualTo("Aborted"));
+            Assert.That(
+                FindField(emergencyEvent, "reason").StringValue,
+                Is.EqualTo("EmergencyStopCommand"));
+            Assert.That(
+                FindField(emergencyEvent, "final_state_illumination")
+                    .NumberValue,
+                Is.EqualTo(0.5d).Within(0.0001d));
 
             yield return null;
         }
@@ -561,6 +723,87 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     new StressProbabilityVector(0.1d, 0.7d, 0.1d, 0.1d),
                     stressScore),
                 0.95d);
+        }
+
+        private static PhysiologyWindow CreateInvalidWindow(
+            double windowEndUtcUnixSeconds)
+        {
+            return new PhysiologyWindow(
+                windowEndUtcUnixSeconds,
+                windowEndUtcUnixSeconds - 0.2d,
+                windowEndUtcUnixSeconds,
+                double.NaN,
+                35d,
+                40d,
+                new StressDecision(
+                    StressDecisionMode.Point,
+                    1,
+                    null,
+                    null,
+                    "mild",
+                    0.8d,
+                    false,
+                    new StressProbabilityVector(
+                        0.1d,
+                        0.7d,
+                        0.1d,
+                        0.1d),
+                    1.4d),
+                0.95d);
+        }
+
+        private static TelemetryEvent AssertEventPresent(
+            IReadOnlyList<TelemetryEvent> events,
+            string eventType)
+        {
+            for (var index = 0; index < events.Count; index++)
+            {
+                if (events[index].EventType == eventType)
+                {
+                    return events[index];
+                }
+            }
+
+            Assert.Fail("Missing telemetry event: " + eventType);
+            return null;
+        }
+
+        private static TelemetryField FindField(
+            TelemetryEvent telemetryEvent,
+            string fieldName)
+        {
+            for (var index = 0;
+                index < telemetryEvent.FieldCount;
+                index++)
+            {
+                var field = telemetryEvent.GetField(index);
+                if (field.Name == fieldName)
+                {
+                    return field;
+                }
+            }
+
+            Assert.Fail(
+                "Missing telemetry field '"
+                + fieldName
+                + "' on "
+                + telemetryEvent.EventType
+                + ".");
+            return default;
+        }
+
+        private static string ReadTextFromActiveTelemetryFile(
+            string filePath)
+        {
+            using (var stream = new FileStream(
+                       filePath,
+                       FileMode.Open,
+                       FileAccess.Read,
+                       FileShare.ReadWrite | FileShare.Delete))
+            using (var reader = new StreamReader(stream))
+            {
+                return reader.ReadToEnd();
+            }
         }
 
         private static EnvironmentState State(float value)
