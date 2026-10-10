@@ -252,6 +252,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\","
                 + "\"participantPseudonym\":\"P017\","
                 + "\"sceneId\":\"temple-pond\","
+                + "\"studyCondition\":\"StaticPersonalized\","
                 + "\"preferredEnvironment\":{\"illumination\":0.3,"
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
                 + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";

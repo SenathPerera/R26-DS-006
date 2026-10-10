@@ -126,6 +126,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             sceneAdapterComponent = adapterComponent;
             ruleBasedPolicyProfile = ruleProfile;
             linUcbPolicyProfile = linUcbProfile;
+            initializeOnStart = false;
             requireExplicitStudyPolicySelection = true;
             hasExplicitStudyPolicySelection = false;
         }
