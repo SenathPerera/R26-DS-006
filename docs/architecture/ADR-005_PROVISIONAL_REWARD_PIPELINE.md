@@ -2,9 +2,10 @@
 
 ## Status
 
-Superseded by ADR-015 for production reward-input availability. The baseline,
-timing, physiological, change, and safety weights remain provisional pilot
-values.
+Superseded by ADR-015 for production reward-input availability. ADR-016 freezes
+the resulting `adaptive-vr-reward-pilot-v2` profile for the engineering pilot.
+The values below describe the historical v1 candidate and are not the active
+production profile.
 
 ## Context
 
@@ -19,7 +20,7 @@ starting when only two forwarded samples arrive during acclimatization.
 Reward attribution must also wait long enough for a physiology window that is
 fully after the visual transition and settling period.
 
-## Provisional pilot values
+## Historical v1 pilot values
 
 | Setting | Candidate | Basis |
 |---|---:|---|

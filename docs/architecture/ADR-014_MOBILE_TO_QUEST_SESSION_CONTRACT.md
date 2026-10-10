@@ -45,6 +45,10 @@ Mobile-only preference mechanics (`preferenceMode` and temporary slider values)
 are not duplicated on the wire. Mobile resolves them into the single
 `preferredEnvironment` sent to Quest.
 
+ADR-016 freezes how Quest uses that full preference: all conditions initialize
+from `65%` participant preference and `35%` Temple Pond safe default. The full
+preference remains available to policy observations and stabilization scoring.
+
 Quest validates and records session context in session-configuration telemetry.
 It does not add those values to policy observations, safety decisions, rewards,
 or feature schema `1.0`. A future policy use requires a new approved feature

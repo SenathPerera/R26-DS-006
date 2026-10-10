@@ -1,7 +1,7 @@
 namespace LaminarVR.AdaptiveMeditation.Telemetry
 {
-    // TODO(RESEARCH_DECISION): These are draft local event names. Freeze and
-    // version the shared telemetry vocabulary before the pilot export schema.
+    // ADR-016 freezes these names under telemetry schema 1.0-pilot. Changes
+    // require a new schema version.
     public static class TelemetryEventTypes
     {
         public const string ApplicationStarted = "application.started";

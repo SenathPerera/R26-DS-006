@@ -19,7 +19,7 @@ The fixed study conditions are:
 - `RuleBasedAdaptive`
 - `ContextualBandit`
 
-The rule-based thresholds remain unapproved under the research contract.
+ADR-016 subsequently freezes and assigns the production rule-based profile.
 
 ## Decision
 
@@ -44,8 +44,8 @@ of mobile state.
 - Missing, unsupported, or conflicting conditions fail closed.
 - No condition bypasses the shared safety validator, transition controller,
   timing, or telemetry pipeline.
-- `RuleBasedAdaptive` remains unavailable in production until an approved
-  `RuleBasedPolicyProfile` is assigned. No threshold is inferred by this ADR.
+- `RuleBasedAdaptive` uses the approved `adaptive-vr-rule-based-pilot-v1`
+  profile assigned under ADR-016. No threshold is inferred at runtime.
 - Condition assignment is explicit; the app does not randomly assign a
   condition or implement an unapproved counterbalancing schedule.
 

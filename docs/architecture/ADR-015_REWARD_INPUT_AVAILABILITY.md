@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted as a provisional MVP correction.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016.
 
 ## Context
 
@@ -57,8 +57,8 @@ belongs in offline evaluation.
 - The online discomfort component remains disabled until the study protocol
   approves a time-aligned input. Post-session comfort remains available for
   offline analysis.
-- The binary safety mapping and all reward weights remain provisional and must
-  be revisited during pilot calibration.
+- The binary safety mapping and reward weights are frozen for the engineering
+  pilot and must be versioned if pilot evidence justifies a revision.
 
 ## Validation plan
 

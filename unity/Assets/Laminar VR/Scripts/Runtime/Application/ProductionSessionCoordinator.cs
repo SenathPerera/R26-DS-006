@@ -8,6 +8,7 @@ using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy;
+using LaminarVR.AdaptiveMeditation.Preferences;
 using LaminarVR.AdaptiveMeditation.Rewards;
 using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using LaminarVR.AdaptiveMeditation.Runtime.Telemetry;
@@ -35,6 +36,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         [Header("Approved Research Configuration")]
         [SerializeField]
         private SessionTimingProfile sessionTimingProfile = null;
+
+        [SerializeField]
+        private PreferenceInitializationProfile preferenceInitializationProfile =
+            null;
 
         [SerializeField]
         private PhysiologyValidationProfile physiologyValidationProfile = null;
@@ -72,6 +77,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private SessionStateMachine session;
         private PhysiologyStateBuffer physiologyBuffer;
         private PhysiologyBaselineAccumulator baselineAccumulator;
+        private PreferenceInitializationConfiguration
+            preferenceInitializationConfiguration;
         private RewardPipelineConfiguration rewardConfiguration;
         private ProductionCoordinatorConfiguration coordinatorConfiguration;
         private StabilizationStateSelector stabilizationSelector;
@@ -99,6 +106,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private string sessionId;
         private string participantPseudonym;
         private EnvironmentState preferredEnvironment;
+        private EnvironmentState initialEnvironment;
         private SessionContextSnapshot sessionContextSnapshot;
         private bool hasSessionContext;
 
@@ -245,7 +253,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             RewardPipelineProfile rewardProfile,
             StabilizationSelectionProfile stabilizationProfile,
             TelemetryLoggingProfile loggingProfile,
-            ProductionCoordinatorProfile productionProfile)
+            ProductionCoordinatorProfile productionProfile,
+            PreferenceInitializationProfile preferenceProfile = null)
         {
             if (IsInitialized)
             {
@@ -260,6 +269,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             stabilizationSelectionProfile = stabilizationProfile;
             telemetryLoggingProfile = loggingProfile;
             coordinatorProfile = productionProfile;
+            preferenceInitializationProfile = preferenceProfile;
         }
 
         public void ConfigureSessionContext(
@@ -358,6 +368,22 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 return false;
             }
 
+            var preferenceInitialization = new PreferenceInitializer()
+                .Initialize(
+                    applicationBootstrap.SceneProfile,
+                    new EnvironmentPreference(preferredEnvironment),
+                    preferenceInitializationConfiguration);
+            if (!preferenceInitialization.Accepted)
+            {
+                return Fail(
+                    "Preference initialization was rejected: "
+                    + preferenceInitialization.FailureReason
+                    + ".",
+                    out validationError);
+            }
+
+            initialEnvironment = preferenceInitialization.SafeInitialState;
+
             if (!coordinatorConfiguration.TryValidateCompatibility(
                     timing,
                     physiologyValidation,
@@ -440,6 +466,53 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     TelemetryField.Integer(
                         "coordinator_configuration_version",
                         coordinatorConfiguration.ConfigurationVersion),
+                    TelemetryField.String(
+                        "session_timing_configuration_id",
+                        timing.ConfigurationId),
+                    TelemetryField.Integer(
+                        "session_timing_configuration_version",
+                        timing.ConfigurationVersion),
+                    TelemetryField.String(
+                        "physiology_configuration_id",
+                        physiologyValidation.ConfigurationId),
+                    TelemetryField.Integer(
+                        "physiology_configuration_version",
+                        physiologyValidation.ConfigurationVersion),
+                    TelemetryField.String(
+                        "preference_configuration_id",
+                        preferenceInitializationConfiguration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "preference_configuration_version",
+                        preferenceInitializationConfiguration
+                            .ConfigurationVersion),
+                    TelemetryField.Number(
+                        "preference_weight",
+                        preferenceInitializationConfiguration.PreferenceWeight),
+                    TelemetryField.String(
+                        "reward_configuration_id",
+                        rewardConfiguration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "reward_configuration_version",
+                        rewardConfiguration.ConfigurationVersion),
+                    TelemetryField.String(
+                        "stabilization_configuration_id",
+                        stabilizationSelector.Configuration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "stabilization_configuration_version",
+                        stabilizationSelector.Configuration
+                            .ConfigurationVersion),
+                    TelemetryField.String(
+                        "telemetry_configuration_id",
+                        telemetryConfiguration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "telemetry_configuration_version",
+                        telemetryConfiguration.ConfigurationVersion),
+                    TelemetryField.String(
+                        "telemetry_event_schema_id",
+                        telemetryConfiguration.EventSchemaId),
+                    TelemetryField.String(
+                        "telemetry_event_schema_version",
+                        telemetryConfiguration.EventSchemaVersion),
                     TelemetryField.Number(
                         "expected_physiology_output_interval_seconds",
                         coordinatorConfiguration
@@ -469,9 +542,24 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     TelemetryField.Number(
                         "preferred_ambient_motion",
                         preferredEnvironment.AmbientMotion),
-                TelemetryField.Boolean(
-                    "preference_initialization_transition_started",
-                    preferenceInitializationTransitionStarted)
+                    TelemetryField.Number(
+                        "initial_illumination",
+                        initialEnvironment.Illumination),
+                    TelemetryField.Number(
+                        "initial_warmth",
+                        initialEnvironment.Warmth),
+                    TelemetryField.Number(
+                        "initial_atmospheric_softness",
+                        initialEnvironment.AtmosphericSoftness),
+                    TelemetryField.Number(
+                        "initial_color_richness",
+                        initialEnvironment.ColorRichness),
+                    TelemetryField.Number(
+                        "initial_ambient_motion",
+                        initialEnvironment.AmbientMotion),
+                    TelemetryField.Boolean(
+                        "preference_initialization_transition_started",
+                        preferenceInitializationTransitionStarted)
             };
             if (sessionContextSnapshot != null)
             {
@@ -742,6 +830,20 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             physiologyValidation = null;
             telemetryConfiguration = null;
 
+            if (preferenceInitializationProfile == null)
+            {
+                return Fail(
+                    "Assign an approved PreferenceInitializationProfile.",
+                    out validationError);
+            }
+
+            if (!preferenceInitializationProfile.TryCreateRuntimeConfiguration(
+                    out preferenceInitializationConfiguration,
+                    out var preferenceError))
+            {
+                return Fail(preferenceError, out validationError);
+            }
+
             if (sessionTimingProfile == null)
             {
                 return Fail(
@@ -919,7 +1021,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             double monotonicTimeSeconds)
         {
             var environmentManager = applicationBootstrap.EnvironmentManager;
-            if (environmentManager.CurrentState.Equals(preferredEnvironment))
+            if (environmentManager.CurrentState.Equals(initialEnvironment))
             {
                 return false;
             }
@@ -930,7 +1032,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             // policy transitions; it is not a policy decision or reward event.
             environmentManager.BeginTransition(
                 PreferenceInitializationTransitionId(),
-                preferredEnvironment,
+                initialEnvironment,
                 monotonicTimeSeconds,
                 applicationBootstrap.SceneProfile.TransitionDurationSeconds);
             return true;
@@ -1185,6 +1287,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             var result = await policyController.SelectStabilizationStateAsync(
                 session.Phase,
                 preferredEnvironment,
+                initialEnvironment,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
                 adaptationCancellation.Token);

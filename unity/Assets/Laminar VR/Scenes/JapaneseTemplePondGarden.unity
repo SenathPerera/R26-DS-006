@@ -5323,7 +5323,7 @@ MonoBehaviour:
   sceneAdapterComponent: {fileID: 1414086895}
   requireExplicitStudyPolicySelection: 1
   studyPolicyMode: 0
-  ruleBasedPolicyProfile: {fileID: 0}
+  ruleBasedPolicyProfile: {fileID: 11400000, guid: 26f5bf6474fb4e3bbc7138f9d01b96e8, type: 2}
   linUcbPolicyProfile: {fileID: 11400000, guid: b109afea7a4a4b55abde72bfae0d3811, type: 2}
 --- !u!114 &1414086899
 MonoBehaviour:
@@ -5339,6 +5339,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   applicationBootstrap: {fileID: 1414086898}
   sessionTimingProfile: {fileID: 11400000, guid: 12d2968ab8184fcabca22e1f75279391, type: 2}
+  preferenceInitializationProfile: {fileID: 11400000, guid: 812ec076b3a7457eaf0489b7cd5f3588, type: 2}
   physiologyValidationProfile: {fileID: 11400000, guid: 833ab46c3187477f93e252583fb3a23c, type: 2}
   rewardPipelineProfile: {fileID: 11400000, guid: 1e2fb22956c447ea95fd424620e448c6, type: 2}
   stabilizationSelectionProfile: {fileID: 11400000, guid: d071353a934e4350b094e10734fe61d3, type: 2}

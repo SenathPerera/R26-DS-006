@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted for development validation; the pilot configuration remains subject
-to Step 14 freeze and Quest 2 validation.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. Full Quest 2
+timeline validation remains required before the main study.
 
 ## Context
 
@@ -58,4 +58,5 @@ The timed phases total 1,170 seconds. Together with the separately owned
   decision interval.
 - Run the production coordinator PlayMode suite.
 - Verify the complete phase timeline in JSONL telemetry.
-- Validate the full 20-minute protocol on Quest 2 before Step 14 freeze.
+- Validate the full 20-minute protocol on Quest 2 before promoting the pilot
+  freeze to a main-study freeze.

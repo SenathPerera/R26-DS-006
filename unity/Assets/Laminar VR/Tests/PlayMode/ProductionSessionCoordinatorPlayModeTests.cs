@@ -64,7 +64,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     StabilizationProfileJson),
                 CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
                 CreateProfile<ProductionCoordinatorProfile>(
-                    CoordinatorProfileJson));
+                    CoordinatorProfileJson),
+                CreateProfile<PreferenceInitializationProfile>(
+                    PreferenceProfileJson));
             coordinator.ConfigureSessionContext(
                 "playmode-production-" + Guid.NewGuid().ToString("N"),
                 "P-PLAYMODE-PRODUCTION",
@@ -111,7 +113,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         }
 
         [UnityTest]
-        public IEnumerator Coordinator_AppliesSafeParticipantPreferenceAtInitialization()
+        public IEnumerator Coordinator_AppliesApprovedPreferenceBlendAtInitialization()
         {
             var root = Track(new GameObject("PreferenceInitializationHarness"));
             var adapter = root.AddComponent<RecordingAdapter>();
@@ -133,13 +135,21 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     StabilizationProfileJson),
                 CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
                 CreateProfile<ProductionCoordinatorProfile>(
-                    CoordinatorProfileJson));
+                    CoordinatorProfileJson),
+                CreateProfile<PreferenceInitializationProfile>(
+                    PreferenceProfileJson));
             var preference = new EnvironmentState(
                 0.7f,
                 0.3f,
                 0.6f,
                 0.2f,
                 0.8f);
+            var expectedInitial = new EnvironmentState(
+                0.63f,
+                0.37f,
+                0.565f,
+                0.305f,
+                0.695f);
             coordinator.ConfigureSessionContext(
                 "playmode-preference-" + Guid.NewGuid().ToString("N"),
                 "P-PLAYMODE-PREFERENCE",
@@ -153,9 +163,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(
                 bootstrap.EnvironmentManager.IsTransitionActive,
                 Is.True);
-            Assert.That(
+            AssertStateEqual(
                 bootstrap.EnvironmentManager.TargetState,
-                Is.EqualTo(preference));
+                expectedInitial);
 
             var now = Time.realtimeSinceStartupAsDouble;
             coordinator.Advance(now + 0.1d, UtcNowUnixSeconds() + 0.1d);
@@ -163,10 +173,10 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(
                 bootstrap.EnvironmentManager.IsTransitionActive,
                 Is.False);
-            Assert.That(
+            AssertStateEqual(
                 bootstrap.EnvironmentManager.CurrentState,
-                Is.EqualTo(preference));
-            Assert.That(adapter.LastAppliedState, Is.EqualTo(preference));
+                expectedInitial);
+            AssertStateEqual(adapter.LastAppliedState, expectedInitial);
 
             yield return null;
         }
@@ -194,7 +204,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     StabilizationProfileJson),
                 CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
                 CreateProfile<ProductionCoordinatorProfile>(
-                    CoordinatorProfileJson));
+                    CoordinatorProfileJson),
+                CreateProfile<PreferenceInitializationProfile>(
+                    PreferenceProfileJson));
 
             var boundary = root.AddComponent<VisualSessionBoundary>();
             boundary.enabled = false;
@@ -262,7 +274,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     StabilizationProfileJson),
                 CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
                 CreateProfile<ProductionCoordinatorProfile>(
-                    CoordinatorProfileJson));
+                    CoordinatorProfileJson),
+                CreateProfile<PreferenceInitializationProfile>(
+                    PreferenceProfileJson));
 
             var boundary = root.AddComponent<VisualSessionBoundary>();
             boundary.enabled = false;
@@ -334,7 +348,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     StabilizationProfileJson),
                 CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
                 CreateProfile<ProductionCoordinatorProfile>(
-                    CoordinatorProfileJson));
+                    CoordinatorProfileJson),
+                CreateProfile<PreferenceInitializationProfile>(
+                    PreferenceProfileJson));
             coordinator.ConfigureSessionContext(
                 "playmode-headset-lifecycle-" + Guid.NewGuid().ToString("N"),
                 "P-PLAYMODE-HEADSET-LIFECYCLE",
@@ -446,7 +462,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                     StabilizationProfileJson),
                 CreateProfile<TelemetryLoggingProfile>(TelemetryProfileJson),
                 CreateProfile<ProductionCoordinatorProfile>(
-                    CoordinatorProfileJson));
+                    CoordinatorProfileJson),
+                CreateProfile<PreferenceInitializationProfile>(
+                    PreferenceProfileJson));
             coordinator.ConfigureSessionContext(
                 "playmode-headset-clock-" + Guid.NewGuid().ToString("N"),
                 "P-PLAYMODE-HEADSET-CLOCK",
@@ -548,6 +566,27 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         private static EnvironmentState State(float value)
         {
             return new EnvironmentState(value, value, value, value, value);
+        }
+
+        private static void AssertStateEqual(
+            EnvironmentState actual,
+            EnvironmentState expected)
+        {
+            Assert.That(
+                actual.Illumination,
+                Is.EqualTo(expected.Illumination).Within(1e-6f));
+            Assert.That(
+                actual.Warmth,
+                Is.EqualTo(expected.Warmth).Within(1e-6f));
+            Assert.That(
+                actual.AtmosphericSoftness,
+                Is.EqualTo(expected.AtmosphericSoftness).Within(1e-6f));
+            Assert.That(
+                actual.ColorRichness,
+                Is.EqualTo(expected.ColorRichness).Within(1e-6f));
+            Assert.That(
+                actual.AmbientMotion,
+                Is.EqualTo(expected.AmbientMotion).Within(1e-6f));
         }
 
         private static SessionContextSnapshot CreateSessionContext()
@@ -652,6 +691,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             ""eventSchemaId"": ""production-test-event"",
             ""eventSchemaVersion"": ""1"",
             ""flushEveryEventCount"": 1
+        }";
+
+        private const string PreferenceProfileJson = @"{
+            ""configurationId"": ""production-preference-test"",
+            ""configurationVersion"": 1,
+            ""researchConfigurationApproved"": true,
+            ""preferenceWeight"": 0.65
         }";
 
         private const string CoordinatorProfileJson = @"{

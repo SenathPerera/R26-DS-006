@@ -576,9 +576,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 
             if (stabilizationSelector != null)
             {
-                // TODO(RESEARCH_DECISION): Freeze discomfort and safety
-                // eligibility thresholds. Until then, any positive severity
-                // excludes the state from final stabilization selection.
+                // ADR-016 freezes binary pilot eligibility: any positive
+                // discomfort or safety intervention excludes the outcome.
                 stabilizationSelector.RecordOutcome(
                     new StabilizationOutcome(
                         match.Request.TransitionId,
@@ -768,6 +767,25 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 double sessionElapsedSeconds,
                 CancellationToken cancellationToken)
         {
+            return await SelectStabilizationStateAsync(
+                    phase,
+                    safePreferenceState,
+                    safePreferenceState,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public async Task<StabilizationSelectionResult>
+            SelectStabilizationStateAsync(
+                VrSessionPhase phase,
+                EnvironmentState safePreferenceState,
+                EnvironmentState safeFallbackState,
+                double utcTimestampUnixSeconds,
+                double sessionElapsedSeconds,
+                CancellationToken cancellationToken)
+        {
             ValidateFiniteNonNegative(
                 utcTimestampUnixSeconds,
                 nameof(utcTimestampUnixSeconds));
@@ -796,6 +814,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 
             var result = stabilizationSelector.Select(
                 safePreferenceState,
+                safeFallbackState,
                 sceneProfile.Limits);
             for (var index = 0; index < result.EvaluationCount; index++)
             {

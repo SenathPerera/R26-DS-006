@@ -28,7 +28,8 @@ from temporary adjustments.
   session on the mobile device when the context is submitted.
 - Continue sending only the effective normalized five-dimensional environment
   preference through the existing relay contract. Unity retains ownership of
-  safety validation and raw scene mapping.
+  the frozen preference/default blend, safety validation, and raw scene
+  mapping.
 - Keep the Japanese Temple Pond Garden as the only selectable scene.
 
 ## Alternatives considered

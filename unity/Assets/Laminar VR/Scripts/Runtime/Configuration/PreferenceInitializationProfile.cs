@@ -23,7 +23,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("First-Session Blend")]
-        // TODO(RESEARCH_DECISION): This weight requires pilot/study approval.
+        // Approved values live only in versioned profiles. The zero authoring
+        // default keeps an unconfigured profile behaviorally neutral.
         [SerializeField, Range(0f, 1f)]
         private float preferenceWeight = 0f;
 
