@@ -5451,6 +5451,7 @@ MonoBehaviour:
   applicationBootstrap: {fileID: 1414086898}
   productionCoordinator: {fileID: 1414086899}
   visualSessionBoundary: {fileID: 1414086900}
+  reconnectBackoffProfile: {fileID: 11400000, guid: d51d5b57a8f74a20b8113d36f2140764, type: 2}
   maximumMessagesPerFrame: 64
 --- !u!1 &1423676677
 GameObject:

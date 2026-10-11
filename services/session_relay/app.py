@@ -135,8 +135,9 @@ class SessionChannels:
 
     async def attach_quest(self, session_id: str, socket: WebSocket) -> None:
         async with self.lock:
-            if session_id in self.quest:
-                raise PairingRejectedError("quest-already-connected")
+            old = self.quest.get(session_id)
+            if old is not None and old is not socket:
+                await old.close(code=4409, reason="quest-replaced")
             self.quest[session_id] = socket
 
     async def detach(self, session_id: str, role: str, socket: WebSocket) -> None:
@@ -344,7 +345,27 @@ async def _quest_connection(websocket: WebSocket) -> None:
             if not _valid_quest_message(message, session.session_id):
                 await websocket.send_json(_error("quest-message-invalid"))
                 continue
-            await _append_durable(session.session_id, message)
+            is_first_delivery = store.accept_quest_message(
+                session.session_id,
+                message["messageId"],
+            )
+            if not is_first_delivery:
+                if message["messageType"] == "visual_telemetry_batch":
+                    await websocket.send_json(
+                        _delivery_ack(
+                            session.session_id,
+                            message["messageId"],
+                        )
+                    )
+                continue
+            try:
+                await _append_durable(session.session_id, message)
+            except Exception:
+                store.release_quest_message(
+                    session.session_id,
+                    message["messageId"],
+                )
+                raise
             terminal_phase = (
                 message["payload"].get("phase")
                 if message["messageType"] == "quest_state"
@@ -366,13 +387,7 @@ async def _quest_connection(websocket: WebSocket) -> None:
                 )
             if message["messageType"] == "visual_telemetry_batch":
                 await websocket.send_json(
-                    _envelope(
-                        "delivery_ack",
-                        {
-                            "sessionId": session.session_id,
-                            "acknowledgedMessageId": message["messageId"],
-                        },
-                    )
+                    _delivery_ack(session.session_id, message["messageId"])
                 )
             if terminal_phase is not None:
                 break
@@ -423,6 +438,16 @@ def _pairing_rejection(code: str) -> dict:
 
 def _error(code: str) -> dict:
     return _envelope("relay_error", {"code": code})
+
+
+def _delivery_ack(session_id: str, message_id: str) -> dict:
+    return _envelope(
+        "delivery_ack",
+        {
+            "sessionId": session_id,
+            "acknowledgedMessageId": message_id,
+        },
+    )
 
 
 def _envelope(message_type: str, payload: dict) -> dict:

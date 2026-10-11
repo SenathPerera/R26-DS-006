@@ -73,15 +73,38 @@ class SessionStoreTests(unittest.TestCase):
                 SESSION_CONTEXT,
             )
 
-    def test_pairing_code_is_one_time(self) -> None:
+    def test_pairing_code_allows_only_the_original_quest_to_reconnect(self) -> None:
         session = self.store.create(
             "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
             SESSION_CONTEXT,
         )
         paired = self.store.pair(session.pairing_code, "quest-1")
         self.assertEqual("quest-1", paired.quest_client_id)
+        self.now = session.expires_at_unix_seconds + 1
+        reconnected = self.store.pair(session.pairing_code, "quest-1")
+        self.assertIs(session, reconnected)
         with self.assertRaisesRegex(PairingRejectedError, "code-already-used"):
-            self.store.pair(session.pairing_code, "quest-1")
+            self.store.pair(session.pairing_code, "quest-2")
+
+    def test_quest_message_ids_are_accepted_once_per_session(self) -> None:
+        session = self.store.create(
+            "request-1", "participant-1", "temple-pond", STUDY_CONDITION, PREFERENCE,
+            SESSION_CONTEXT,
+        )
+
+        self.assertTrue(
+            self.store.accept_quest_message(session.session_id, "message-1")
+        )
+        self.assertFalse(
+            self.store.accept_quest_message(session.session_id, "message-1")
+        )
+        self.assertTrue(
+            self.store.accept_quest_message(session.session_id, "message-2")
+        )
+        self.store.release_quest_message(session.session_id, "message-1")
+        self.assertTrue(
+            self.store.accept_quest_message(session.session_id, "message-1")
+        )
 
     def test_expired_code_is_rejected_and_allows_new_session(self) -> None:
         session = self.store.create(

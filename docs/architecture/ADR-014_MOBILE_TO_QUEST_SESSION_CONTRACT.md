@@ -67,6 +67,11 @@ Quest must be deployed with the same relay schema version. Missing, malformed,
 out-of-range, or unsupported session context fails before Quest session
 initialization.
 
+ADR-018 hardens reconnection without changing this schema. While a prepared
+session remains active, the originally bound `questClientId` may reattach with
+the original pairing code; a different Quest identity remains rejected.
+Unacknowledged telemetry is replayed with its original message ID.
+
 ## Consequences
 
 - Apply the Supabase migration that drops `light_sensitivity` and

@@ -1,10 +1,15 @@
 # MindSync Session Relay
 
 Development relay for the controlled single-participant mobile/Quest pilot.
-It creates one prepared session, issues a six-digit one-time code, binds one
-Quest WebSocket, delivers the Temple Pond configuration and start command,
+It creates one prepared session, issues a six-digit initial-pairing code, binds
+one Quest identity, delivers the Temple Pond configuration and start command,
 persists Quest messages to JSON Lines, and forwards them to the authenticated
 mobile connection.
+
+If that Quest loses its WebSocket, the same `questClientId` may reattach to the
+active session with the original code; another Quest remains rejected. A
+replayed telemetry message receives another acknowledgement but is not
+appended or forwarded twice.
 
 The session creation request must include one exact `studyCondition` value:
 `StaticPersonalized`, `RuleBasedAdaptive`, or `ContextualBandit`. The relay
@@ -60,7 +65,8 @@ python -m unittest services.session_relay.test_session_store services.session_re
 ```
 
 The integration suite covers the prepared-session HTTP endpoint, authenticated
-mobile WebSocket, one-time Quest pairing, configuration and start delivery,
-readiness-gated initialization, mobile command forwarding, Quest telemetry
-acknowledgement/forwarding, terminal log finalization, idempotent mobile
-delivery acknowledgement, and durable visual-log recovery.
+mobile WebSocket, initial Quest pairing, configuration and start delivery,
+readiness-gated initialization, same-Quest reattachment, mobile command
+forwarding, idempotent Quest telemetry acknowledgement/forwarding, terminal
+log finalization, idempotent mobile delivery acknowledgement, and durable
+visual-log recovery.

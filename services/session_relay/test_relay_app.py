@@ -145,6 +145,13 @@ class SessionRelayAppTests(unittest.TestCase):
                 )
                 self.assertEqual(telemetry, forwarded)
 
+                quest.send_json(telemetry)
+                duplicate_acknowledgement = quest.receive_json()
+                self.assertEqual(
+                    "telemetry-message",
+                    duplicate_acknowledgement["payload"]["acknowledgedMessageId"],
+                )
+
                 completed = self._envelope(
                     "quest_state",
                     {
