@@ -1,3 +1,4 @@
+using System;
 using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Policy.RuleBased;
@@ -86,6 +87,40 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
             Assert.That(created, Is.True);
             Assert.That(code, Is.EqualTo(StudyPolicyCreationResultCode.Created));
             Assert.That(policy, Is.TypeOf<ContextualBanditPolicy>());
+        }
+
+        [TestCase("StaticPersonalized", StudyPolicyMode.StaticPersonalized)]
+        [TestCase("RuleBasedAdaptive", StudyPolicyMode.RuleBasedAdaptive)]
+        [TestCase("ContextualBandit", StudyPolicyMode.ContextualBandit)]
+        public void StudyConditionCodec_RoundTripsApprovedWireValues(
+            string wireValue,
+            StudyPolicyMode expectedMode)
+        {
+            Assert.That(
+                StudyConditionCodec.TryParse(wireValue, out var mode),
+                Is.True);
+            Assert.That(mode, Is.EqualTo(expectedMode));
+            Assert.That(
+                StudyConditionCodec.ToWireValue(mode),
+                Is.EqualTo(wireValue));
+        }
+
+        [TestCase("")]
+        [TestCase("contextual_bandit")]
+        [TestCase("ExperimentalPolicy")]
+        public void StudyConditionCodec_RejectsNonContractValues(
+            string wireValue)
+        {
+            Assert.That(
+                StudyConditionCodec.TryParse(wireValue, out _),
+                Is.False);
+        }
+
+        [Test]
+        public void StudyConditionCodec_RejectsUndefinedMode()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => StudyConditionCodec.ToWireValue((StudyPolicyMode)99));
         }
 
         private static RuleBasedPolicyConfiguration CreateRuleConfiguration()

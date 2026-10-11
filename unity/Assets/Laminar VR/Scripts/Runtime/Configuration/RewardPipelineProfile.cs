@@ -21,8 +21,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Baseline and Trend")]
-        // TODO(RESEARCH_DECISION): Approve the normalization method, sample
-        // counts, variability floor, and trend horizon before runtime use.
+        // Approved normalization and sampling values live in versioned profiles.
         [SerializeField]
         private BaselineStandardDeviationMethod
             baselineStandardDeviationMethod =
@@ -41,8 +40,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private int minimumTrendSamples = 0;
 
         [Header("Attribution Timing")]
-        // TODO(RESEARCH_DECISION): Calibrate against the transition duration,
-        // Component B window length, and decision interval.
+        // Approved timing must remain compatible with transitions and physiology.
         [SerializeField, Min(0f)]
         private float settlingSeconds = 0f;
 
@@ -50,8 +48,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private float maximumAttributionWaitSeconds = 0f;
 
         [Header("Reward Weights")]
-        // TODO(RESEARCH_DECISION): Blueprint values are examples, not approved
-        // defaults. Keep every weight explicit and versioned.
+        // Keep every approved weight explicit and versioned.
         [SerializeField, Min(0f)]
         private float stressWeight = 0f;
 

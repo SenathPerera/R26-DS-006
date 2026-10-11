@@ -171,6 +171,18 @@ namespace LaminarVR.AdaptiveMeditation.Environment
             return true;
         }
 
+        public bool DelayActiveTransition(double delaySeconds)
+        {
+            ValidateFiniteNonNegative(delaySeconds, nameof(delaySeconds));
+            if (!IsTransitionActive)
+            {
+                return false;
+            }
+
+            transitionStartMonotonicTimeSeconds += delaySeconds;
+            return true;
+        }
+
         private static EnvironmentState Interpolate(
             EnvironmentState start,
             EnvironmentState target,

@@ -45,7 +45,27 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Telemetry
             Assert.That(sink.TryDequeue(out _), Is.False);
         }
 
-        private static TelemetryEvent CreateEvent()
+        [Test]
+        public async Task AppendAsync_CanKeepTransferStatusLocalOnly()
+        {
+            var durableSink = new RecordingDurableSink();
+            var sink = new DurableTelemetryBufferingSink(
+                durableSink,
+                telemetryEvent => telemetryEvent.EventType
+                    != TelemetryEventTypes.LocalLogUploadSucceeded);
+
+            await sink.AppendAsync(
+                CreateEvent(
+                    TelemetryEventTypes.LocalLogUploadSucceeded),
+                CancellationToken.None);
+
+            Assert.That(durableSink.AppendCount, Is.EqualTo(1));
+            Assert.That(sink.PendingEventCount, Is.Zero);
+            Assert.That(sink.TryDequeue(out _), Is.False);
+        }
+
+        private static TelemetryEvent CreateEvent(
+            string eventType = "session_started")
         {
             return new TelemetryEvent(
                 "visual-event",
@@ -56,7 +76,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Telemetry
                 1,
                 "session-42",
                 "P017",
-                "session_started",
+                eventType,
                 1787282898.4d,
                 0d,
                 true,

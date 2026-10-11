@@ -49,8 +49,6 @@ export type Database = {
           preferred_atmospheric_softness: number | null;
           preferred_color_richness: number | null;
           preferred_ambient_motion: number | null;
-          light_sensitivity: 'none' | 'mild' | 'high' | null;
-          motion_sensitivity: number | null;
           consent_accepted: boolean;
           research_consent: boolean;
           privacy_notice_version: string;
@@ -72,8 +70,6 @@ export type Database = {
           preferred_atmospheric_softness?: number | null;
           preferred_color_richness?: number | null;
           preferred_ambient_motion?: number | null;
-          light_sensitivity?: 'none' | 'mild' | 'high' | null;
-          motion_sensitivity?: number | null;
           consent_accepted?: boolean;
           research_consent?: boolean;
           privacy_notice_version?: string;

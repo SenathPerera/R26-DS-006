@@ -2,6 +2,7 @@ import type {
   MeditationSession,
   OnboardingProfile,
   PreferredEnvironment,
+  QuestSessionContext,
   SessionContext,
   SessionPreferenceMode,
 } from '../../types/domain';
@@ -56,6 +57,23 @@ export function effectiveEnvironmentPreference(
     ambientMotion: context.sessionPreferredAmbientMotion
       ?? profile.preferredAmbientMotion,
   });
+}
+
+export function questSessionContext(
+  context: SessionContext,
+): QuestSessionContext {
+  return {
+    schemaVersion: context.schemaVersion,
+    collectedAt: context.collectedAt,
+    subjectiveStress: context.subjectiveStress,
+    moodValence: context.moodValence,
+    fatigue: context.fatigue,
+    sleepQuality: context.sleepQuality,
+    headacheOrEyeStrainToday: context.headacheOrEyeStrainToday,
+    timeOfDayMinutes: context.timeOfDayMinutes,
+    sessionSequenceNumber: context.sessionSequenceNumber,
+    daysSincePreviousSession: context.daysSincePreviousSession,
+  };
 }
 
 export function createSessionContext(

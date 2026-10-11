@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This is an engineering and
-project-team approval for runtime use, not evidence that the thresholds are
-scientifically optimal.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. This is an
+engineering pilot decision, not evidence that the thresholds are scientifically
+optimal.
 
 ## Context
 
@@ -50,7 +50,7 @@ apply before a decision or model update.
 The 30-second minimum window accepts the expected approximately 45-second
 resting window, but Component B windows are beat-count based rather than
 fixed-duration. The team must confirm the shortest legitimate window expected
-from the supported participant population before the final Step 14 freeze.
+from the supported participant population before the main-study freeze.
 
 ## Validation plan
 

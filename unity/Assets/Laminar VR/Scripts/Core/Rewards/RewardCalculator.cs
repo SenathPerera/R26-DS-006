@@ -22,8 +22,7 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
             EnvironmentAction executedAction,
             EnvironmentState environmentBefore,
             EnvironmentState environmentAfter,
-            double discomfortSeverity,
-            double safetySeverity)
+            RewardPenaltyObservation penaltyObservation)
         {
             if (!IsValidSnapshot(preAction) || !IsValidSnapshot(postAction))
             {
@@ -51,11 +50,28 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
                     RewardCalculationResultCode.InvalidEnvironmentState);
             }
 
-            if (!IsUnitInterval(discomfortSeverity)
-                || !IsUnitInterval(safetySeverity))
+            if (penaltyObservation == null)
             {
                 return RewardCalculationResult.Invalid(
                     RewardCalculationResultCode.InvalidPenaltySeverity);
+            }
+
+            if ((penaltyObservation.DiscomfortSeverity.HasValue
+                    && !IsUnitInterval(
+                        penaltyObservation.DiscomfortSeverity.Value))
+                || !IsUnitInterval(penaltyObservation.SafetySeverity)
+                || penaltyObservation.SafetyInterventionOccurred
+                    != (penaltyObservation.SafetySeverity > 0d))
+            {
+                return RewardCalculationResult.Invalid(
+                    RewardCalculationResultCode.InvalidPenaltySeverity);
+            }
+
+            if (configuration.DiscomfortPenaltyWeight > 0d
+                && !penaltyObservation.DiscomfortSeverity.HasValue)
+            {
+                return RewardCalculationResult.Invalid(
+                    RewardCalculationResultCode.MissingDiscomfortSeverity);
             }
 
             if (!IsActionConsistent(
@@ -101,6 +117,9 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
                 : 0d;
             var actionMagnitude =
                 environmentBefore.L1DistanceTo(environmentAfter);
+            var discomfortSeverity =
+                penaltyObservation.DiscomfortSeverity.GetValueOrDefault();
+            var safetySeverity = penaltyObservation.SafetySeverity;
 
             var stressComponent =
                 configuration.StressWeight * normalizedStress;
@@ -140,8 +159,9 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
                     normalizedRmssd,
                     normalizedHeartRate,
                     actionMagnitude,
-                    discomfortSeverity,
+                    penaltyObservation.DiscomfortSeverity,
                     safetySeverity,
+                    penaltyObservation.SafetyInterventionOccurred,
                     stressComponent,
                     rmssdComponent,
                     heartRateComponent,

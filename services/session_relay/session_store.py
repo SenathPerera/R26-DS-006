@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import secrets
 import threading
 import time
@@ -13,7 +13,9 @@ class PreparedSession:
     session_id: str
     participant_pseudonym: str
     scene_id: str
+    study_condition: str
     preferred_environment: dict[str, float]
+    session_context: dict[str, object]
     pairing_code: str
     expires_at_unix_seconds: float
     mobile_token: str
@@ -22,6 +24,7 @@ class PreparedSession:
     completion_phase: str | None = None
     visual_log_message_count: int | None = None
     visual_log_last_message_id: str | None = None
+    received_quest_message_ids: set[str] = field(default_factory=set)
 
 
 class SessionStore:
@@ -50,14 +53,19 @@ class SessionStore:
         request_id: str,
         participant_pseudonym: str,
         scene_id: str,
+        study_condition: str,
         preferred_environment: dict[str, float],
+        session_context: dict[str, object],
     ) -> PreparedSession:
         request_id = self._required(request_id, "request_id")
         participant_pseudonym = self._required(
             participant_pseudonym, "participant_pseudonym"
         )
         scene_id = self._required(scene_id, "scene_id")
+        study_condition = self._required(study_condition, "study_condition")
         self._validate_environment(preferred_environment)
+        if not isinstance(session_context, dict):
+            raise ValueError("session_context is required")
 
         with self._lock:
             existing_id = self._session_ids_by_request.get(request_id)
@@ -76,7 +84,9 @@ class SessionStore:
                 session_id=session_id,
                 participant_pseudonym=participant_pseudonym,
                 scene_id=scene_id,
+                study_condition=study_condition,
                 preferred_environment=dict(preferred_environment),
+                session_context=dict(session_context),
                 pairing_code=code,
                 expires_at_unix_seconds=now + self._code_lifetime_seconds,
                 mobile_token=self._token_factory(),
@@ -96,13 +106,33 @@ class SessionStore:
             session = self._sessions_by_id[session_id]
             if session.ended:
                 raise PairingRejectedError("session-ended")
+            if session.quest_client_id is not None:
+                if secrets.compare_digest(session.quest_client_id, quest_client_id):
+                    return session
+                raise PairingRejectedError("code-already-used")
             if self._clock() >= session.expires_at_unix_seconds:
                 session.ended = True
                 raise PairingRejectedError("code-expired")
-            if session.quest_client_id is not None:
-                raise PairingRejectedError("code-already-used")
             session.quest_client_id = quest_client_id
             return session
+
+    def accept_quest_message(self, session_id: str, message_id: str) -> bool:
+        message_id = self._required(message_id, "message_id")
+        with self._lock:
+            session = self._sessions_by_id.get(session_id)
+            if session is None:
+                return False
+            if message_id in session.received_quest_message_ids:
+                return False
+            session.received_quest_message_ids.add(message_id)
+            return True
+
+    def release_quest_message(self, session_id: str, message_id: str) -> None:
+        message_id = self._required(message_id, "message_id")
+        with self._lock:
+            session = self._sessions_by_id.get(session_id)
+            if session is not None:
+                session.received_quest_message_ids.discard(message_id)
 
     def authenticate_mobile(
         self,

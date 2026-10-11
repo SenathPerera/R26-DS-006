@@ -33,7 +33,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private float expectedPhysiologyOutputIntervalSeconds = 60f;
 
         [Header("Session-level Safety Limits")]
-        // TODO(RESEARCH_DECISION): Approve both limits before pilot use.
+        // Approved safety limits live only in versioned profiles.
         [SerializeField, Min(0)]
         private int maximumConsecutiveSameDirectionActions = 0;
 

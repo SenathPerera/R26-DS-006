@@ -67,6 +67,36 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
         }
 
         [Test]
+        public async Task ConnectAsync_TimesOutAnUnresponsiveConnection()
+        {
+            var connection = new FakeConnection
+            {
+                BlockConnect = true
+            };
+            var transport = CreateTransport(connection, 0.01d);
+            SessionTransportStatus lastStatus = default;
+            transport.StatusChanged += status => lastStatus = status;
+
+            var timeoutObserved = false;
+            try
+            {
+                await transport.ConnectAsync(CancellationToken.None);
+            }
+            catch (OperationCanceledException)
+            {
+                timeoutObserved = true;
+            }
+
+            Assert.That(timeoutObserved, Is.True);
+            Assert.That(
+                transport.ConnectionState,
+                Is.EqualTo(SessionTransportConnectionState.Disconnected));
+            Assert.That(
+                lastStatus.Reason,
+                Is.EqualTo(SessionTransportStatusReason.ConnectionFailed));
+        }
+
+        [Test]
         public async Task ReceiveLoop_RoutesSessionMessagesAndDropsDuplicateCommand()
         {
             var connection = new FakeConnection();
@@ -192,8 +222,47 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
             await transport.DisconnectAsync(CancellationToken.None);
         }
 
+        [Test]
+        public async Task Reconnect_ReplaysTelemetryBatchWithOriginalMessageId()
+        {
+            var connection = new FakeConnection();
+            connection.EnqueueText(CreateAcceptedPairingJson());
+            var transport = CreateTransport(connection);
+            var telemetryBatch = new[] { CreateTelemetryEvent() };
+            var acknowledgedCount = 0;
+            transport.TelemetryBatchAcknowledged +=
+                _ => Interlocked.Increment(ref acknowledgedCount);
+            await transport.ConnectAsync(CancellationToken.None);
+            await transport.PublishTelemetryBatchAsync(
+                telemetryBatch,
+                CancellationToken.None);
+
+            connection.EnqueueClosed();
+            await WaitUntilAsync(
+                () => transport.ConnectionState
+                    == SessionTransportConnectionState.Disconnected);
+            connection.EnqueueText(CreateAcceptedPairingJson());
+            await transport.ConnectAsync(CancellationToken.None);
+            await transport.PublishTelemetryBatchAsync(
+                telemetryBatch,
+                CancellationToken.None);
+
+            Assert.That(connection.SentTexts, Has.Count.EqualTo(4));
+            Assert.That(connection.SentTexts[1], Does.Contain(
+                "\"messageId\":\"generated-2\""));
+            Assert.That(connection.SentTexts[3], Does.Contain(
+                "\"messageId\":\"generated-2\""));
+
+            connection.EnqueueText(CreateDeliveryAcknowledgementJson(
+                "generated-2"));
+            await WaitUntilAsync(
+                () => Volatile.Read(ref acknowledgedCount) == 1);
+            await transport.DisconnectAsync(CancellationToken.None);
+        }
+
         private static SessionRelayWebSocketTransport CreateTransport(
-            FakeConnection connection)
+            FakeConnection connection,
+            double connectionTimeoutSeconds = 20d)
         {
             var info = new SessionRelayConnectionInfo(
                 new Uri("wss://relay.example.test/session"),
@@ -202,7 +271,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 "quest-install-7",
                 "1.2.0",
                 65536,
-                32);
+                32,
+                connectionTimeoutSeconds);
             return new SessionRelayWebSocketTransport(
                 info,
                 new SessionRelayJsonCodec(SchemaVersion),
@@ -252,9 +322,19 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\","
                 + "\"participantPseudonym\":\"P017\","
                 + "\"sceneId\":\"temple-pond\","
+                + "\"studyCondition\":\"StaticPersonalized\","
                 + "\"preferredEnvironment\":{\"illumination\":0.3,"
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
-                + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4},"
+                + "\"sessionContext\":{"
+                + "\"schemaVersion\":\"mindsync-session-context-v1\","
+                + "\"collectedAt\":\"2026-10-10T08:30:00.000Z\","
+                + "\"subjectiveStress\":6,\"moodValence\":-0.2,"
+                + "\"fatigue\":0.7,\"sleepQuality\":0.4,"
+                + "\"headacheOrEyeStrainToday\":false,"
+                + "\"timeOfDayMinutes\":510,"
+                + "\"sessionSequenceNumber\":2,"
+                + "\"daysSincePreviousSession\":3}}}";
         }
 
         private static string CreateCommandJson(
@@ -337,11 +417,20 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
 
             public bool IsOpen { get; private set; }
 
+            public bool BlockConnect { get; set; }
+
             public Task ConnectAsync(
                 Uri endpoint,
                 CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                if (BlockConnect)
+                {
+                    return Task.Delay(
+                        Timeout.InfiniteTimeSpan,
+                        cancellationToken);
+                }
+
                 IsOpen = true;
                 return Task.CompletedTask;
             }
@@ -396,6 +485,23 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 }
 
                 pending.TrySetResult(message);
+            }
+
+            public void EnqueueClosed()
+            {
+                TaskCompletionSource<SessionRelayWebSocketMessage> pending;
+                lock (synchronization)
+                {
+                    pending = waiter;
+                    waiter = null;
+                    if (pending == null)
+                    {
+                        messages.Enqueue(SessionRelayWebSocketMessage.Closed);
+                        return;
+                    }
+                }
+
+                pending.TrySetResult(SessionRelayWebSocketMessage.Closed);
             }
 
             public void Abort()

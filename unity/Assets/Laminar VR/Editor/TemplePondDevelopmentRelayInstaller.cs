@@ -23,6 +23,10 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             "Assets/Laminar VR/Configuration/Networking/"
             + "ComponentBQuestStreamConnectionProfile.asset";
 
+        private const string ReconnectProfilePath =
+            "Assets/Laminar VR/Configuration/Networking/"
+            + "ComponentBQuestReconnectBackoffProfile.asset";
+
         private const string DevelopmentNetworkProfilePath =
             "Assets/Laminar VR/Configuration/Networking/"
             + "LocalDevelopmentNetworkProfile.asset";
@@ -80,6 +84,16 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             }
 
             var profile = LoadOrCreateProfile(developmentNetworkProfile);
+            var reconnectProfile = AssetDatabase.LoadAssetAtPath<
+                ReconnectBackoffProfile>(ReconnectProfilePath);
+            if (reconnectProfile == null)
+            {
+                EditorUtility.DisplayDialog(
+                    "Temple Pond Relay",
+                    "The approved Quest reconnect profile could not be found.",
+                    "OK");
+                return;
+            }
             ConfigureComponentBProfile(developmentNetworkProfile);
             var inputActions = AssetDatabase.LoadAssetAtPath<InputActionAsset>(
                 InputActionsPath);
@@ -103,6 +117,7 @@ namespace LaminarVR.AdaptiveMeditation.Editor
             SetReference(bridge, "applicationBootstrap", bootstrap);
             SetReference(bridge, "productionCoordinator", coordinator);
             SetReference(bridge, "visualSessionBoundary", boundary);
+            SetReference(bridge, "reconnectBackoffProfile", reconnectProfile);
             SetReference(pairing, "connectionProfile", profile);
             SetReference(pairing, "sessionRelayBridge", bridge);
             SetReference(panel, "pairingController", pairing);
@@ -190,18 +205,20 @@ namespace LaminarVR.AdaptiveMeditation.Editor
 
             var serialized = new SerializedObject(profile);
             serialized.FindProperty("configurationId").stringValue =
-                "temple-pond-session-relay-dev-v1";
-            serialized.FindProperty("configurationVersion").intValue = 1;
+                "temple-pond-session-relay-dev-v2";
+            serialized.FindProperty("configurationVersion").intValue = 2;
             serialized.FindProperty("deploymentConfigurationApproved")
                 .boolValue = true;
             serialized.FindProperty("developmentNetworkProfile")
                 .objectReferenceValue = developmentNetworkProfile;
             serialized.FindProperty("relayEndpoint").stringValue = string.Empty;
             serialized.FindProperty("schemaVersion").stringValue =
-                "mindsync-session-v1";
+                "mindsync-session-v3";
             serialized.FindProperty("maximumMessageBytes").intValue = 65536;
             serialized.FindProperty("maximumTelemetryEventsPerBatch")
                 .intValue = 32;
+            serialized.FindProperty("connectionTimeoutSeconds")
+                .floatValue = 20f;
             serialized.FindProperty("allowInsecureDevelopmentEndpoint")
                 .boolValue = true;
             serialized.ApplyModifiedPropertiesWithoutUndo();

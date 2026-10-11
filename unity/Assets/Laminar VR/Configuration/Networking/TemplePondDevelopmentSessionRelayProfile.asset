@@ -12,12 +12,13 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 173822ef4eb54119b33287e6723d74b3, type: 3}
   m_Name: TemplePondDevelopmentSessionRelayProfile
   m_EditorClassIdentifier: 
-  configurationId: temple-pond-session-relay-dev-v1
-  configurationVersion: 1
+  configurationId: temple-pond-session-relay-dev-v2
+  configurationVersion: 2
   deploymentConfigurationApproved: 1
   developmentNetworkProfile: {fileID: 11400000, guid: 9605881a83ec452ea3d710050d82329c, type: 2}
   relayEndpoint: ''
-  schemaVersion: mindsync-session-v1
+  schemaVersion: mindsync-session-v3
   maximumMessageBytes: 65536
   maximumTelemetryEventsPerBatch: 32
+  connectionTimeoutSeconds: 20
   allowInsecureDevelopmentEndpoint: 1

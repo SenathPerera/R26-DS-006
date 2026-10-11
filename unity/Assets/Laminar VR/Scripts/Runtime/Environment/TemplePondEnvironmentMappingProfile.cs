@@ -22,12 +22,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         private bool researchConfigurationApproved = false;
 
         [Header("Illumination")]
-        // TODO(RESEARCH_DECISION): Calibrate the permitted light-intensity range.
+        // Approved ranges live only in versioned mapping assets.
         [SerializeField]
         private Vector2 directionalLightIntensityRange = Vector2.zero;
 
         [Header("Color Warmth")]
-        // TODO(RESEARCH_DECISION): Verify all three warmth anchors on Quest 2.
+        // Approved color anchors live only in versioned mapping assets.
         [SerializeField]
         private Color coolDirectionalLightColor = Color.white;
 
@@ -41,7 +41,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         private Color warmDirectionalLightColor = Color.white;
 
         [Header("Atmospheric Softness")]
-        // TODO(RESEARCH_DECISION): Calibrate density and tint on Quest 2.
+        // Approved fog values live only in versioned mapping assets.
         [SerializeField]
         private Vector2 fogDensityRange = Vector2.zero;
 
@@ -55,8 +55,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         [Tooltip(
             "URP Color Adjustments saturation values mapped from normalized "
             + "color richness. Supported values are [-100, 100].")]
-        // TODO(RESEARCH_DECISION): Calibrate a restrained scene-wide saturation
-        // range on Quest 2 before approving this mapping for research use.
+        // Approved saturation ranges live only in versioned mapping assets.
         [SerializeField]
         private Vector2 saturationRange = Vector2.zero;
 
@@ -67,7 +66,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         [SerializeField]
         private string waterMotionProperty = "_RippleMotion";
 
-        // TODO(RESEARCH_DECISION): Calibrate the permitted ripple-motion range.
+        // Approved ripple ranges live only in versioned mapping assets.
         [SerializeField]
         private Vector2 waterMotionRange = Vector2.zero;
 

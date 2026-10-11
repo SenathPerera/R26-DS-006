@@ -93,8 +93,6 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 harness.Session.ActiveSessionElapsedSeconds,
                 harness.Session.Phase,
                 true,
-                0d,
-                0d,
                 CancellationToken.None);
 
             harness.Session.AdvanceTo(13d);
@@ -145,6 +143,25 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 validationEvent.CopyFields().Select(field => field.Name),
                 Does.Contain("state_before_illumination")
                     .And.Contain("safe_target_ambient_motion"));
+            var rewardEvent = harness.Sink.Events.Last(
+                telemetryEvent => telemetryEvent.EventType
+                    == TelemetryEventTypes.RewardCalculated);
+            var rewardFields = rewardEvent.CopyFields();
+            Assert.That(
+                rewardFields.Single(
+                    field => field.Name == "discomfort_observed")
+                    .BooleanValue,
+                Is.False);
+            Assert.That(
+                rewardFields.Single(
+                    field => field.Name == "discomfort_severity")
+                    .ValueType,
+                Is.EqualTo(TelemetryFieldValueType.Null));
+            Assert.That(
+                rewardFields.Single(
+                    field => field.Name == "safety_severity")
+                    .NumberValue,
+                Is.Zero);
             if (policyMode == StudyPolicyMode.ContextualBandit)
             {
                 var proposalEvent = harness.Sink.Events.Last(
@@ -375,8 +392,6 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 8d,
                 VrSessionPhase.Paused,
                 true,
-                0d,
-                0d,
                 CancellationToken.None);
 
             Assert.That(
@@ -420,8 +435,6 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 harness.Session.ActiveSessionElapsedSeconds,
                 harness.Session.Phase,
                 true,
-                0d,
-                0d,
                 CancellationToken.None);
 
             Assert.That(
@@ -576,7 +589,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
                 0d,
                 0d,
                 0.1d,
-                1d,
+                0d,
                 1d);
             var sink = new RecordingSink();
             var telemetry = new TelemetryRecorder(

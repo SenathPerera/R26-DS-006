@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import suppress
+from datetime import datetime
+from enum import Enum
 import json
 import os
 from pathlib import Path
 import time
+from typing import Literal
 import uuid
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .session_store import (
     ActiveSessionExistsError,
@@ -21,7 +24,7 @@ from .session_store import (
 )
 
 
-SCHEMA_VERSION = "mindsync-session-v1"
+SCHEMA_VERSION = "mindsync-session-v3"
 CODE_LIFETIME_SECONDS = float(os.getenv("SESSION_RELAY_CODE_LIFETIME_SECONDS", "300"))
 INITIALIZATION_DELAY_SECONDS = max(
     0.0,
@@ -33,7 +36,7 @@ DATA_DIRECTORY = Path(
 
 
 class PreferredEnvironment(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     illumination: float = Field(ge=0, le=1)
     warmth: float = Field(ge=0, le=1)
@@ -42,15 +45,57 @@ class PreferredEnvironment(BaseModel):
     ambient_motion: float = Field(alias="ambientMotion", ge=0, le=1)
 
 
+class StudyCondition(str, Enum):
+    STATIC_PERSONALIZED = "StaticPersonalized"
+    RULE_BASED_ADAPTIVE = "RuleBasedAdaptive"
+    CONTEXTUAL_BANDIT = "ContextualBandit"
+
+
+class SessionContext(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    schema_version: str = Field(
+        alias="schemaVersion",
+        pattern=r"^mindsync-session-context-v1$",
+    )
+    collected_at: str = Field(alias="collectedAt", min_length=1)
+    subjective_stress: float = Field(alias="subjectiveStress", ge=0, le=10)
+    mood_valence: float = Field(alias="moodValence", ge=-1, le=1)
+    fatigue: float = Field(ge=0, le=1)
+    sleep_quality: float = Field(alias="sleepQuality", ge=0, le=1)
+    headache_or_eye_strain_today: bool = Field(
+        alias="headacheOrEyeStrainToday"
+    )
+    time_of_day_minutes: int = Field(alias="timeOfDayMinutes", ge=0, le=1439)
+    session_sequence_number: int = Field(alias="sessionSequenceNumber", ge=1)
+    days_since_previous_session: int | None = Field(
+        alias="daysSincePreviousSession", ge=0
+    )
+
+    @field_validator("collected_at")
+    @classmethod
+    def validate_collected_at(cls, value: str) -> str:
+        normalized = value.strip()
+        try:
+            parsed = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError as error:
+            raise ValueError("collectedAt must be an ISO-8601 timestamp") from error
+        if parsed.tzinfo is None:
+            raise ValueError("collectedAt must include a UTC offset")
+        return normalized
+
+
 class CreateSessionRequest(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     request_id: str = Field(alias="requestId", min_length=1, max_length=128)
     participant_pseudonym: str = Field(
         alias="participantPseudonym", min_length=1, max_length=128
     )
-    scene_id: str = Field(alias="sceneId", min_length=1, max_length=128)
+    scene_id: Literal["temple-pond"] = Field(alias="sceneId")
+    study_condition: StudyCondition = Field(alias="studyCondition")
     preferred_environment: PreferredEnvironment = Field(alias="preferredEnvironment")
+    session_context: SessionContext = Field(alias="sessionContext")
 
 
 class CreateSessionResponse(BaseModel):
@@ -61,6 +106,7 @@ class CreateSessionResponse(BaseModel):
     pairing_code: str = Field(alias="pairingCode")
     expires_at: float = Field(alias="expiresAt")
     mobile_token: str = Field(alias="mobileToken")
+    study_condition: str = Field(alias="studyCondition")
 
 
 class VisualLogAcknowledgementRequest(BaseModel):
@@ -89,8 +135,9 @@ class SessionChannels:
 
     async def attach_quest(self, session_id: str, socket: WebSocket) -> None:
         async with self.lock:
-            if session_id in self.quest:
-                raise PairingRejectedError("quest-already-connected")
+            old = self.quest.get(session_id)
+            if old is not None and old is not socket:
+                await old.close(code=4409, reason="quest-replaced")
             self.quest[session_id] = socket
 
     async def detach(self, session_id: str, role: str, socket: WebSocket) -> None:
@@ -129,12 +176,15 @@ async def health() -> dict[str, str]:
 @app.post("/sessions", response_model=CreateSessionResponse)
 async def create_session(request: CreateSessionRequest) -> CreateSessionResponse:
     environment = request.preferred_environment.model_dump(by_alias=True)
+    session_context = request.session_context.model_dump(by_alias=True)
     try:
         session = store.create(
             request.request_id,
             request.participant_pseudonym,
             request.scene_id,
+            request.study_condition.value,
             environment,
+            session_context,
         )
     except ActiveSessionExistsError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -144,6 +194,7 @@ async def create_session(request: CreateSessionRequest) -> CreateSessionResponse
         pairingCode=session.pairing_code,
         expiresAt=session.expires_at_unix_seconds,
         mobileToken=session.mobile_token,
+        studyCondition=session.study_condition,
     )
 
 
@@ -294,7 +345,27 @@ async def _quest_connection(websocket: WebSocket) -> None:
             if not _valid_quest_message(message, session.session_id):
                 await websocket.send_json(_error("quest-message-invalid"))
                 continue
-            await _append_durable(session.session_id, message)
+            is_first_delivery = store.accept_quest_message(
+                session.session_id,
+                message["messageId"],
+            )
+            if not is_first_delivery:
+                if message["messageType"] == "visual_telemetry_batch":
+                    await websocket.send_json(
+                        _delivery_ack(
+                            session.session_id,
+                            message["messageId"],
+                        )
+                    )
+                continue
+            try:
+                await _append_durable(session.session_id, message)
+            except Exception:
+                store.release_quest_message(
+                    session.session_id,
+                    message["messageId"],
+                )
+                raise
             terminal_phase = (
                 message["payload"].get("phase")
                 if message["messageType"] == "quest_state"
@@ -316,13 +387,7 @@ async def _quest_connection(websocket: WebSocket) -> None:
                 )
             if message["messageType"] == "visual_telemetry_batch":
                 await websocket.send_json(
-                    _envelope(
-                        "delivery_ack",
-                        {
-                            "sessionId": session.session_id,
-                            "acknowledgedMessageId": message["messageId"],
-                        },
-                    )
+                    _delivery_ack(session.session_id, message["messageId"])
                 )
             if terminal_phase is not None:
                 break
@@ -353,7 +418,9 @@ def _configuration(session: PreparedSession) -> dict:
             "sessionId": session.session_id,
             "participantPseudonym": session.participant_pseudonym,
             "sceneId": session.scene_id,
+            "studyCondition": session.study_condition,
             "preferredEnvironment": session.preferred_environment,
+            "sessionContext": session.session_context,
         },
     )
 
@@ -371,6 +438,16 @@ def _pairing_rejection(code: str) -> dict:
 
 def _error(code: str) -> dict:
     return _envelope("relay_error", {"code": code})
+
+
+def _delivery_ack(session_id: str, message_id: str) -> dict:
+    return _envelope(
+        "delivery_ack",
+        {
+            "sessionId": session_id,
+            "acknowledgedMessageId": message_id,
+        },
+    )
 
 
 def _envelope(message_type: str, payload: dict) -> dict:

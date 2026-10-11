@@ -134,7 +134,14 @@ real authentication and database persistence:
    SUPABASE_ENABLED=true
    SUPABASE_URL=https://your-project-ref.supabase.co
    SUPABASE_PUBLISHABLE_KEY=sb_publishable_replace_me
+   STUDY_CONDITION=StaticPersonalized
    ```
+
+   `STUDY_CONDITION` is required before preparing a VR session. Its accepted
+   values are `StaticPersonalized`, `RuleBasedAdaptive`, and
+   `ContextualBandit`; the selected value is immutable for that session.
+   `RuleBasedAdaptive` remains fail-closed until an approved rule profile is
+   assigned in Unity.
 
 4. In Supabase Authentication, enable Email authentication. Decide whether the
    research deployment requires email confirmation before inviting

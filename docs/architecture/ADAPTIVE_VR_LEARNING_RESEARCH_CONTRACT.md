@@ -220,9 +220,12 @@ All bandit inputs must be finite, bounded, normalized, and constructed by one
 versioned feature-vector builder. Feature ordering must not be assembled through
 scattered array indexes.
 
-The exact production feature schema remains a research decision. Until it is
-frozen, it must remain clearly marked as draft and must not be treated as a
-compatible `1.0` research schema.
+ADR-012 freezes the Temple Pond MVP production schema as
+`adaptive-vr-policy-features/1.0`: the exact 24-feature ordering,
+normalization, names, and deliberate exclusions recorded there are part of the
+research contract. Any change requires a new schema version; omitted inputs
+must not be fabricated or added without an approved collection and
+normalization contract.
 
 ## 10. Policy interface contract
 
@@ -274,7 +277,17 @@ reward =
   - safetyPenalty
 ```
 
-The exact weights and normalization method are not approved by this contract.
+The Temple Pond engineering-pilot weights and normalization method are frozen
+by ADR-016 and the approved, versioned reward profile. They are not claimed to
+be scientifically optimal; changing them requires a new profile version and
+an ADR amendment.
+
+An online reward component may be enabled only when its action-attributed input
+is actually available. Missing subjective discomfort must remain explicitly
+missing rather than being encoded as an observed zero. The MVP post-session
+comfort response is reserved for offline evaluation; an online discomfort
+penalty requires a separately approved mid-session protocol. Safety severity is
+derived from the recorded safety-validation outcome.
 
 The attribution sequence is:
 
@@ -312,8 +325,8 @@ At each eligible decision point:
 
 1. Build the versioned normalized context.
 2. Generate all eleven actions.
-3. Remove actions disallowed by scene limits, sensitivity constraints,
-   boundaries, cooldowns, repeated-direction limits, or total-variation limits.
+3. Remove actions disallowed by scene limits, boundaries, cooldowns,
+   repeated-direction limits, or total-variation limits.
 4. Retain `NoChange`.
 5. Score eligible candidates.
 6. Select with approved conservative exploration and deterministic tie-breaking.
@@ -378,21 +391,21 @@ The following require explicit configuration, calibration, and approval:
 
 | Item | Contract status |
 |---|---|
-| Scene-safe raw property ranges | Unapproved |
-| Scene-safe default states | Unapproved |
-| Preference/default/history blend weights | Unapproved |
-| Normalized action step sizes | Unapproved |
-| Transition duration | Unapproved |
-| Decision interval and cooldown | Unapproved |
-| Settling and reward-observation timing | Unapproved |
-| Baseline duration, sample count, and normalization | Unapproved |
-| Signal-quality and stale-data thresholds | Unapproved |
-| Reward weights and penalties | Unapproved |
-| Rule-based thresholds and mappings | Unapproved |
-| LinUCB exploration coefficient and ridge value | Unapproved |
-| Consecutive-direction and total-variation limits | Unapproved |
-| Forgetting and cross-session persistence behavior | Unapproved |
-| Final feature schema | Unapproved |
+| Scene-safe raw property ranges | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Scene-safe default states | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Preference/default/history blend weights | Preference/default blend frozen; history disabled for pilot v1 (ADR-016) |
+| Normalized action step sizes | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Transition duration | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Decision interval and cooldown | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Settling and reward-observation timing | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Baseline duration, sample count, and normalization | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Signal-quality and stale-data thresholds | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Reward weights and penalties | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Rule-based thresholds and mappings | Frozen for Temple Pond pilot v1 (ADR-016) |
+| LinUCB exploration coefficient and ridge value | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Consecutive-direction and total-variation limits | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Forgetting and cross-session persistence behavior | Cross-session persistence disabled for pilot v1 (ADR-016) |
+| Final feature schema | Frozen as `adaptive-vr-policy-features/1.0` (ADR-012) |
 
 Research-sensitive profiles must default to unapproved or deliberately invalid
 values. Runtime study configuration must fail closed until the team explicitly
@@ -422,6 +435,14 @@ Logs must allow reconstruction of:
 Participant identifiers must be pseudonymous. Do not log unnecessary personal
 information. Local logging must continue where possible during connectivity
 loss.
+
+The active Temple Pond pilot uses telemetry configuration
+`adaptive-vr-telemetry-pilot-v3` / `3` and event schema
+`adaptive-vr-telemetry` / `1.1-pilot` as frozen by ADR-017. The schema requires
+null-safe full physiology payloads, startup and scene-binding context,
+non-adaptive transition boundaries, terminal summaries, relay-transfer
+outcomes, and event-driven performance checkpoints. Relay-transfer outcome
+events remain local-only to prevent acknowledgement recursion.
 
 ## 16. Change control
 
@@ -681,9 +702,12 @@ All bandit inputs must be finite, bounded, normalized, and constructed by one
 versioned feature-vector builder. Feature ordering must not be assembled through
 scattered array indexes.
 
-The exact production feature schema remains a research decision. Until it is
-frozen, it must remain clearly marked as draft and must not be treated as a
-compatible `1.0` research schema.
+ADR-012 freezes the Temple Pond MVP production schema as
+`adaptive-vr-policy-features/1.0`: the exact 24-feature ordering,
+normalization, names, and deliberate exclusions recorded there are part of the
+research contract. Any change requires a new schema version; omitted inputs
+must not be fabricated or added without an approved collection and
+normalization contract.
 
 ## 10. Policy interface contract
 
@@ -735,7 +759,17 @@ reward =
   - safetyPenalty
 ```
 
-The exact weights and normalization method are not approved by this contract.
+The Temple Pond engineering-pilot weights and normalization method are frozen
+by ADR-016 and the approved, versioned reward profile. They are not claimed to
+be scientifically optimal; changing them requires a new profile version and
+an ADR amendment.
+
+An online reward component may be enabled only when its action-attributed input
+is actually available. Missing subjective discomfort must remain explicitly
+missing rather than being encoded as an observed zero. The MVP post-session
+comfort response is reserved for offline evaluation; an online discomfort
+penalty requires a separately approved mid-session protocol. Safety severity is
+derived from the recorded safety-validation outcome.
 
 The attribution sequence is:
 
@@ -773,8 +807,8 @@ At each eligible decision point:
 
 1. Build the versioned normalized context.
 2. Generate all eleven actions.
-3. Remove actions disallowed by scene limits, sensitivity constraints,
-   boundaries, cooldowns, repeated-direction limits, or total-variation limits.
+3. Remove actions disallowed by scene limits, boundaries, cooldowns,
+   repeated-direction limits, or total-variation limits.
 4. Retain `NoChange`.
 5. Score eligible candidates.
 6. Select with approved conservative exploration and deterministic tie-breaking.
@@ -839,21 +873,21 @@ The following require explicit configuration, calibration, and approval:
 
 | Item | Contract status |
 |---|---|
-| Scene-safe raw property ranges | Unapproved |
-| Scene-safe default states | Unapproved |
-| Preference/default/history blend weights | Unapproved |
-| Normalized action step sizes | Unapproved |
-| Transition duration | Unapproved |
-| Decision interval and cooldown | Unapproved |
-| Settling and reward-observation timing | Unapproved |
-| Baseline duration, sample count, and normalization | Unapproved |
-| Signal-quality and stale-data thresholds | Unapproved |
-| Reward weights and penalties | Unapproved |
-| Rule-based thresholds and mappings | Unapproved |
-| LinUCB exploration coefficient and ridge value | Unapproved |
-| Consecutive-direction and total-variation limits | Unapproved |
-| Forgetting and cross-session persistence behavior | Unapproved |
-| Final feature schema | Unapproved |
+| Scene-safe raw property ranges | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Scene-safe default states | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Preference/default/history blend weights | Preference/default blend frozen; history disabled for pilot v1 (ADR-016) |
+| Normalized action step sizes | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Transition duration | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Decision interval and cooldown | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Settling and reward-observation timing | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Baseline duration, sample count, and normalization | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Signal-quality and stale-data thresholds | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Reward weights and penalties | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Rule-based thresholds and mappings | Frozen for Temple Pond pilot v1 (ADR-016) |
+| LinUCB exploration coefficient and ridge value | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Consecutive-direction and total-variation limits | Frozen for Temple Pond pilot v1 (ADR-016) |
+| Forgetting and cross-session persistence behavior | Cross-session persistence disabled for pilot v1 (ADR-016) |
+| Final feature schema | Frozen as `adaptive-vr-policy-features/1.0` (ADR-012) |
 
 Research-sensitive profiles must default to unapproved or deliberately invalid
 values. Runtime study configuration must fail closed until the team explicitly
@@ -883,6 +917,14 @@ Logs must allow reconstruction of:
 Participant identifiers must be pseudonymous. Do not log unnecessary personal
 information. Local logging must continue where possible during connectivity
 loss.
+
+The active Temple Pond pilot uses telemetry configuration
+`adaptive-vr-telemetry-pilot-v3` / `3` and event schema
+`adaptive-vr-telemetry` / `1.1-pilot` as frozen by ADR-017. The schema requires
+null-safe full physiology payloads, startup and scene-binding context,
+non-adaptive transition boundaries, terminal summaries, relay-transfer
+outcomes, and event-driven performance checkpoints. Relay-transfer outcome
+events remain local-only to prevent acknowledgement recursion.
 
 ## 16. Change control
 

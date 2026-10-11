@@ -12,8 +12,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: d4066f3c578740d3a94657d8e94387f3, type: 3}
   m_Name: AdaptiveVrRewardPipelineProfile
   m_EditorClassIdentifier: 
-  configurationId: adaptive-vr-reward-pilot-v1
-  configurationVersion: 1
+  configurationId: adaptive-vr-reward-pilot-v2
+  configurationVersion: 2
   researchConfigurationApproved: 1
   baselineStandardDeviationMethod: 0
   minimumBaselineSamples: 2
@@ -26,5 +26,5 @@ MonoBehaviour:
   rmssdWeight: 0.35
   heartRateWeight: 0.15
   changePenaltyWeight: 0.1
-  discomfortPenaltyWeight: 2
+  discomfortPenaltyWeight: 0
   safetyPenaltyWeight: 2

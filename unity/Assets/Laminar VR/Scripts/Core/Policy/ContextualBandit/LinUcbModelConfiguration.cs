@@ -44,9 +44,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy.ContextualBandit
                 explorationCoefficient,
                 nameof(explorationCoefficient));
 
-            // TODO(RESEARCH_DECISION): Ridge regularization and exploration
-            // coefficient must be calibrated, approved, and versioned before
-            // this configuration is used in a participant study.
+            // Research use depends on an approved, versioned profile supplying
+            // these hyperparameters.
             ConfigurationId = configurationId.Trim();
             ConfigurationVersion = configurationVersion;
             FeatureSchemaVersion = featureSchemaVersion.Trim();

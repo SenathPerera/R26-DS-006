@@ -1,4 +1,5 @@
 import {generatedEnvironment} from './generatedEnvironment';
+import type {StudyCondition} from '../types/domain';
 export const developmentBackendHost = '192.168.1.23';
 
 export function buildDevelopmentEndpoints(host: string) {
@@ -15,12 +16,24 @@ export function buildDevelopmentEndpoints(host: string) {
 
 const developmentEndpoints = buildDevelopmentEndpoints(developmentBackendHost);
 
+export function parseStudyCondition(value: string): StudyCondition | null {
+  switch (value.trim()) {
+    case 'StaticPersonalized':
+    case 'RuleBasedAdaptive':
+    case 'ContextualBandit':
+      return value.trim() as StudyCondition;
+    default:
+      return null;
+  }
+}
+
 export const environment = {
   apiBaseUrl: __DEV__ ? developmentEndpoints.apiBaseUrl : 'https://api.mindsync.invalid',
   componentDBaseUrl: __DEV__ ? 'http://localhost:8010' : 'https://componentd.cognify.invalid',
   componentBIngestUrl: __DEV__ ? developmentEndpoints.componentBIngestUrl : 'wss://api.mindsync.invalid/component-b/ingest',
   websocketUrl: __DEV__ ? developmentEndpoints.websocketUrl : 'wss://api.mindsync.invalid/realtime',
   useMockBackend: false,
+  studyCondition: parseStudyCondition(generatedEnvironment.studyCondition),
   supabase: {
     enabled: generatedEnvironment.supabaseEnabled,
     url: generatedEnvironment.supabaseUrl,

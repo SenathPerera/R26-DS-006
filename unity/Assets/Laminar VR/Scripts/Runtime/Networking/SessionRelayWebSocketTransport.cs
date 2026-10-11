@@ -50,8 +50,13 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         private readonly ISessionRelayMessageIdSource messageIdSource;
         private readonly HashSet<string> dispatchedMessageIds =
             new HashSet<string>(StringComparer.Ordinal);
-        private readonly HashSet<string> pendingTelemetryMessageIds =
-            new HashSet<string>(StringComparer.Ordinal);
+        private readonly Dictionary<TelemetryBatchIdentity, string>
+            pendingTelemetryMessageIds =
+                new Dictionary<TelemetryBatchIdentity, string>();
+        private readonly Dictionary<string, TelemetryBatchIdentity>
+            pendingTelemetryBatches =
+                new Dictionary<string, TelemetryBatchIdentity>(
+                    StringComparer.Ordinal);
 
         private SessionTransportConnectionState connectionState =
             SessionTransportConnectionState.Disconnected;
@@ -174,6 +179,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                     SessionTransportStatusReason.ConnectRequested);
 
                 ISessionRelayWebSocketConnection candidate = null;
+                using var connectionTimeout =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        cancellationToken);
+                connectionTimeout.CancelAfter(
+                    TimeSpan.FromSeconds(
+                        connectionInfo.ConnectionTimeoutSeconds));
                 try
                 {
                     candidate = connectionFactory.Create()
@@ -181,7 +192,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                             "The session relay connection factory returned null.");
                     await candidate.ConnectAsync(
                             connectionInfo.Endpoint,
-                            cancellationToken)
+                            connectionTimeout.Token)
                         .ConfigureAwait(false);
                     if (!candidate.IsOpen)
                     {
@@ -194,12 +205,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                         connectionInfo.PairingCode,
                         connectionInfo.QuestClientId,
                         connectionInfo.AppVersion);
-                    await candidate.SendTextAsync(request, cancellationToken)
+                    await candidate.SendTextAsync(
+                            request,
+                            connectionTimeout.Token)
                         .ConfigureAwait(false);
 
                     var pairingMessage = await candidate.ReceiveTextAsync(
                             connectionInfo.MaximumMessageBytes,
-                            cancellationToken)
+                            connectionTimeout.Token)
                         .ConfigureAwait(false);
                     if (pairingMessage.CloseReceived)
                     {
@@ -332,30 +345,28 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 }
             }
 
-            var messageId = RequireGeneratedMessageId();
+            var identity = TelemetryBatchIdentity.Create(telemetryEvents);
+            string messageId;
             lock (synchronization)
             {
-                pendingTelemetryMessageIds.Add(messageId);
-            }
-
-            try
-            {
-                await SendAsync(
-                        codec.SerializeTelemetryBatch(
-                            messageId,
-                            telemetryEvents),
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch
-            {
-                lock (synchronization)
+                if (!pendingTelemetryMessageIds.TryGetValue(
+                        identity,
+                        out messageId))
                 {
-                    pendingTelemetryMessageIds.Remove(messageId);
+                    messageId = RequireGeneratedMessageId();
+                    pendingTelemetryMessageIds.Add(identity, messageId);
+                    pendingTelemetryBatches.Add(messageId, identity);
                 }
-
-                throw;
             }
+
+            // Retain the message ID when delivery is ambiguous. Replaying the
+            // same durable batch after reconnect must be idempotent at the relay.
+            await SendAsync(
+                    codec.SerializeTelemetryBatch(
+                        messageId,
+                        telemetryEvents),
+                    cancellationToken)
+                .ConfigureAwait(false);
         }
 
         public async Task DisconnectAsync(
@@ -502,8 +513,15 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                     bool wasPending;
                     lock (synchronization)
                     {
-                        wasPending = pendingTelemetryMessageIds.Remove(
-                            acknowledgedMessageId);
+                        wasPending = pendingTelemetryBatches.TryGetValue(
+                            acknowledgedMessageId,
+                            out var batchIdentity);
+                        if (wasPending)
+                        {
+                            pendingTelemetryBatches.Remove(
+                                acknowledgedMessageId);
+                            pendingTelemetryMessageIds.Remove(batchIdentity);
+                        }
                     }
 
                     if (wasPending)
@@ -624,10 +642,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                         StringComparison.Ordinal))
                 {
                     dispatchedMessageIds.Clear();
+                    pendingTelemetryMessageIds.Clear();
+                    pendingTelemetryBatches.Clear();
                 }
 
                 activeSessionId = sessionId;
-                pendingTelemetryMessageIds.Clear();
             }
         }
 
@@ -687,6 +706,72 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             }
 
             public string DiagnosticCode { get; }
+        }
+
+        private readonly struct TelemetryBatchIdentity
+            : IEquatable<TelemetryBatchIdentity>
+        {
+            private TelemetryBatchIdentity(
+                string sessionId,
+                long firstSequenceNumber,
+                long lastSequenceNumber,
+                int eventCount)
+            {
+                SessionId = sessionId;
+                FirstSequenceNumber = firstSequenceNumber;
+                LastSequenceNumber = lastSequenceNumber;
+                EventCount = eventCount;
+            }
+
+            private string SessionId { get; }
+
+            private long FirstSequenceNumber { get; }
+
+            private long LastSequenceNumber { get; }
+
+            private int EventCount { get; }
+
+            public static TelemetryBatchIdentity Create(
+                IReadOnlyList<TelemetryEvent> telemetryEvents)
+            {
+                return new TelemetryBatchIdentity(
+                    telemetryEvents[0].SessionId,
+                    telemetryEvents[0].SequenceNumber,
+                    telemetryEvents[telemetryEvents.Count - 1]
+                        .SequenceNumber,
+                    telemetryEvents.Count);
+            }
+
+            public bool Equals(TelemetryBatchIdentity other)
+            {
+                return string.Equals(
+                        SessionId,
+                        other.SessionId,
+                        StringComparison.Ordinal)
+                    && FirstSequenceNumber == other.FirstSequenceNumber
+                    && LastSequenceNumber == other.LastSequenceNumber
+                    && EventCount == other.EventCount;
+            }
+
+            public override bool Equals(object value)
+            {
+                return value is TelemetryBatchIdentity other
+                    && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    var hashCode = StringComparer.Ordinal.GetHashCode(
+                        SessionId ?? string.Empty);
+                    hashCode = (hashCode * 397)
+                        ^ FirstSequenceNumber.GetHashCode();
+                    hashCode = (hashCode * 397)
+                        ^ LastSequenceNumber.GetHashCode();
+                    return (hashCode * 397) ^ EventCount;
+                }
+            }
         }
     }
 }

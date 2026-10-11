@@ -20,8 +20,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Rule Activation")]
-        // TODO(RESEARCH_DECISION): Freeze the activation mode and all rule
-        // thresholds after pilot review and before the comparative study.
+        // Approved modes and thresholds live only in versioned profiles.
         [SerializeField]
         private RuleActivationMode activationMode =
             RuleActivationMode.WorseningStressTrend;

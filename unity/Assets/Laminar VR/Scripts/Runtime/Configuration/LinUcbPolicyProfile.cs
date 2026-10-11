@@ -21,8 +21,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("LinUCB Hyperparameters")]
-        // TODO(RESEARCH_DECISION): Calibrate and approve ridge and alpha
-        // before enabling the contextual-bandit study condition.
+        // Approved hyperparameters live only in versioned profiles.
         [SerializeField, Min(0f)]
         private float ridgeRegularization = 0f;
 

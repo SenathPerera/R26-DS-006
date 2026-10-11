@@ -2,19 +2,23 @@ import {environment} from '../../config/environment';
 import {
   PreferredEnvironment,
   PreparedVrSession,
+  QuestSessionContext,
   RelayEnvelope,
+  StudyCondition,
   VisualLogSnapshot,
 } from '../../types/domain';
 
 export type {RelayEnvelope, VisualLogSnapshot} from '../../types/domain';
 
-export const SESSION_RELAY_SCHEMA_VERSION = 'mindsync-session-v1';
+export const SESSION_RELAY_SCHEMA_VERSION = 'mindsync-session-v3';
 
 export type CreatePreparedSessionInput = {
   requestId: string;
   participantPseudonym: string;
   sceneId: string;
+  studyCondition: StudyCondition;
   preferredEnvironment: PreferredEnvironment;
+  sessionContext: QuestSessionContext;
 };
 
 type RelayHandlers = {
@@ -134,7 +138,14 @@ export function isPreparedSession(value: unknown): value is PreparedVrSession {
     && typeof value.sessionId === 'string' && value.sessionId.length > 0
     && typeof value.pairingCode === 'string' && /^\d{6}$/.test(value.pairingCode)
     && typeof value.expiresAt === 'number' && Number.isFinite(value.expiresAt)
-    && typeof value.mobileToken === 'string' && value.mobileToken.length > 0;
+    && typeof value.mobileToken === 'string' && value.mobileToken.length > 0
+    && isStudyCondition(value.studyCondition);
+}
+
+function isStudyCondition(value: unknown): value is StudyCondition {
+  return value === 'StaticPersonalized'
+    || value === 'RuleBasedAdaptive'
+    || value === 'ContextualBandit';
 }
 
 export function isRelayEnvelope(value: unknown): value is RelayEnvelope {

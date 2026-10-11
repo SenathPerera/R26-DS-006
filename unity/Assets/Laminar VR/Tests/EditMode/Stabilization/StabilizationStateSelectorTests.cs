@@ -81,6 +81,22 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Stabilization
         }
 
         [Test]
+        public void Select_UsesDistinctApprovedInitialStateAsFallback()
+        {
+            var selector = CreateSelector(maximumOutcomes: 3);
+            var preference = State(0.8f);
+            var initialState = State(0.6f);
+
+            var result = selector.Select(
+                preference,
+                initialState,
+                FullLimits());
+
+            Assert.That(result.UsedPreferenceFallback, Is.True);
+            Assert.That(result.SelectedState, Is.EqualTo(initialState));
+        }
+
+        [Test]
         public void RecordOutcome_KeepsOnlyConfiguredRecentWindow()
         {
             var selector = CreateSelector(maximumOutcomes: 2);
