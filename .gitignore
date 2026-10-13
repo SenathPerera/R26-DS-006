@@ -65,9 +65,28 @@ Thumbs.db
 
 /unity/.utmp/
 /debug.log
+/.demo-runtime/
+/docs/LOCAL_FULL_SYSTEM_DEMO.md
+/docs/THREE_DAY_HUMAN_PILOT_MINIMUM_CRITERIA.md
+
+# Local thesis drafts, page renders, screenshots, and verification outputs
+/.codex_tmp/
+/docs/thesis/
+
+# Python environments, caches, and local secrets
+**/.env
+**/.venv/
+**/.venv_*/
+**/venv/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
 
 #Context Bandit Research Contract
 #/docs/architecture/ADAPTIVE_VR_LEARNING_RESEARCH_CONTRACT.md
 
 #Adaptive VR Implementation plan
 #/docs/plans/ADAPTIVE_VR_14_STEP_IMPLEMENTATION_PLAN.md
+/.codex_tmp/
+*.md

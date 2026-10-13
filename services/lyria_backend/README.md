@@ -24,10 +24,12 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-Copy `.env.example` to `.env`, or set the environment variable before starting the server:
+Copy `.env.example` to `.env`. Configure the API key and the PC's current LAN
+host in that one file:
 
 ```powershell
-$env:GEMINI_API_KEY="your_api_key_here"
+GEMINI_API_KEY=your_api_key_here
+MINDSYNC_DEVELOPMENT_HOST=192.168.1.100
 ```
 
 ## Run
@@ -35,7 +37,7 @@ $env:GEMINI_API_KEY="your_api_key_here"
 ```powershell
 cd services\lyria_backend
 .venv\Scripts\Activate.ps1
-uvicorn app:app --host 127.0.0.1 --port 8000 --reload
+uvicorn app:app --host 0.0.0.0 --port 8002 --reload
 ```
 
 ## Endpoints
@@ -58,7 +60,10 @@ Example request body:
 
 ## Notes
 
-- The current Unity installer defaults to `http://127.0.0.1:8000` and `ws://127.0.0.1:8000/live-music`.
-- That default works when Unity and the backend run on the same PC.
-- For a headset or another device on the network, change the backend host in the Unity installer to the PC LAN IP.
+- Unity derives all local Component B, Lyria, and session-relay endpoints from
+  `MINDSYNC_DEVELOPMENT_HOST`. When Wi-Fi changes, update only that value and
+  run `Adaptive Meditation > Sync Local Development Host From Environment`.
+  Android builds also synchronize this value automatically before building.
+- For a headset or another device on the network, set the host to the PC LAN IP;
+  do not use `localhost`.
 - Generated files stay local in `services/lyria_backend/generated/` for debugging and presentation evidence.

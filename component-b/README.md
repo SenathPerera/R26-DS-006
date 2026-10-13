@@ -19,7 +19,7 @@ server/     ──┘
 ## Architecture
 
 ```text
-Wearable (PPG + TMP117)
+Wearable (PPG + environmental noise; temperature currently unavailable)
       | BLE
       v
   Mobile app          relays raw PPG, runs no model
@@ -61,7 +61,7 @@ The mobile ingest client connects to `ws://<laptop-ip>:8000/ingest` and sends on
 }
 ```
 
-On the wire, `ppg` must contain exactly 960 finite numeric amplitudes; the shortened array above is illustrative only. `timestamp` is the frame-start POSIX time in seconds, `sample_rate` must be `64.0`, and `temperature` is degrees Celsius or `null`. A valid frame receives `{"status":"accepted","timestamp":...,"samples":960}`. Invalid JSON or schema data receives `{"status":"invalid_batch","detail":...}` without closing the WebSocket. The validated model requires temperature, so inference reports `waiting_for_temperature` until the first real TMP117 value arrives; a later `null` carries forward that last real value. If model artifacts are unavailable, the server reports `model_unavailable` while continuing to validate and accept incoming physiology.
+On the wire, `ppg` must contain exactly 960 finite numeric amplitudes; the shortened array above is illustrative only. `timestamp` is the frame-start POSIX time in seconds, `sample_rate` must be `64.0`, and `temperature` is degrees Celsius or `null`. While the physical sensor is unavailable, Component B replaces `null` with a smooth body-surface surrogate centered near 33.7 C. A valid frame receives `{"status":"accepted","timestamp":...,"samples":960,"temperature":33.7,"temperature_source":"synthetic_backend"}`. A measured value is labeled `wearable`; a recent cached measurement is labeled `wearable_cached`. Set `COMPONENT_B_SYNTHETIC_TEMPERATURE=false` to disable the fallback and restore strict waiting behavior. Synthetic temperature is for pipeline development only and must not be represented as a clinical or measured value. Invalid JSON or schema data receives `{"status":"invalid_batch","detail":...}` without closing the WebSocket. If model artifacts are unavailable, the server reports `model_unavailable` while continuing to validate and accept incoming physiology.
 
 ## Model in production
 

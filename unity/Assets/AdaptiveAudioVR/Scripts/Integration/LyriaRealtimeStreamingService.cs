@@ -21,7 +21,7 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private RealtimePcmAudioPlayer pcmAudioPlayer = null;
 
         [Header("Backend Connection")]
-        [SerializeField] private string websocketBaseUrl = "ws://127.0.0.1:8000/live-music";
+        [SerializeField] private string websocketBaseUrl = string.Empty;
         [SerializeField] private string realtimeModel = "models/lyria-realtime-exp";
         [SerializeField] private bool autoStartOnPlay = false;
         [SerializeField] private bool autoCheckCapabilityOnStart = true;
@@ -147,6 +147,11 @@ namespace AdaptiveAudioVR.Integration
         public void StopRealtimeStream()
         {
             _ = StopRealtimeStreamAsync();
+        }
+
+        public void StopForParticipantChange()
+        {
+            if (IsRealtimeActive) _ = DisconnectAsync(restoreClip: false);
         }
 
         public void PushCurrentFrameToRealtime()
@@ -408,7 +413,7 @@ namespace AdaptiveAudioVR.Integration
             promptSignature = string.Empty;
 
             ResolveReferences();
-            if (bootstrap == null || bootstrap.CurrentLyriaFrame == null)
+            if (bootstrap == null || !bootstrap.IsPrepared || bootstrap.CurrentLyriaFrame == null)
             {
                 return false;
             }
@@ -750,7 +755,7 @@ namespace AdaptiveAudioVR.Integration
         {
             if (!Uri.TryCreate(websocketBaseUrl, UriKind.Absolute, out Uri websocketUri))
             {
-                return $"http://127.0.0.1:8000/realtime-capability?model={UnityWebRequest.EscapeURL(realtimeModel)}";
+                return string.Empty;
             }
 
             string scheme = websocketUri.Scheme.Equals("wss", StringComparison.OrdinalIgnoreCase) ? "https" : "http";
@@ -768,7 +773,18 @@ namespace AdaptiveAudioVR.Integration
             IsCapabilityCheckRunning = true;
             LastStatusMessage = "Checking realtime capability...";
 
-            using (UnityWebRequest request = UnityWebRequest.Get(BuildCapabilityUrl()))
+            string capabilityUrl = BuildCapabilityUrl();
+            if (string.IsNullOrWhiteSpace(capabilityUrl))
+            {
+                const string Error =
+                    "Realtime capability check requires a configured backend endpoint.";
+                SetCapabilityResult(false, Error, realtimeModel);
+                LastStatusMessage = Error;
+                IsCapabilityCheckRunning = false;
+                yield break;
+            }
+
+            using (UnityWebRequest request = UnityWebRequest.Get(capabilityUrl))
             {
                 request.timeout = 15;
                 yield return request.SendWebRequest();

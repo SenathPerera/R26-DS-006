@@ -2,17 +2,17 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This approval permits runtime
-use for the time-constrained visual MVP; the hyperparameters remain versioned
-candidates rather than scientifically optimal values.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. The
+hyperparameters remain engineering pilot values rather than scientifically
+optimal values.
 
 ## Context
 
 The production Temple Pond study condition requires a contextual-bandit policy
 profile. The implementation uses disjoint LinUCB with one model per action,
 double-precision matrix operations, deterministic tie-breaking, and the frozen
-policy feature schema. It updates only the executed action after a valid
-delayed reward.
+production policy feature schema defined by ADR-012. It updates only the
+executed action after a valid delayed reward.
 
 No production LinUCB ScriptableObject previously existed, so the serialized
 scene could not initialize the contextual-bandit study mode.

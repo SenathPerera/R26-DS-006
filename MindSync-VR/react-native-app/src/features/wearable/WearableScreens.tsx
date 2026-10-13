@@ -90,6 +90,11 @@ export function WearableDetailScreen({navigation}: any) {
         </View>
         <Text style={uiStyles.body}>Raw BLE stream: {componentB.rawCharacteristicAvailable ? 'Available' : 'Unavailable'}</Text>
         <Text style={uiStyles.label}>Frames sent: {componentB.framesSent} · queued: {componentB.framesQueued}</Text>
+        <Text style={uiStyles.label}>
+          Component B temperature: {componentB.lastTemperatureC !== null
+            ? `${componentB.lastTemperatureC.toFixed(3)} C · ${componentB.temperatureSource?.replace('_', ' ')}`
+            : 'Waiting for first frame'}
+        </Text>
         {componentB.lastBackendMessage ? <Text style={uiStyles.label}>{componentB.lastBackendMessage}</Text> : null}
         <Field
           label="Component B ingest WebSocket"

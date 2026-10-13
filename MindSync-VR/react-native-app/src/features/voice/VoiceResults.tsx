@@ -8,7 +8,7 @@ import React, {useState} from 'react';
 import {NativeModules, Pressable, StyleSheet, Text, View} from 'react-native';
 import Svg, {Circle, Defs, LinearGradient as SvgLinear, Path, Polyline, Rect, Stop, Text as SvgTextNative} from 'react-native-svg';
 import LinearGradient from 'react-native-linear-gradient';
-import {Activity, ChevronDown, ChevronRight, Clock, Copy, HeartPulse, Repeat, Sparkles, Wind} from 'lucide-react-native';
+import {ChevronDown, ChevronRight, Clock, Copy, HeartPulse, Repeat, Sparkles, Wind} from 'lucide-react-native';
 import type {Anomaly, Comparison, CrossModal, FullSessionResult, StressResult} from '../../services/api/componentDService';
 import type {SavedVoiceSession} from './voiceHistory';
 import {palette, radius, space, type as T} from '../../theme/design';
@@ -102,7 +102,6 @@ export function TrendChart({sessions}: {sessions: SavedVoiceSession[]}) {
 
 function AnomalyDistribution({markerScore}: {markerScore: number}) {
   const W = 300, H = 90, pad = 20;
-  const mid = W / 2;
   // simple bell curve
   const pts: string[] = [];
   for (let i = 0; i <= 40; i++) {

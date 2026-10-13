@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c7b274039ad64d0fac0ef84b321166b3, type: 3}
   m_Name: TemplePondSessionTimingProfile
   m_EditorClassIdentifier: 
-  configurationId: temple-pond-session-dev-v1
+  configurationId: temple-pond-session-pilot-v1
   configurationVersion: 1
   researchConfigurationApproved: 1
   acclimatizationDurationSeconds: 120

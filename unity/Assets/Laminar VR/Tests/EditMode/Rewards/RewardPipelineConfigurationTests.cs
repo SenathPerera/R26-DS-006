@@ -64,7 +64,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
             double maximumAttributionWaitSeconds = 120d,
             double stressWeight = 1d,
             double rmssdWeight = 0.35d,
-            double heartRateWeight = 0.15d)
+            double heartRateWeight = 0.15d,
+            double discomfortPenaltyWeight = 2d,
+            double safetyPenaltyWeight = 2d)
         {
             return new RewardPipelineConfiguration(
                 "reward-test",
@@ -80,8 +82,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
                 rmssdWeight,
                 heartRateWeight,
                 0.1d,
-                2d,
-                2d);
+                discomfortPenaltyWeight,
+                safetyPenaltyWeight);
         }
     }
 }

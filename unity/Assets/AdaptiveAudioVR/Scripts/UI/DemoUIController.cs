@@ -101,6 +101,19 @@ namespace AdaptiveAudioVR.UI
             lyriaClipGenerationService?.RequestBackendHealthRefresh();
         }
 
+        public void SetRuleOnlyMode()
+        {
+            bootstrap?.SetRuleOnlyMode();
+        }
+
+        public void SetPpoResidualMode()
+        {
+            bootstrap?.SetPersonalizedBanditMode();
+        }
+
+        public void SetStaticPersonalizedMode() => bootstrap?.SetStaticPersonalizedMode();
+        public void SetPersonalizedBanditMode() => bootstrap?.SetPersonalizedBanditMode();
+
         private void OnStressSliderChanged(float value)
         {
             signalSimulator?.SetManualStress(value);
@@ -131,7 +144,7 @@ namespace AdaptiveAudioVR.UI
 
         private void RefreshDynamicText()
         {
-            SignalPacket signal = signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
+            SignalPacket signal = bootstrap != null ? bootstrap.CurrentSignal : signalSimulator != null ? signalSimulator.CurrentSignal : SignalPacket.CreateDefault();
             AudioParameters parameters = bootstrap != null ? bootstrap.CurrentParameters : default;
 
             if (stressValueText != null)
@@ -148,7 +161,7 @@ namespace AdaptiveAudioVR.UI
             {
                 if (bootstrap != null)
                 {
-                    controllerModeText.text = $"Controller: {bootstrap.CurrentControllerMode} | {bootstrap.CurrentPolicyStatus} | {bootstrap.CurrentActionName}";
+                    controllerModeText.text = $"Controller: {bootstrap.CurrentRLMode} | {bootstrap.CurrentControllerMode} | {bootstrap.CurrentPolicyStatus} | {bootstrap.CurrentActionName}";
                 }
                 else
                 {

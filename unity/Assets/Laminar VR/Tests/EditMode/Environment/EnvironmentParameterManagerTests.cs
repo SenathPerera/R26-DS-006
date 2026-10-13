@@ -100,6 +100,31 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Environment
             Assert.That(manager.CurrentState, Is.EqualTo(frozen));
         }
 
+        [Test]
+        public void DelayActiveTransition_ExcludesSuspendedTime()
+        {
+            var manager = new EnvironmentParameterManager(
+                CreateState(0.5f),
+                new RecordingAdapter());
+            manager.BeginTransition("suspended", CreateState(0.7f), 10d, 4d);
+            var beforeSuspension = manager.AdvanceTransition(11d);
+
+            Assert.That(manager.DelayActiveTransition(100d), Is.True);
+            var afterRestore = manager.AdvanceTransition(111d);
+            var completed = manager.AdvanceTransition(114d);
+
+            Assert.That(
+                afterRestore.NormalizedProgress,
+                Is.EqualTo(beforeSuspension.NormalizedProgress));
+            Assert.That(afterRestore.State, Is.EqualTo(beforeSuspension.State));
+            Assert.That(
+                completed.Status,
+                Is.EqualTo(EnvironmentTransitionStatus.Completed));
+            Assert.That(
+                completed.CompletedMonotonicTimeSeconds,
+                Is.EqualTo(114d));
+        }
+
         private static EnvironmentState CreateState(float value)
         {
             return new EnvironmentState(value, value, value, value, value);

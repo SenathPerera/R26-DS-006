@@ -12,9 +12,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bb3d563172c343fe87134c9c75c3bd8d, type: 3}
   m_Name: AdaptiveVrTelemetryLoggingProfile
   m_EditorClassIdentifier: 
-  configurationId: adaptive-vr-telemetry-pilot-v1
-  configurationVersion: 1
+  configurationId: adaptive-vr-telemetry-pilot-v3
+  configurationVersion: 3
   researchConfigurationApproved: 1
   eventSchemaId: adaptive-vr-telemetry
-  eventSchemaVersion: 0.1-pilot
+  eventSchemaVersion: 1.1-pilot
   flushEveryEventCount: 8

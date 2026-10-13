@@ -10,11 +10,21 @@ import {
 import {ConnectionState, RawPpgBatch, WearableDevice, WearableTelemetry} from '../../types/domain';
 import {parseBase64RawPpgPacket} from './rawPpgParser';
 import {parseBase64Telemetry} from './telemetryParser';
+import {
+  mergeWearableAdvertisement,
+  rankWearableCandidates,
+  WEARABLE_DEVICE_NAME,
+  WEARABLE_RAW_PPG_UUID,
+  WEARABLE_SERVICE_UUID,
+  WEARABLE_TELEMETRY_UUID,
+} from './wearableAdvertisement';
 
-export const WEARABLE_DEVICE_NAME = 'WearableHealthMonitor';
-export const WEARABLE_SERVICE_UUID = '7c69f001-7f70-4b0a-9c91-93d7f91b1001';
-export const WEARABLE_TELEMETRY_UUID = '7c69f002-7f70-4b0a-9c91-93d7f91b1001';
-export const WEARABLE_RAW_PPG_UUID = '7c69f003-7f70-4b0a-9c91-93d7f91b1001';
+export {
+  WEARABLE_DEVICE_NAME,
+  WEARABLE_RAW_PPG_UUID,
+  WEARABLE_SERVICE_UUID,
+  WEARABLE_TELEMETRY_UUID,
+} from './wearableAdvertisement';
 
 type Callbacks = {
   onState: (state: ConnectionState) => void;
@@ -98,10 +108,7 @@ export class WearableBleService {
       return await new Promise(resolve => {
         const finish = () => {
           this.stopScan();
-          const devices = [...found.values()]
-            .filter(device => device.verified || device.rssi >= -78)
-            .sort((a, b) => Number(b.verified) - Number(a.verified) || b.rssi - a.rssi)
-            .slice(0, 8);
+          const devices = rankWearableCandidates(found.values());
           this.callbacks?.onDevices(devices);
           this.callbacks?.onState('idle');
           if (devices.length === 0) {
@@ -113,29 +120,23 @@ export class WearableBleService {
           resolve(devices);
         };
 
-        this.manager.startDeviceScan(null, {allowDuplicates: false}, (error, device) => {
+        // Keep duplicate callbacks so Android can deliver a later scan response
+        // containing the name that did not fit in the primary advertisement.
+        this.manager.startDeviceScan(null, {allowDuplicates: true}, (error, device) => {
           if (error) {
             this.log(`Scan error: ${error.message}`);
             finish();
             return;
           }
           if (!device) return;
-          const advertisedName = device.localName ?? device.name;
-          const serviceUuids = (device.serviceUUIDs ?? []).map(normalizeUuid);
-          const verified = advertisedName === WEARABLE_DEVICE_NAME || serviceUuids.includes(WEARABLE_SERVICE_UUID);
-          const rssi = device.rssi ?? -127;
-          if (!verified && rssi < -78) return;
-          const candidate: WearableDevice = {
-            id: device.id,
-            name: advertisedName ?? `Unknown BLE device ${device.id.slice(-5)}`,
-            rssi,
-            verified,
-            firmware: verified ? 'ESP32-S3 Mini' : 'Unverified; connect to inspect GATT',
-          };
+          const previous = found.get(device.id);
+          const candidate = mergeWearableAdvertisement(previous, device);
           found.set(device.id, candidate);
-          const sorted = [...found.values()].sort((a, b) => Number(b.verified) - Number(a.verified) || b.rssi - a.rssi);
+          const sorted = rankWearableCandidates(found.values());
           this.callbacks?.onDevices(sorted);
-          this.log(`Saw ${candidate.name} id=${device.id} rssi=${rssi} verified=${verified}`);
+          if (!previous || previous.verified !== candidate.verified) {
+            this.log(`Saw ${candidate.name} id=${device.id} rssi=${candidate.rssi} verified=${candidate.verified}`);
+          }
         });
         this.scanTimer = setTimeout(finish, SCAN_MS);
       });

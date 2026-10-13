@@ -1,6 +1,7 @@
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Rewards;
+using LaminarVR.AdaptiveMeditation.Safety;
 using NUnit.Framework;
 
 namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
@@ -27,8 +28,10 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
                 EnvironmentAction.IncreaseWarmth,
                 before,
                 after,
-                0.5d,
-                0d);
+                RewardPenaltyObservation.CreateForTesting(
+                    0.5d,
+                    0d,
+                    false));
 
             Assert.That(result.Valid, Is.True);
             Assert.That(result.Breakdown.StressScoreImprovement, Is.EqualTo(1d));
@@ -76,8 +79,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
                 EnvironmentAction.NoChange,
                 CreateEnvironment(),
                 CreateEnvironment(),
-                0d,
-                0d);
+                ObservedNoPenalty());
 
             Assert.That(
                 result.ResultCode,
@@ -97,8 +99,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
                 EnvironmentAction.NoChange,
                 CreateEnvironment(),
                 CreateEnvironment(),
-                0d,
-                0d);
+                ObservedNoPenalty());
 
             Assert.That(
                 result.ResultCode,
@@ -125,13 +126,150 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
                 EnvironmentAction.IncreaseIllumination,
                 CreateEnvironment(),
                 after,
-                0d,
-                0d);
+                ObservedNoPenalty());
 
             Assert.That(
                 result.ResultCode,
                 Is.EqualTo(
                     RewardCalculationResultCode.ActionEnvironmentMismatch));
+        }
+
+        [Test]
+        public void Calculate_RejectsMissingDiscomfortWhenWeighted()
+        {
+            var calculator = new RewardCalculator(
+                RewardPipelineConfigurationTests.CreateConfiguration());
+
+            var result = calculator.Calculate(
+                CreateSnapshot(1L, 1000d, 2d, 70d, 30d),
+                CreateSnapshot(2L, 1060d, 1d, 72d, 35d),
+                CreateBaseline(),
+                EnvironmentAction.NoChange,
+                CreateEnvironment(),
+                CreateEnvironment(),
+                RewardPenaltyObservation.CreateForTesting(
+                    null,
+                    0d,
+                    false));
+
+            Assert.That(
+                result.ResultCode,
+                Is.EqualTo(
+                    RewardCalculationResultCode.MissingDiscomfortSeverity));
+        }
+
+        [Test]
+        public void Calculate_PreservesMissingDiscomfortWhenWeightDisabled()
+        {
+            var calculator = new RewardCalculator(
+                RewardPipelineConfigurationTests.CreateConfiguration(
+                    discomfortPenaltyWeight: 0d));
+
+            var result = calculator.Calculate(
+                CreateSnapshot(1L, 1000d, 2d, 70d, 30d),
+                CreateSnapshot(2L, 1060d, 1d, 72d, 35d),
+                CreateBaseline(),
+                EnvironmentAction.NoChange,
+                CreateEnvironment(),
+                CreateEnvironment(),
+                RewardPenaltyObservation.CreateForTesting(
+                    null,
+                    0d,
+                    false));
+
+            Assert.That(result.Valid, Is.True);
+            Assert.That(result.Breakdown.DiscomfortSeverity, Is.Null);
+            Assert.That(
+                result.Breakdown.DiscomfortPenaltyComponent,
+                Is.Zero);
+        }
+
+        [Test]
+        public void PenaltyObservation_UsesAcceptedSafetyModification()
+        {
+            var current = CreateEnvironment();
+            var range = new NormalizedRange(0f, 0.55f);
+            var profile = new SceneEnvironmentProfile(
+                "reward-safety-test",
+                "Reward Safety Test",
+                current,
+                new EnvironmentStateLimits(
+                    range,
+                    new NormalizedRange(0f, 1f),
+                    new NormalizedRange(0f, 1f),
+                    new NormalizedRange(0f, 1f),
+                    new NormalizedRange(0f, 1f)),
+                new EnvironmentActionStepConfiguration(
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f),
+                1f,
+                0f);
+            var validation = new ActionSafetyValidator().Validate(
+                EnvironmentAction.IncreaseIllumination,
+                current,
+                profile,
+                new SafetyRuntimeState(
+                    SafetyBlockReason.None,
+                    null,
+                    0,
+                    0d),
+                new ActionSafetyLimits(2, 1d));
+
+            var observation =
+                RewardPenaltyObservation.FromActionValidation(validation);
+
+            Assert.That(validation.Accepted, Is.True);
+            Assert.That(validation.Modified, Is.True);
+            Assert.That(observation.DiscomfortSeverity, Is.Null);
+            Assert.That(observation.SafetySeverity, Is.EqualTo(1d));
+            Assert.That(observation.SafetyInterventionOccurred, Is.True);
+        }
+
+        [Test]
+        public void PenaltyObservation_UsesZeroForUnmodifiedAcceptedAction()
+        {
+            var current = CreateEnvironment();
+            var range = new NormalizedRange(0f, 1f);
+            var profile = new SceneEnvironmentProfile(
+                "reward-safety-test",
+                "Reward Safety Test",
+                current,
+                new EnvironmentStateLimits(
+                    range,
+                    range,
+                    range,
+                    range,
+                    range),
+                new EnvironmentActionStepConfiguration(
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f,
+                    0.1f),
+                1f,
+                0f);
+            var validation = new ActionSafetyValidator().Validate(
+                EnvironmentAction.NoChange,
+                current,
+                profile,
+                new SafetyRuntimeState(
+                    SafetyBlockReason.None,
+                    null,
+                    0,
+                    0d),
+                new ActionSafetyLimits(2, 1d));
+
+            var observation =
+                RewardPenaltyObservation.FromActionValidation(validation);
+
+            Assert.That(validation.Accepted, Is.True);
+            Assert.That(validation.Modified, Is.False);
+            Assert.That(observation.DiscomfortSeverity, Is.Null);
+            Assert.That(observation.SafetySeverity, Is.Zero);
+            Assert.That(observation.SafetyInterventionOccurred, Is.False);
         }
 
         private static RewardCalculationResult CalculateNoChange(
@@ -145,8 +283,15 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Rewards
                 EnvironmentAction.NoChange,
                 CreateEnvironment(),
                 CreateEnvironment(),
+                ObservedNoPenalty());
+        }
+
+        private static RewardPenaltyObservation ObservedNoPenalty()
+        {
+            return RewardPenaltyObservation.CreateForTesting(
                 0d,
-                0d);
+                0d,
+                false);
         }
 
         private static PhysiologyBaseline CreateBaseline()

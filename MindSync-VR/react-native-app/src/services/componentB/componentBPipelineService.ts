@@ -80,6 +80,8 @@ export class ComponentBPipelineService {
       framesSent: 0,
       framesAcknowledged: 0,
       lastFrameTimestamp: null,
+      lastTemperatureC: null,
+      temperatureSource: null,
       lastBackendMessage: null,
       lastError: null,
     });
@@ -186,13 +188,25 @@ export class ComponentBPipelineService {
 
   private handleBackendMessage(raw: string) {
     try {
-      const message = JSON.parse(raw) as {status?: string; detail?: unknown; timestamp?: number};
+      const message = JSON.parse(raw) as {
+        status?: string;
+        detail?: unknown;
+        timestamp?: number;
+        temperature?: number | null;
+        temperature_source?: ComponentBPipelineState['temperatureSource'];
+      };
       const detail = typeof message.detail === 'string' ? message.detail : null;
       if (message.status === 'accepted') {
         this.framesAcknowledged += 1;
         this.patch({
           framesAcknowledged: this.framesAcknowledged,
-          lastBackendMessage: `Frame ${Number(message.timestamp).toFixed(3)} accepted`,
+          lastTemperatureC: typeof message.temperature === 'number' ? message.temperature : null,
+          temperatureSource: message.temperature_source ?? null,
+          lastBackendMessage: `Frame ${Number(message.timestamp).toFixed(3)} accepted${
+            typeof message.temperature === 'number'
+              ? ` with ${message.temperature.toFixed(3)} C (${message.temperature_source ?? 'unknown source'})`
+              : ''
+          }`,
         });
         return;
       }
@@ -208,7 +222,7 @@ export class ComponentBPipelineService {
       }
       if (message.status === 'waiting_for_temperature') {
         this.patch({lastBackendMessage: detail ?? 'Waiting for temperature'});
-        this.log('Component B is waiting for the first real temperature value');
+        this.log('Component B temperature is unavailable and its synthetic fallback is disabled');
         return;
       }
       if (message.status === 'processing_error') {

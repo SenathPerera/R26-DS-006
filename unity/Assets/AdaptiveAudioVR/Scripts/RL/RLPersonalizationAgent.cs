@@ -26,7 +26,7 @@ namespace AdaptiveAudioVR.RL
             EnsureDefaultStrategies();
         }
 
-        public PersonalizationStrategy SelectStrategy(UserPreferences preferences, AudioProfile profile)
+        public PersonalizationStrategy SelectStrategy(UserPreferences preferences, AudioProfile profile, bool useLearning = true)
         {
             EnsureDefaultStrategies();
 
@@ -43,8 +43,9 @@ namespace AdaptiveAudioVR.RL
             {
                 BanditArm arm = arms[i];
                 float priorScore = GetContextualPrior(arm.strategy, preferences, profile);
-                float confidenceBonus = explorationStrength * Mathf.Sqrt(Mathf.Log(totalSelections + 2f) / (arm.selectionCount + 1f));
-                float score = priorScore + arm.meanReward + confidenceBonus;
+                float confidenceBonus = useLearning
+                    ? explorationStrength * Mathf.Sqrt(Mathf.Log(totalSelections + 2f) / (arm.selectionCount + 1f)) : 0f;
+                float score = priorScore + (useLearning ? arm.meanReward : 0f) + confidenceBonus;
 
                 if (score > bestScore)
                 {
@@ -54,8 +55,11 @@ namespace AdaptiveAudioVR.RL
             }
 
             currentArmIndex = bestIndex;
-            arms[bestIndex].selectionCount++;
-            totalSelections++;
+            if (useLearning)
+            {
+                arms[bestIndex].selectionCount++;
+                totalSelections++;
+            }
 
             if (logToConsole)
             {

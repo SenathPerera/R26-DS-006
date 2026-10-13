@@ -4,6 +4,12 @@
   "mood": "calm",
   "tempoPreference": "slow",
   "preferredAmbience": "forest",
+  "ambientMusicBalance": "balanced",
+  "brightnessPreference": "soft_dark",
+  "rhythmPreference": "minimal",
+  "natureSoundPreference": "medium",
+  "reverbPreference": "spacious",
+  "volumePreference": "low",
   "audioIntensity": 0.3,
   "noveltyTolerance": 0.2,
   "avoidDissonance": true

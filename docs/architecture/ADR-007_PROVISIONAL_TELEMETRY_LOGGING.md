@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This approval permits runtime
-logging for the time-constrained MVP; the event schema remains explicitly
-pre-freeze until Step 14.
+Superseded for the active pilot by ADR-017. This ADR records the
+`temple-pond-pilot-freeze-v1` telemetry baseline and remains the history of
+schema `1.0-pilot`; it does not describe the active telemetry profile.
 
 ## Context
 
@@ -20,15 +20,15 @@ be flushed in small batches to reduce filesystem work on Quest 2.
 
 | Setting | Candidate | Meaning |
 |---|---|---|
-| Configuration ID | `adaptive-vr-telemetry-pilot-v1` | Identifies this pilot logging behavior in every event |
-| Configuration version | `1` | First provisional pilot configuration |
+| Configuration ID | `adaptive-vr-telemetry-pilot-v2` | Identifies the frozen pilot logging behavior in every event |
+| Configuration version | `2` | Adds reconstructable profile and preference-initialization metadata |
 | Event schema ID | `adaptive-vr-telemetry` | Stable event-family identifier |
-| Event schema version | `0.1-pilot` | Explicitly pre-freeze schema version for Step 13 validation |
+| Event schema version | `1.0-pilot` | Frozen engineering-pilot event schema |
 | Flush every | 8 ordinary events | Limits routine filesystem flushes; critical events still flush immediately |
 
 ## Decision
 
-Version the profile as `adaptive-vr-telemetry-pilot-v1` and enable its runtime
+Version the profile as `adaptive-vr-telemetry-pilot-v2` and enable its runtime
 approval gate using the values above. Logs remain local JSON Lines under
 Unity's persistent-data path, separated by session. Participant identity must
 remain pseudonymous.
@@ -43,11 +43,12 @@ remain pseudonymous.
 
 ## Limitations
 
-- `0.1-pilot` is not the final frozen study schema.
+- `1.0-pilot` is frozen for the engineering pilot, not the final main-study
+  schema.
 - Retention, deletion, export, and sensitive-data handling still require the
   research protocol outside this Unity configuration.
-- Step 13 must inspect a complete JSONL session before the schema is frozen in
-  Step 14.
+- A complete JSONL session must be inspected before promoting the schema to the
+  main study.
 
 ## Validation plan
 

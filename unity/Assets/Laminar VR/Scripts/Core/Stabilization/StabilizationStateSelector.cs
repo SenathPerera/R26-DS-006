@@ -42,8 +42,8 @@ namespace LaminarVR.AdaptiveMeditation.Stabilization
                 double.MaxValue,
                 nameof(preferenceDistancePenaltyWeight));
 
-            // TODO(RESEARCH_DECISION): Freeze the recent-outcome count,
-            // recency decay, and preference-distance penalty before pilot use.
+            // Research use depends on an approved, versioned profile supplying
+            // these selection values.
             ConfigurationId = configurationId.Trim();
             ConfigurationVersion = configurationVersion;
             RecentOutcomeCount = recentOutcomeCount;
@@ -225,12 +225,31 @@ namespace LaminarVR.AdaptiveMeditation.Stabilization
             EnvironmentState safePreferenceState,
             EnvironmentStateLimits safeLimits)
         {
+            return Select(
+                safePreferenceState,
+                safePreferenceState,
+                safeLimits);
+        }
+
+        public StabilizationSelectionResult Select(
+            EnvironmentState safePreferenceState,
+            EnvironmentState safeFallbackState,
+            EnvironmentStateLimits safeLimits)
+        {
             if (!safePreferenceState.IsNormalized
                 || !safeLimits.Contains(safePreferenceState))
             {
                 throw new ArgumentException(
                     "Preference fallback must be normalized and inside safe limits.",
                     nameof(safePreferenceState));
+            }
+
+            if (!safeFallbackState.IsNormalized
+                || !safeLimits.Contains(safeFallbackState))
+            {
+                throw new ArgumentException(
+                    "Fallback state must be normalized and inside safe limits.",
+                    nameof(safeFallbackState));
             }
 
             var evaluations = new StabilizationCandidateEvaluation[
@@ -263,7 +282,7 @@ namespace LaminarVR.AdaptiveMeditation.Stabilization
             if (selectedIndex < 0)
             {
                 return new StabilizationSelectionResult(
-                    safePreferenceState,
+                    safeFallbackState,
                     true,
                     null,
                     PreferenceFallbackReasonCode,

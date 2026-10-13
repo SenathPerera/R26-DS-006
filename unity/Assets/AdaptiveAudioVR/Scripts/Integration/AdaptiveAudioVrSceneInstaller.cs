@@ -6,9 +6,12 @@ using AdaptiveAudioVR.Logging;
 using AdaptiveAudioVR.Preference;
 using AdaptiveAudioVR.Profile;
 using AdaptiveAudioVR.RL;
+using AdaptiveAudioVR.RL.Agent;
 using AdaptiveAudioVR.Safety;
 using AdaptiveAudioVR.Signals;
 using AdaptiveAudioVR.UI;
+using LaminarVR.AdaptiveMeditation.Runtime.Application;
+using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 
@@ -28,8 +31,9 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private AudioClip fallbackMeditationClip;
 
         [Header("Backend")]
-        [SerializeField] private string backendBaseUrl = "http://127.0.0.1:8000";
-        [SerializeField] private string realtimeWebsocketBaseUrl = "ws://127.0.0.1:8000/live-music";
+        [SerializeField] private LocalDevelopmentNetworkProfile developmentNetworkProfile;
+        [SerializeField] private string backendBaseUrl = string.Empty;
+        [SerializeField] private string realtimeWebsocketBaseUrl = string.Empty;
 
         [Header("Runtime Options")]
         [SerializeField] private bool installOnAwake = true;
@@ -38,6 +42,8 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private bool autoGenerateMeditationClipOnStart = false;
         [SerializeField] private bool autoGenerateOnActionChange = false;
         [SerializeField] private bool autoCheckRealtimeCapabilityOnStart = true;
+        [SerializeField] private bool requireGeneratedMeditationBeforeSession = true;
+        [SerializeField] private AudioRLPolicyMode audioStudyCondition = AudioRLPolicyMode.PersonalizedBandit;
 
         [Header("StreamingAssets Files")]
         [SerializeField] private string preferenceConfigFileName = "sample_user_preferences.json";
@@ -62,6 +68,10 @@ namespace AdaptiveAudioVR.Integration
         [ContextMenu("Install Adaptive Audio Runtime")]
         public void InstallAdaptiveAudioRuntime()
         {
+            ResolveBackendEndpoints(
+                out string resolvedBackendBaseUrl,
+                out string resolvedRealtimeWebsocketBaseUrl);
+
             GameObject appRoot = GetOrCreateNamedObject(AppRootName);
             GameObject signalSystem = GetOrCreateNamedObject(SignalSystemName);
             GameObject controllerSystem = GetOrCreateNamedObject(ControllerSystemName);
@@ -79,10 +89,16 @@ namespace AdaptiveAudioVR.Integration
             PreferenceManager preferenceManager = GetOrAddComponent<PreferenceManager>(appRoot);
             ProfileEngine profileEngine = GetOrAddComponent<ProfileEngine>(appRoot);
             PrototypeBootstrap bootstrap = GetOrAddComponent<PrototypeBootstrap>(appRoot);
+            AudioSessionPreferenceReceiver audioPreferenceReceiver =
+                GetOrAddComponent<AudioSessionPreferenceReceiver>(appRoot);
 
             SignalSimulator signalSimulator = GetOrAddComponent<SignalSimulator>(signalSystem);
+            ComponentBStressSignalReceiver componentBSignalReceiver =
+                GetOrAddComponent<ComponentBStressSignalReceiver>(signalSystem);
 
             RLPersonalizationAgent rlPersonalizationAgent = GetOrAddComponent<RLPersonalizationAgent>(controllerSystem);
+            AudioRLAgent audioRLAgent = GetOrAddComponent<AudioRLAgent>(controllerSystem);
+            AudioRLTransitionLogger transitionLogger = GetOrAddComponent<AudioRLTransitionLogger>(controllerSystem);
             RLAdaptiveController rlAdaptiveController = GetOrAddComponent<RLAdaptiveController>(controllerSystem);
             LyriaPromptBuilder lyriaPromptBuilder = GetOrAddComponent<LyriaPromptBuilder>(controllerSystem);
             ActionSafetyShield actionSafetyShield = GetOrAddComponent<ActionSafetyShield>(controllerSystem);
@@ -107,6 +123,9 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(preferenceManager, "configFileName", preferenceConfigFileName);
 
             SetPrivateField(rlAdaptiveController, "importedPolicyFileName", importedPolicyFileName);
+            SetPrivateField(audioRLAgent, "transitionLogger", transitionLogger);
+            SetPrivateField(audioRLAgent, "environmentId", ResolveEnvironmentId());
+            audioRLAgent.SetPolicyMode(audioStudyCondition);
 
             lyriaPromptBuilder.ConfigureEnvironment(
                 ResolveEnvironmentId(),
@@ -117,12 +136,18 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(audioMixerController, "ambientSource", ambientSource);
             SetPrivateField(audioMixerController, "meditationLowPass", meditationLowPass);
             SetPrivateField(audioMixerController, "meditationReverb", meditationReverb);
+            SetPrivateField(audioMixerController, "requireExplicitSessionStart", requireGeneratedMeditationBeforeSession);
 
             SetPrivateField(clipGenerationService, "bootstrap", bootstrap);
             SetPrivateField(clipGenerationService, "audioMixerController", audioMixerController);
-            SetPrivateField(clipGenerationService, "backendBaseUrl", backendBaseUrl);
+            SetPrivateField(
+                clipGenerationService,
+                "backendBaseUrl",
+                resolvedBackendBaseUrl);
             SetPrivateField(clipGenerationService, "generateOnStart", autoGenerateMeditationClipOnStart);
             SetPrivateField(clipGenerationService, "autoGenerateOnActionChange", autoGenerateOnActionChange);
+            SetPrivateField(clipGenerationService, "requireGeneratedClipBeforeSession", requireGeneratedMeditationBeforeSession);
+            SetPrivateField(clipGenerationService, "requiredEnvironmentId", ResolveEnvironmentId());
 
             if (realtimeStreamingService != null)
             {
@@ -130,7 +155,10 @@ namespace AdaptiveAudioVR.Integration
                 SetPrivateField(realtimeStreamingService, "audioMixerController", audioMixerController);
                 SetPrivateField(realtimeStreamingService, "clipGenerationService", clipGenerationService);
                 SetPrivateField(realtimeStreamingService, "pcmAudioPlayer", pcmAudioPlayer);
-                SetPrivateField(realtimeStreamingService, "websocketBaseUrl", realtimeWebsocketBaseUrl);
+                SetPrivateField(
+                    realtimeStreamingService,
+                    "websocketBaseUrl",
+                    resolvedRealtimeWebsocketBaseUrl);
                 SetPrivateField(realtimeStreamingService, "autoCheckCapabilityOnStart", autoCheckRealtimeCapabilityOnStart);
             }
 
@@ -149,7 +177,9 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(bootstrap, "preferenceManager", preferenceManager);
             SetPrivateField(bootstrap, "profileEngine", profileEngine);
             SetPrivateField(bootstrap, "signalSimulator", signalSimulator);
+            SetPrivateField(bootstrap, "componentBSignalReceiver", componentBSignalReceiver);
             SetPrivateField(bootstrap, "rlPersonalizationAgent", rlPersonalizationAgent);
+            SetPrivateField(bootstrap, "audioRLAgent", audioRLAgent);
             SetPrivateField(bootstrap, "rlAdaptiveController", rlAdaptiveController);
             SetPrivateField(bootstrap, "lyriaPromptBuilder", lyriaPromptBuilder);
             SetPrivateField(bootstrap, "actionSafetyShield", actionSafetyShield);
@@ -157,8 +187,60 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(bootstrap, "audioMixerController", audioMixerController);
             SetPrivateField(bootstrap, "sessionLogger", sessionLogger);
             SetPrivateField(bootstrap, "safetyManager", safetyManager);
+            SetPrivateField(bootstrap, "clipGenerationService", clipGenerationService);
+            SetPrivateField(bootstrap, "productionCoordinator", FindAnyObjectByType<ProductionSessionCoordinator>());
+            SetPrivateField(bootstrap, "visualBootstrap", FindAnyObjectByType<ApplicationBootstrap>());
+            SetPrivateField(bootstrap, "requireGeneratedMeditationBeforeSession", requireGeneratedMeditationBeforeSession);
+            SetPrivateField(bootstrap, "requireParticipantPreferences", true);
+            audioPreferenceReceiver.Configure(
+                FindAnyObjectByType<SessionRelayBridge>(), bootstrap);
+
+            ComponentBPhysiologyBridge componentBBridge =
+                FindAnyObjectByType<ComponentBPhysiologyBridge>();
+            componentBSignalReceiver.Configure(
+                componentBBridge,
+                signalSimulator);
+
+            if (componentBBridge == null)
+            {
+                Debug.LogWarning(
+                    "[AdaptiveAudioVrSceneInstaller] Component B bridge was not found; "
+                    + "audio will keep using its configured simulator until one is assigned.",
+                    this);
+            }
 
             Debug.Log("[AdaptiveAudioVrSceneInstaller] Adaptive audio runtime is installed in the current VR scene.", this);
+        }
+
+        private void ResolveBackendEndpoints(
+            out string resolvedBackendBaseUrl,
+            out string resolvedRealtimeWebsocketBaseUrl)
+        {
+            resolvedBackendBaseUrl = backendBaseUrl?.Trim() ?? string.Empty;
+            resolvedRealtimeWebsocketBaseUrl =
+                realtimeWebsocketBaseUrl?.Trim() ?? string.Empty;
+
+            if (developmentNetworkProfile == null)
+            {
+                return;
+            }
+
+            bool hasHttpEndpoint =
+                developmentNetworkProfile.TryGetLyriaHttpBaseUrl(
+                    out resolvedBackendBaseUrl,
+                    out string httpValidationError);
+            bool hasWebsocketEndpoint =
+                developmentNetworkProfile.TryGetLyriaRealtimeWebsocketUrl(
+                    out resolvedRealtimeWebsocketBaseUrl,
+                    out string websocketValidationError);
+            if (!hasHttpEndpoint || !hasWebsocketEndpoint)
+            {
+                Debug.LogError(
+                    "[AdaptiveAudioVrSceneInstaller] The shared development "
+                    + $"network profile is invalid. HTTP: {httpValidationError} "
+                    + $"WebSocket: {websocketValidationError}",
+                    this);
+            }
         }
 
         private string ResolveEnvironmentId()
@@ -217,7 +299,7 @@ namespace AdaptiveAudioVR.Integration
                 source.clip = clip;
             }
 
-            source.playOnAwake = true;
+            source.playOnAwake = false;
             source.loop = true;
             source.priority = priority;
             source.volume = 1f;

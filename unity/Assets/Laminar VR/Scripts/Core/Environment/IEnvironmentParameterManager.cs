@@ -19,6 +19,8 @@ namespace LaminarVR.AdaptiveMeditation.Environment
         EnvironmentTransitionProgress AdvanceTransition(
             double currentMonotonicTimeSeconds);
 
+        bool DelayActiveTransition(double delaySeconds);
+
         bool CancelTransition(out string cancelledTransitionId);
     }
 }

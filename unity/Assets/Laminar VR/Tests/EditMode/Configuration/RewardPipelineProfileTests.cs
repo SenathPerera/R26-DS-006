@@ -1,11 +1,16 @@
 using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 
 namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
 {
     public sealed class RewardPipelineProfileTests
     {
+        private const string ProductionProfilePath =
+            "Assets/Laminar VR/Configuration/Rewards/"
+            + "AdaptiveVrRewardPipelineProfile.asset";
+
         [Test]
         public void NewProfile_IsRejectedUntilResearchConfigurationIsApproved()
         {
@@ -97,6 +102,27 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
             {
                 Object.DestroyImmediate(asset);
             }
+        }
+
+        [Test]
+        public void ProductionProfile_UsesAvailableOnlinePenaltyInputs()
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<RewardPipelineProfile>(
+                ProductionProfilePath);
+
+            Assert.That(asset, Is.Not.Null);
+            Assert.That(
+                asset.TryCreateRuntimeConfiguration(
+                    out var configuration,
+                    out var validationError),
+                Is.True,
+                validationError);
+            Assert.That(
+                configuration.ConfigurationId,
+                Is.EqualTo("adaptive-vr-reward-pilot-v2"));
+            Assert.That(configuration.ConfigurationVersion, Is.EqualTo(2));
+            Assert.That(configuration.DiscomfortPenaltyWeight, Is.Zero);
+            Assert.That(configuration.SafetyPenaltyWeight, Is.EqualTo(2d));
         }
     }
 }
