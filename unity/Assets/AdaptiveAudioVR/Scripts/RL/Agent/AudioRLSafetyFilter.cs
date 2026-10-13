@@ -68,6 +68,11 @@ namespace AdaptiveAudioVR.RL.Agent
             bool safeToRun,
             bool signalIsRecent)
         {
+            if (state == null) throw new ArgumentNullException(nameof(state));
+            foreach (float value in proposedAction.ToArray())
+                if (!AudioLinUcbModel.IsFinite(value))
+                    return BuildResult(proposedAction, AudioRLAction.NoChange, state.currentParameters,
+                        AudioRLSafetyMode.BaselineRecovery, true, "Non-finite action rejected.");
             if (!safeToRun)
             {
                 return BuildResult(
@@ -121,7 +126,7 @@ namespace AdaptiveAudioVR.RL.Agent
                 mode = AudioRLSafetyMode.LowSignalQualityDampened;
                 reason = $"Signal quality dampened the proposed action to {scale:F2} of its magnitude.";
             }
-            else if (confidence < lowConfidenceThreshold)
+            if (!adaptationFrozen && confidence < lowConfidenceThreshold)
             {
                 float scale = Mathf.Lerp(0.15f, 0.50f, Mathf.InverseLerp(confidenceFreezeThreshold, lowConfidenceThreshold, confidence));
                 safeAction = safeAction.Scale(scale);
@@ -131,10 +136,12 @@ namespace AdaptiveAudioVR.RL.Agent
 
             // A freeze is an absolute hold. Acceleration smoothing must not reintroduce
             // part of the previous action after confidence or quality has failed.
-            if (!adaptationFrozen)
+            if (adaptationFrozen || safeAction.MaximumAbsoluteMagnitude <= 0.000001f)
             {
-                safeAction = LimitActionAcceleration(previousSafeAction, safeAction);
+                return BuildResult(proposedAction, AudioRLAction.NoChange, state.currentParameters,
+                    mode, adaptationFrozen, reason);
             }
+            safeAction = LimitActionAcceleration(previousSafeAction, safeAction);
             AudioParameters safeTarget = safeAction.ApplyTo(state.currentParameters);
             safeTarget.brightness = Mathf.Min(safeTarget.brightness, 0.90f);
             safeTarget.ambientMix = Mathf.Max(safeTarget.ambientMix, minimumAmbientMix);
@@ -163,7 +170,10 @@ namespace AdaptiveAudioVR.RL.Agent
             float[] candidateValues = candidate.ToArray();
             for (int i = 0; i < candidateValues.Length; i++)
             {
-                candidateValues[i] = Mathf.MoveTowards(previousValues[i], candidateValues[i], maximumActionAcceleration);
+                // Do not carry previous adjustments into unselected dimensions.
+                float origin = previousValues[i] * candidateValues[i] > 0f ? previousValues[i] : 0f;
+                candidateValues[i] = candidateValues[i] == 0f ? 0f
+                    : Mathf.MoveTowards(origin, candidateValues[i], maximumActionAcceleration);
             }
 
             return AudioRLAction.FromArray(candidateValues).Clamp(maximumActionDelta);

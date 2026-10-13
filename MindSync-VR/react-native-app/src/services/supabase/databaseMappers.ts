@@ -1,4 +1,5 @@
 import type {Database, Json} from './database.types';
+import {isAudioControlPreferences, normalizeAudioPreferences} from '../preferences/audioPreferences';
 import type {
   MeditationSession,
   OnboardingProfile,
@@ -36,6 +37,8 @@ export function onboardingFromRow(row: OnboardingRow, name: string): OnboardingP
     goals: row.goals,
     meditationStyle: row.meditation_style,
     audioPreferences: row.audio_preferences,
+    audioControlPreferences: isAudioControlPreferences(row.audio_control_preferences)
+      ? normalizeAudioPreferences(row.audio_control_preferences) : undefined,
     environmentPreferences: row.environment_preferences,
     sensitivities: row.sensitivities,
     preferredIllumination: row.preferred_illumination ?? TEMPLE_POND_SAFE_DEFAULT.illumination,
@@ -63,6 +66,9 @@ export function sessionFromRow(row: SessionRow): MeditationSession {
     moodAfter: row.mood_after,
     validationComplete: row.validation_complete,
     sessionContext: isSessionContext(row.session_context) ? row.session_context : null,
+    ...(isAudioControlPreferences(row.effective_audio_preference)
+      ? {effectiveAudioPreference: normalizeAudioPreferences(row.effective_audio_preference)}
+      : {}),
     effectiveEnvironmentPreference: isPreferredEnvironment(row.effective_environment_preference)
       ? row.effective_environment_preference
       : null,

@@ -1,160 +1,282 @@
-# Component E Audio RL Agent
+# Component E: Online Personalized Audio Control
 
-## Scope
+Updated: 2026-10-11. This is the current audio learning architecture in the shared
+`R26-DS-006/unity` project. Earlier PPO residual descriptions are superseded.
+The separate original `ComponentE_AdaptiveAudioVR` checkout is not changed.
 
-This implementation controls meditation and fixed scene-ambient playback. It does not generate music inside the RL policy and it does not modify or call the visual LinUCB agent.
+## Relationship To Component C
 
-The primary runtime policy is the **directly exported PPO actor network** trained with seed 37. Unity evaluates the original 34 -> 64 -> 64 -> 7 tanh MLP without a Python process or ML runtime dependency. The export includes Python-generated verification examples that are checked when Unity loads the network. A PPO-derived nearest-neighbour sample policy remains only as a compatibility fallback. Unity does not retrain either policy online.
+Both components follow the same learning process:
 
-## Runtime Flow
+1. Initialize an output from participant preferences.
+2. Select one whole controller condition for the session.
+3. Collect reliable baseline physiology windows.
+4. Observe a fresh context during the adaptive session phase.
+5. Select one eligible adjustment and independently validate safety.
+6. Apply a smooth transition and allow a settling period.
+7. Wait for a new, non-overlapping post-action physiology window.
+8. Calculate reward and log the outcome.
+9. Update the personalized contextual bandit online, only for a valid outcome.
 
-```text
-Long-term audio preferences + selected VR environment
-                         |
-                         v
-       Audio profile and personalized baseline
-                         |
-Stress + confidence + signal quality + optional HR/HRV window
-                         |
-                         v
-              34-feature audio RL state
-                         |
-             +-----------+------------+
-             |                        |
-             v                        v
-      Safe rule action        Trained PPO residual action
-             |                        |
-             +-----------+------------+
-                         |
-                         v
-              Confidence-aware safety filter
-                         |
-                         v
- Seven safe targets: intensity, density, brightness, tempo,
-             fade, music mix, ambient mix
-                         |
-                         v
-      Smooth Unity playback and Lyria control-frame mapping
-                         |
-                         v
- Next non-overlapping physiology window -> delayed reward
-                         |
-                         v
-        JSONL transition log + in-memory replay buffer
-```
+Component C changes the visual environment. Component E changes audio controls.
+The audio implementation has its own policy, action catalogue, features, model
+files and logs. It does not modify the visual LinUCB implementation or weights.
 
-## State
+The precise algorithm name is **disjoint LinUCB contextual bandit**. It learns
+context-to-action outcome estimates online. It does not perform online PPO
+gradient updates or claim to solve long-horizon sequential credit assignment.
 
-`AudioRLState` contains:
+## Complete Controller Conditions
 
-- Stress, confidence, and signal quality.
-- Optional Component B heart rate, RMSSD, SDNN, source timestamp, and window boundaries.
-- Stress, confidence, heart-rate, and RMSSD trends.
-- The seven current audio parameters and personalized baseline.
-- A 13-value preference encoding compatible with the simulated-user training environment.
-- Recent residual-action history, session progress, time since action, novelty count, and decision index.
+| Unity mode | Behaviour | Online weight updates |
+| --- | --- | --- |
+| `StaticPersonalized` | Hold the initialized personalized audio parameters | None |
+| `RuleBasedAdaptive` | Select a conservative stress-aware action from the catalogue | None |
+| `PersonalizedBandit` | Select an eligible action using personalized LinUCB scores | Valid delayed outcomes only |
 
-The direct PPO policy receives the original 34-feature training contract. Additional production fields stay in the structured state for safety, reward, and logging so the imported model distribution is not silently changed.
+All conditions share the initial preference mapping, action catalogue, safety,
+playback, physiology validation, reward calculation and outcome telemetry.
+The static condition selects NoChange. The rule condition chooses a catalogue
+action closest to its conservative target adjustment. The bandit chooses the
+complete action; a rule action is not added to it.
 
-## Actions
+The initial content strategy uses preference priors deterministically. It is
+not a second learner receiving study rewards. This preserves the same initial
+personalized configuration across controller conditions for identical inputs.
 
-Every policy decision is a bounded residual vector:
+Serialized mode values are migrated deliberately: old rule mode `0` becomes
+`RuleBasedAdaptive`, and old PPO residual mode `1` becomes `PersonalizedBandit`.
+Static personalized is `2`. Old Unity button callbacks named
+`SetPpoResidualMode` delegate to the new bandit mode for scene compatibility.
+New UI buttons display the correct controller names.
 
-1. `deltaIntensity`
-2. `deltaDensity`
-3. `deltaBrightness`
-4. `deltaTempo`
-5. `deltaFade`
-6. `deltaMusicMix`
-7. `deltaAmbientMix`
+## Music And Scene Initialization
 
-`RuleOnly` applies only the safe rule baseline. `PpoResidual` adds the trained PPO actor's residual before safety filtering. The dashboard can switch between these modes for an A/B demonstration.
+The existing generated-meditation start gate remains active. The session must
+have its personalized Lyria meditation clip before playback begins. Preferences
+and the selected Japanese Temple Pond Garden inform content generation.
+The environment ambient clip is fixed and stays separate from generated music.
+Lyria content generation remains a separate service from audio-policy learning.
 
-## Safety
+The mobile app now saves structured long-term sound choices during onboarding
+and exposes them for later editing in Settings. Before each VR session it asks
+whether to use those usual choices or a session-only adjustment. The mobile
+request sends both profiles, the selected mode and the signed-in account's
+stable pseudonymous ID to the session relay. The relay validates the audio
+bundle and includes it in the paired Quest configuration. Unity maps the
+effective sound profile into Component E, with the temple scene supplying the
+musical setting. The fixed scene ambience remains its own audio source.
 
-`AudioRLSafetyFilter` is the only parameter-action safety boundary in the new path. It:
+The integrated audio installer waits for this configuration. A missing or
+invalid audio bundle cannot load a personalized model or trigger generated
+music; `sample_user_preferences.json` remains for explicitly configured
+standalone demonstrations. Audio transition logs use the relay session ID,
+and learned weights remain keyed by participant and environment. A new
+participant session resets clip readiness and pending generation, so an old
+clip cannot satisfy the next session's start gate. The mobile database change
+requires `202610130004_audio_control_preferences.sql` before using the updated
+mobile build with Supabase. Existing broad sound tags are mapped to initial
+structured values until the participant saves explicit choices in Settings.
 
-- Clamps every action dimension to the configured maximum delta.
-- Limits action acceleration relative to the preceding safe action.
-- Freezes adaptation under very low confidence or signal quality.
-- Dampens adaptation under moderately low confidence or signal quality.
-- Recovers toward the personalized baseline when a signal is stale.
-- Prevents excessive drift from the personalized baseline.
-- Constrains brightness and the music/ambient balance, then normalizes the mix.
-- Cancels action while emergency mute is active.
+Replacing a meditation clip invalidates the pending audio outcome. Crossfading
+content temporarily suspends decisions and attribution. This prevents a new
+composition from being incorrectly credited to a small mixer adjustment.
 
-The legacy `ActionSafetyShield` remains only for compatibility with the old controller. It does not clamp parameters a second time when `AudioRLAgent` is active.
+## Action Catalogue
 
-## Reward and Learning Boundary
+`AudioActionCatalog` version `audio-micro-actions-v1` has 13 actions:
 
-The agent stores a pending transition after an action. Reward is calculated only when the next eligible observation arrives. If real physiology windows are supplied, the next window must not overlap the pre-action window.
+- NoChange.
+- Increase or reduce intensity.
+- Increase or reduce density.
+- Increase brightness or darken.
+- Increase or reduce tempo.
+- Lengthen or shorten fade.
+- Increase music while reducing ambience, or the inverse.
 
-Reward includes:
+An action changes one independent control dimension. Mix is one coupled
+dimension, so the seven logged output values contain six independent controls.
+The prototype micro-step is 0.03. The final filter retains an absolute 0.08
+per-dimension limit, range limits, mix normalization and a baseline drift limit.
 
-- Stress reduction.
-- RMSSD increase and heart-rate reduction when real physiology is present.
-- Preference alignment and stable control.
-- Penalties for abrupt actions, low-confidence overreaction, excessive novelty, and unnecessary intervention.
+Candidates that would be altered by the safety filter are masked before bandit
+selection. NoChange remains available. The final action still passes through
+the filter. A safety replacement is never credited to the proposed arm; an
+altered/non-catalogue execution cannot update this fixed-action bandit.
 
-Unity does not pretend to retrain PPO online. Each completed transition is written to JSONL and retained in a bounded replay buffer for later offline policy improvement. The small session-strategy bandit receives each delayed reward once.
+## Context Features
 
-## Timing
+`AudioBanditFeatures` version `audio-context-v1-40` uses the following fixed order:
 
-- Simulation decisions default to every 5 seconds so the dashboard can demonstrate behaviour.
-- Production physiology decisions are rate-limited to at least 55 seconds and keyed by unique physiology windows.
-- One warmup observation is collected before the first action.
-- Production signals time out after 120 seconds by default.
+| Indices | Contents |
+| --- | --- |
+| 0 | Bias |
+| 1-13 | Existing preference encoding |
+| 14-20 | Current applied audio parameters |
+| 21-27 | Current parameters minus personalized baseline |
+| 28-30 | Stress, confidence, signal quality |
+| 31-32 | Recent stress and confidence trends |
+| 33-34 | Optional heart rate / 200 and RMSSD / 200 |
+| 35-36 | Heart-rate and RMSSD availability flags |
+| 37-39 | Session progress, novelty count / 20, recent action magnitude |
 
-These values are serialized fields on `AudioRLAgent` and should be locked in the study protocol before user evaluation.
+Values are finite and bounded to [-1, 1]. Missing optional physiology has an
+explicit availability flag and contributes no invented HRV reward. The old
+34-value PPO observation schema remains only for archived export compatibility.
 
-## Unity Wiring
+## Online Learning
 
-`AdaptiveAudioVrSceneInstaller` creates and connects:
-
-- `AudioRLAgent` and `AudioRLTransitionLogger` on `ControllerSystem`.
-- `PrototypeBootstrap` on `AppRoot`.
-- Existing `AudioMixerController`, Lyria services, logger, simulator, safety manager, and dashboard components.
-
-The installer assigns both policy artifacts from `Assets/StreamingAssets/AdaptiveAudioVR/Training`:
-
-- `ppo_seed_37_unity_network.json`: primary direct PPO actor network.
-- `ppo_seed_37_unity_policy.json`: sampled nearest-neighbour fallback.
-
-The direct export records source-model SHA-256 `7a40b87a968be05f922df7c58e2a1a9e648c9895dd995d1c24eb366cc22192d9` for traceability.
-
-To regenerate the direct Unity artifact from a trained Stable-Baselines3 PPO model, run `tools/rl_training/src/export/export_unity_ppo_network.py`. The exporter rejects incompatible observation/action sizes and embeds numerical verification cases.
-
-For manual verification, use `AdaptiveAudioVR > Verify Audio RL Agent` in the Unity editor.
-
-## Generated Meditation Session Lifecycle
-
-The Japanese Temple Pond Garden session uses a strict generated-audio start gate:
-
-1. Unity loads long-term preferences and prepares the personalized audio profile and Japanese-temple Lyria prompt.
-2. Meditation and fixed-ambient playback remain stopped while a matching generated clip is loaded from the prompt cache or requested from the clip-generation backend.
-3. A failed request does not fall back to raw meditation playback. The service retries while the session remains stopped.
-4. Once the generated clip is decoded and assigned, Unity starts that meditation clip and the fixed scene ambience together, starts session logging, and enables the RL update loop.
-5. During the session, Unity applies safe RL parameter changes immediately. A materially changed state must remain stable for four seconds before a replacement clip is generated in the background.
-6. Replacement clips are staged on a second source and crossfaded over eight seconds near a loop boundary. If generation fails, the current generated clip continues playing.
-
-Cache keys include the environment ID, personalized strategy, prompt weights, stress/confidence buckets, and audio-control buckets. A cached startup clip is therefore accepted only when it matches the current Japanese-temple personalization context.
-
-## Component B Boundary
-
-The shared `ComponentBPhysiologyBridge` owns transport, JSON parsing, schema validation, connection recovery, and delivery on Unity's main thread. The audio-side `ComponentBStressSignalReceiver` subscribes to its accepted-payload event and maps each validated window into the existing `SignalPacket` input port. The RL policy therefore remains transport-neutral and never parses backend JSON.
-
-The adapter maps stress as `continuous_score / 3`, confidence, signal quality, heart rate, RMSSD, SDNN, source timestamp, window start/end, and an audio-local monotonically increasing sequence ID. It rejects duplicate or out-of-order window ends before switching `SignalSimulator` to `External` mode. Until the first live window arrives, the configured simulator remains the fallback input. If live delivery stops, the packet timestamp ages normally and `AudioRLAgent` enters stale-signal baseline recovery.
+Each user/environment model contains one ridge-regression arm per action.
+At a scheduled decision the model evaluates:
 
 ```text
-Component B WebSocket -> shared parser/validator -> ComponentBPhysiologyBridge
-                                                        |
-                                                        v
-                                    ComponentBStressSignalReceiver
-                                      (map + order guard + sequence)
-                                                        |
-                                                        v
-                            SignalSimulator external input / simulator fallback
-                                                        |
-                                                        v
-                         PrototypeBootstrap -> AudioRLAgent -> safety -> mixer
+theta[a] = solve(A[a], b[a])
+score[a] = dot(theta[a], context) + alpha * sqrt(context' solve(A[a], context))
+
+After a valid delayed outcome for the executed arm:
+A[a] = A[a] + context * context'
+b[a] = b[a] + reward * context
 ```
+
+The prototype uses ridge 1 and exploration alpha 0.25. Cholesky solves avoid
+explicit inversion. Feature dimensions, matrix symmetry, finite values and
+positive definiteness are validated. Ties deterministically favour NoChange,
+then the lower action ID. Only the selected, executed arm is updated once.
+
+Online learning can be frozen using `allowOnlineLearning = false` for evaluation;
+frozen evaluation also removes the exploration bonus and ranks expected rewards.
+`allowSimulationLearning` separately controls synthetic demonstration updates.
+Simulation and Component B window-based models have distinct persistence keys.
+
+Snapshots are saved under `Application.persistentDataPath/AudioOnlineModels`.
+Keys separate participant ID, environment, source domain and relevant reward/
+control settings. Feature/action schema and matrix dimensions are validated on
+load. Corrupt or incompatible models are rejected without partially restoring
+weights. Snapshot writes replace files atomically where supported.
+
+Supply a stable, distinct pseudonymous `AudioProfile.userId` for each participant.
+A sample preference identity reused for different people is not personalization.
+These local audio session IDs are separate from shared relay session IDs; use
+recorded UTC windows when joining logs unless an explicit study session identity
+is supplied by a future shared boundary extension.
+
+## Delayed Outcome Validation
+
+The audio adapter continues receiving accepted Component B windows through the
+existing bridge. The payload can contain stress/confidence, signal quality,
+heart rate and optional RMSSD/SDNN, without adding audio fields to Component B.
+
+The agent requires two reliable baseline observations before adapting. Baseline
+standard deviations normalize stress, RMSSD and heart-rate changes, with floors
+of 0.05 normalized stress, 5 ms and 5 bpm respectively.
+
+The applied mixer state must reach the target within tolerance before the
+settling timer starts. A post-window must start after transition completion plus
+settling and after the pre-window ends. Its sequence and end time must be new.
+The same post-window is never used to reward multiple decisions, but can become
+the next decision's pre-window.
+
+Prototype timing and validity settings:
+
+| Setting | Value |
+| --- | --- |
+| Minimum production decision interval | 75 seconds |
+| Simulated demonstration interval | 5 seconds |
+| Settling | 5 seconds |
+| Outcome timeout | 240 seconds |
+| Accepted window duration | 30-120 seconds |
+| Maximum source-window age | 90 seconds |
+| Future timestamp tolerance | 2 seconds |
+| Minimum learning confidence | 0.45 |
+| Minimum learning signal quality | 0.60 |
+
+With 60-second Component B windows, a valid full post-window often arrives two
+window deliveries after a decision. There is no reward every Unity frame.
+Invalid observations or cancelled attribution mean no model update, rather
+than an invented negative or zero physiological reward.
+
+## Lifecycle And Attribution Protection
+
+Audio reads the existing coordinator's phase and connection state:
+
+- Acclimatization collects baseline observations without policy decisions.
+- Adaptive permits decisions with fresh live windows.
+- Pause, completion, abort and network interruption cancel pending outcomes.
+- Stabilization holds the current safe audio state without exploration.
+- Resume requires a fresh full window rather than reusing paused observations.
+- Emergency mute immediately holds parameters, mutes output and cancels learning.
+
+The audio bootstrap reads visual state and transition status without changing C.
+By default, visual changes invalidate a pending audio outcome and visual
+transitions suspend audio attribution. Simultaneous independent adaptive agents
+can therefore yield fewer usable audio outcomes. Evaluate E with C held static,
+then evaluate integrated operation separately. Do not infer independent causal
+audio effects from sessions where uncontrolled visual changes occur.
+
+## Reward And Telemetry
+
+The configurable reward retains stress improvement, optional RMSSD and heart
+rate improvement, preference alignment and smoothness. Penalties cover abrupt
+changes, low-confidence overreaction, excessive novelty and unnecessary changes.
+Reliability uses both pre- and post-window confidence/quality. Optional missing
+HRV contributes nothing to that component. These weights are research prototype
+settings, not clinically calibrated physiological efficacy measures.
+
+Version-2 JSONL records under `RLTransitions` include decision and outcome events,
+controller condition/segment, context schema/vector, proposed and executed arms,
+safe action, predicted reward, uncertainty, reward validity, update status,
+window identities and cancellation reasons. Invalid outcomes have no reward.
+A bounded replay buffer retains completed and cancelled outcomes.
+
+## Running And Evaluating
+
+Open `R26-DS-006/unity`. On `AdaptiveAudioIntegration`, choose `Audio Study
+Condition` in `AdaptiveAudioVrSceneInstaller`. Existing runtime installation
+adds/configures `AudioRLAgent` and `AudioRLTransitionLogger` on `ControllerSystem`.
+The dashboard has Static Personalized, Rule Based and Online Personalized
+buttons. Switching is a demo feature: it cancels a pending outcome, returns to
+the personalized baseline and starts a new labelled condition segment. For a
+research comparison, use one fixed condition per session and counterbalance order.
+
+Run standalone verification from the common repository:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-audio-online.ps1
+python -m unittest discover -s tests -p test_audio_online_evaluation.py -v
+```
+
+Pass `-UnityEditorData` if the installed editor is in another location. The
+script rebuilds shared references without editing visual sources, compiles all
+audio files against Unity APIs, and executes deterministic logic tests with
+explicit Unity test doubles. It does not launch or upgrade the Unity project.
+In Unity, run `AdaptiveAudioVR > Verify Audio RL Agent` for engine-side checks.
+
+After real sessions in all conditions, summarize logs:
+
+```powershell
+python tools/evaluate-audio-online.py --logs "C:\path\to\RLTransitions" --output results/audio_online
+```
+
+The script writes per-session/participant CSV files, comparison CSV/JSON and a
+Markdown report. It aggregates repeated sessions within participant before
+calculating between-participant statistics. Invalid-only sessions are retained
+without invented reward means. Simulated rows are excluded by default and, if
+explicitly included, are reported in a separate group.
+
+## Historical Experiments And Thesis Correction
+
+PPO, TD3 and SAC models and the earlier simulated-user comparison are retained
+as historical offline experiments. They are not the current online audio agent,
+and their scores cannot be presented as results for the new LinUCB architecture.
+No PPO retraining is required to initialize LinUCB: a new participant starts
+with ridge priors and improves from their valid delayed outcomes.
+
+The previously prepared Component E thesis DOCX still describes the earlier
+PPO residual design. Revise its abstract, methodology, architecture, deployment,
+figures, study conditions and conclusions before presenting it as current.
+Keep its numerical simulation results explicitly historical until new
+experiments are conducted. Component C's thesis and agent are unchanged.
+
+Engine playback, Android/headset persistence, end-to-end wearable delivery,
+participant comfort and longitudinal efficacy still require validation on the
+actual deployment. Automated logic checks do not establish these outcomes.

@@ -25,6 +25,7 @@ export interface OnboardingProfile {
   goals: string[];
   meditationStyle: string;
   audioPreferences: string[];
+  audioControlPreferences?: AudioControlPreferences;
   environmentPreferences: string[];
   sensitivities: string[];
   preferredIllumination: number;
@@ -40,6 +41,28 @@ export interface OnboardingProfile {
 
 export type LightSensitivity = 'none' | 'mild' | 'high';
 export type SessionPreferenceMode = 'usual' | 'adjust';
+
+export interface AudioControlPreferences {
+  preferredInstruments: Array<'piano' | 'flute' | 'pad' | 'strings' | 'bells' | 'drone'>;
+  mood: 'calm' | 'focused' | 'sleepy' | 'energized';
+  tempoPreference: 'slow' | 'medium' | 'fast';
+  audioIntensity: number;
+  ambientMusicBalance: 'mostly_ambience' | 'balanced' | 'mostly_music';
+  brightnessPreference: 'soft_dark' | 'neutral' | 'bright_clear';
+  noveltyTolerance: number;
+  avoidDissonance: boolean;
+  rhythmPreference: 'minimal' | 'gentle_pulse' | 'more_motion';
+  natureSoundPreference: 'none' | 'low' | 'medium' | 'high';
+  reverbPreference: 'dry' | 'balanced' | 'spacious';
+  volumePreference: 'low' | 'medium' | 'high';
+}
+
+export interface AudioPreferenceBundle {
+  schemaVersion: 'mindsync-audio-preferences-v1';
+  longTerm: AudioControlPreferences;
+  preferenceMode: SessionPreferenceMode;
+  sessionOverride: AudioControlPreferences | null;
+}
 
 export interface WearableDevice {
   id: string;
@@ -121,6 +144,7 @@ export interface MeditationSession {
   validationComplete: boolean;
   sessionContext?: SessionContext | null;
   effectiveEnvironmentPreference?: PreferredEnvironment | null;
+  effectiveAudioPreference?: AudioControlPreferences | null;
 }
 
 export interface PreferredEnvironment {
@@ -148,6 +172,8 @@ export interface SessionContext {
   timeOfDayMinutes: number;
   sessionSequenceNumber: number;
   daysSincePreviousSession: number | null;
+  audioPreferenceMode?: SessionPreferenceMode;
+  sessionAudioPreference?: AudioControlPreferences | null;
 }
 
 export interface PreparedVrSession {

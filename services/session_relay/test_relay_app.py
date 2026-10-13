@@ -184,6 +184,68 @@ class SessionRelayAppTests(unittest.TestCase):
         )
         self.assertEqual(409, stale_receipt.status_code)
 
+    def test_audio_preferences_reach_paired_quest_and_request_id_cannot_change_identity(self) -> None:
+        long_term = self._audio_profile()
+        temporary = {**long_term, "preferredInstruments": ["bells"], "mood": "sleepy"}
+        request = {
+            "requestId": "audio-request-1", "participantPseudonym": "participant-7",
+            "sceneId": "temple-pond",
+            "preferredEnvironment": {
+                "illumination": 0.3, "warmth": 0.5,
+                "atmosphericSoftness": 0.5, "colorRichness": 0.5,
+                "ambientMotion": 0.5,
+            },
+            "audioPreferences": {
+                "schemaVersion": "mindsync-audio-preferences-v1",
+                "longTerm": long_term,
+                "preferenceMode": "adjust",
+                "sessionOverride": temporary,
+            },
+        }
+        prepared = self.client.post("/sessions", json=request)
+        self.assertEqual(200, prepared.status_code)
+        self.assertEqual(prepared.json(), self.client.post("/sessions", json=request).json())
+        changed = {**request, "participantPseudonym": "participant-8"}
+        self.assertEqual(409, self.client.post("/sessions", json=changed).status_code)
+        session = prepared.json()
+        with self.client.websocket_connect("/realtime?role=quest") as quest:
+            quest.send_json(self._envelope("pairing_request", {
+                "clientRole": "quest", "pairingCode": session["pairingCode"],
+                "questClientId": "quest-audio-test", "appVersion": "test",
+            }, "pair-audio"))
+            self.assertTrue(quest.receive_json()["payload"]["accepted"])
+            configuration = quest.receive_json()
+            self.assertEqual(session["sessionId"], configuration["payload"]["sessionId"])
+            self.assertEqual(request["audioPreferences"], configuration["payload"]["audioPreferences"])
+
+    def test_rejects_incomplete_audio_adjustment(self) -> None:
+        request = {
+            "requestId": "bad-audio-request", "participantPseudonym": "participant-7",
+            "sceneId": "temple-pond",
+            "preferredEnvironment": {
+                "illumination": 0.5, "warmth": 0.5,
+                "atmosphericSoftness": 0.5, "colorRichness": 0.5,
+                "ambientMotion": 0.5,
+            },
+            "audioPreferences": {
+                "schemaVersion": "mindsync-audio-preferences-v1",
+                "longTerm": self._audio_profile(),
+                "preferenceMode": "adjust", "sessionOverride": None,
+            },
+        }
+        self.assertEqual(422, self.client.post("/sessions", json=request).status_code)
+
+    @staticmethod
+    def _audio_profile() -> dict:
+        return {
+            "preferredInstruments": ["piano", "flute"], "mood": "calm",
+            "tempoPreference": "slow", "audioIntensity": 0.3,
+            "ambientMusicBalance": "balanced", "brightnessPreference": "soft_dark",
+            "noveltyTolerance": 0.2, "avoidDissonance": True,
+            "rhythmPreference": "minimal", "natureSoundPreference": "medium",
+            "reverbPreference": "spacious", "volumePreference": "low",
+        }
+
     @staticmethod
     def _envelope(message_type: str, payload: dict, message_id: str) -> dict:
         return {

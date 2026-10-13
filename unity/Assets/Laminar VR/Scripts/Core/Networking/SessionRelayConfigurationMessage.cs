@@ -11,7 +11,8 @@ namespace LaminarVR.AdaptiveMeditation.Networking
             string sessionId,
             string participantPseudonym,
             string sceneId,
-            EnvironmentState preferredEnvironment)
+            EnvironmentState preferredEnvironment,
+            string rawJson = null)
         {
             SchemaVersion = RequireIdentifier(
                 schemaVersion,
@@ -30,6 +31,7 @@ namespace LaminarVR.AdaptiveMeditation.Networking
             }
 
             PreferredEnvironment = preferredEnvironment;
+            RawJson = rawJson;
         }
 
         public string SchemaVersion { get; }
@@ -43,6 +45,8 @@ namespace LaminarVR.AdaptiveMeditation.Networking
         public string SceneId { get; }
 
         public EnvironmentState PreferredEnvironment { get; }
+
+        public string RawJson { get; }
 
         private static string RequireIdentifier(
             string value,

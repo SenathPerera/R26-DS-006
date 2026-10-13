@@ -43,10 +43,10 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private bool autoGenerateOnActionChange = false;
         [SerializeField] private bool autoCheckRealtimeCapabilityOnStart = true;
         [SerializeField] private bool requireGeneratedMeditationBeforeSession = true;
+        [SerializeField] private AudioRLPolicyMode audioStudyCondition = AudioRLPolicyMode.PersonalizedBandit;
 
         [Header("StreamingAssets Files")]
         [SerializeField] private string preferenceConfigFileName = "sample_user_preferences.json";
-        [SerializeField] private string directPpoPolicyFileName = "ppo_seed_37_unity_network.json";
         [SerializeField] private string importedPolicyFileName = "ppo_seed_37_unity_policy.json";
 
         private const string AppRootName = "AppRoot";
@@ -89,6 +89,8 @@ namespace AdaptiveAudioVR.Integration
             PreferenceManager preferenceManager = GetOrAddComponent<PreferenceManager>(appRoot);
             ProfileEngine profileEngine = GetOrAddComponent<ProfileEngine>(appRoot);
             PrototypeBootstrap bootstrap = GetOrAddComponent<PrototypeBootstrap>(appRoot);
+            AudioSessionPreferenceReceiver audioPreferenceReceiver =
+                GetOrAddComponent<AudioSessionPreferenceReceiver>(appRoot);
 
             SignalSimulator signalSimulator = GetOrAddComponent<SignalSimulator>(signalSystem);
             ComponentBStressSignalReceiver componentBSignalReceiver =
@@ -121,9 +123,9 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(preferenceManager, "configFileName", preferenceConfigFileName);
 
             SetPrivateField(rlAdaptiveController, "importedPolicyFileName", importedPolicyFileName);
-            SetPrivateField(audioRLAgent, "directPpoPolicyFileName", directPpoPolicyFileName);
-            SetPrivateField(audioRLAgent, "importedPolicyFileName", importedPolicyFileName);
             SetPrivateField(audioRLAgent, "transitionLogger", transitionLogger);
+            SetPrivateField(audioRLAgent, "environmentId", ResolveEnvironmentId());
+            audioRLAgent.SetPolicyMode(audioStudyCondition);
 
             lyriaPromptBuilder.ConfigureEnvironment(
                 ResolveEnvironmentId(),
@@ -186,7 +188,12 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(bootstrap, "sessionLogger", sessionLogger);
             SetPrivateField(bootstrap, "safetyManager", safetyManager);
             SetPrivateField(bootstrap, "clipGenerationService", clipGenerationService);
+            SetPrivateField(bootstrap, "productionCoordinator", FindAnyObjectByType<ProductionSessionCoordinator>());
+            SetPrivateField(bootstrap, "visualBootstrap", FindAnyObjectByType<ApplicationBootstrap>());
             SetPrivateField(bootstrap, "requireGeneratedMeditationBeforeSession", requireGeneratedMeditationBeforeSession);
+            SetPrivateField(bootstrap, "requireParticipantPreferences", true);
+            audioPreferenceReceiver.Configure(
+                FindAnyObjectByType<SessionRelayBridge>(), bootstrap);
 
             ComponentBPhysiologyBridge componentBBridge =
                 FindAnyObjectByType<ComponentBPhysiologyBridge>();

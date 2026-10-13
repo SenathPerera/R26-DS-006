@@ -6,36 +6,34 @@ using UnityEngine;
 
 namespace AdaptiveAudioVR.RL.Agent
 {
-    public enum AudioRLPolicyMode
-    {
-        RuleOnly,
-        PpoResidual
-    }
-
     [DisallowMultipleComponent]
     public sealed class AudioRLAgent : MonoBehaviour
     {
-        [Header("Policy")]
-        [SerializeField] private AudioRLPolicyMode policyMode = AudioRLPolicyMode.PpoResidual;
-        [SerializeField] private string directPpoPolicyFileName = "ppo_seed_37_unity_network.json";
-        [SerializeField] private string importedPolicyFileName = "ppo_seed_37_unity_policy.json";
-        [SerializeField, Range(1, 32)] private int importedPolicyNeighbors = 8;
+        [Header("Whole Controller Study Condition")]
+        [SerializeField] private AudioRLPolicyMode policyMode = AudioRLPolicyMode.PersonalizedBandit;
+        [SerializeField] private bool allowOnlineLearning = true;
+        [SerializeField] private bool allowSimulationLearning = true;
+        [SerializeField] private bool persistPersonalizedModel = true;
+        [SerializeField] private string environmentId = "japanese_temple_pond_garden";
+        [SerializeField, Range(0f, 1f)] private float explorationAlpha = 0.25f;
+        [SerializeField, Min(0.01f)] private float ridge = 1f;
+        [SerializeField, Range(0.005f, 0.05f)] private float microActionDelta = 0.03f;
 
-        [Header("Decision Cadence")]
+        [Header("Decision And Outcome Timing")]
         [SerializeField, Min(0.5f)] private float simulationDecisionIntervalSeconds = 5f;
-        [SerializeField, Min(1f)] private float productionMinimumDecisionIntervalSeconds = 55f;
-        [SerializeField, Min(0)] private int warmupObservationCount = 1;
+        [SerializeField, Min(60f)] private float productionMinimumDecisionIntervalSeconds = 75f;
+        [SerializeField, Min(2)] private int warmupObservationCount = 2;
         [SerializeField, Min(1)] private int episodeHorizon = 120;
-        [SerializeField, Min(1f)] private float productionSignalTimeoutSeconds = 120f;
+        [SerializeField, Min(0f)] private float settlingSeconds = 5f;
+        [SerializeField, Min(120f)] private float outcomeTimeoutSeconds = 240f;
+        [SerializeField, Min(1f)] private float productionSignalTimeoutSeconds = 90f;
         [SerializeField, Min(0.5f)] private float simulationSignalTimeoutSeconds = 3f;
 
-        [Header("Action Bounds")]
+        [Header("Safety")]
         [SerializeField, Range(0.005f, 0.15f)] private float maximumActionDelta = 0.08f;
         [SerializeField, Range(0.005f, 0.15f)] private float maximumActionAcceleration = 0.05f;
         [SerializeField, Range(0.01f, 0.5f)] private float outputSlewPerSecond = 0.08f;
         [SerializeField, Range(0.05f, 0.6f)] private float maximumBaselineDistance = 0.30f;
-
-        [Header("Safety Thresholds")]
         [SerializeField, Range(0f, 1f)] private float confidenceFreezeThreshold = 0.25f;
         [SerializeField, Range(0f, 1f)] private float lowConfidenceThreshold = 0.45f;
         [SerializeField, Range(0f, 1f)] private float signalQualityFreezeThreshold = 0.30f;
@@ -43,15 +41,10 @@ namespace AdaptiveAudioVR.RL.Agent
         [SerializeField, Range(0f, 1f)] private float minimumAmbientMix = 0.15f;
         [SerializeField, Range(0f, 1f)] private float maximumMusicMix = 0.85f;
 
-        [Header("Rule Baseline")]
-        [SerializeField, Range(0f, 1f)] private float highStressThreshold = 0.65f;
-        [SerializeField, Range(0f, 1f)] private float lowStressThreshold = 0.35f;
-
-        [Header("Learning Readiness")]
+        [Header("Logging")]
         [SerializeField, Min(16)] private int replayBufferCapacity = 2048;
         [SerializeField] private AudioRLRewardWeights rewardWeights = new AudioRLRewardWeights();
         [SerializeField] private AudioRLTransitionLogger transitionLogger;
-        [SerializeField] private bool logPolicyLoad = true;
 
         public AudioProfile ActiveProfile { get; private set; }
         public PersonalizationStrategy ActiveStrategy { get; private set; }
@@ -60,513 +53,401 @@ namespace AdaptiveAudioVR.RL.Agent
         public AudioParameters CurrentTargetParameters { get; private set; }
         public SignalPacket CurrentSignal { get; private set; }
         public AdaptiveControllerMode CurrentControllerMode { get; private set; } = AdaptiveControllerMode.Initialized;
-        public AudioRLSafetyMode CurrentSafetyMode { get; private set; } = AudioRLSafetyMode.Normal;
+        public AudioRLSafetyMode CurrentSafetyMode { get; private set; }
         public AudioRLPolicyMode CurrentPolicyMode => policyMode;
         public string CurrentPolicyStatus { get; private set; } = "Not initialized";
-        public string CurrentActionName { get; private set; } = "Warmup hold";
-        public string CurrentStateSummary { get; private set; } = "No state observed yet.";
-        public string CurrentSafetyReason { get; private set; } = "No safety decision yet.";
+        public string CurrentActionName { get; private set; } = "Baseline hold";
+        public string CurrentStateSummary { get; private set; } = "Waiting for observations";
+        public string CurrentSafetyReason { get; private set; } = "Waiting for observations";
+        public string CurrentLearningStatus { get; private set; } = "Waiting for a valid delayed outcome";
         public AudioRLAction CurrentRuleAction { get; private set; }
-        public AudioRLAction CurrentResidualAction { get; private set; }
+        public AudioRLAction CurrentProposedAction { get; private set; }
+        // Kept for existing scene bindings. The active controller has no residual.
+        public AudioRLAction CurrentResidualAction => AudioRLAction.NoChange;
         public AudioRLAction CurrentFinalSafeAction { get; private set; }
         public AudioRLRewardBreakdown CurrentRewardBreakdown { get; private set; } = AudioRLRewardBreakdown.Zero;
         public float CurrentReward => CurrentRewardBreakdown.totalReward;
         public int RewardVersion { get; private set; }
-        public int ReplayBufferCount => replayBuffer != null ? replayBuffer.Count : 0;
-        public int DecisionCount => decisionCount;
+        public int ReplayBufferCount => replayBuffer?.Count ?? 0;
+        public int DecisionCount { get; private set; }
+        public int OnlineUpdateCount => policy?.Model.UpdateCount ?? 0;
+        public int InvalidOutcomeCount { get; private set; }
+        public int BaselineObservationCount => baseline?.Count ?? 0;
         public bool IsInitialized => ActiveProfile != null;
         public bool IsUsingProductionPhysiology => CurrentSignal.hasPhysiologyWindow;
-        public string SessionId => sessionId;
+        public string SessionId { get; private set; }
+        public string ModelPath => persistence?.FilePath ?? string.Empty;
+        public string PersistenceStatus { get; private set; } = "Not loaded";
 
-        private readonly Queue<AudioRLAction> recentResidualActions = new Queue<AudioRLAction>(3);
-        private PpoDirectResidualPolicy directPpoPolicy;
-        private PpoSampledResidualPolicy sampledPpoPolicy;
-        private IAudioRLPolicy activeResidualPolicy;
-        private AudioRuleBaselinePolicy rulePolicy;
+        private AudioOnlinePolicy policy;
+        private AudioBanditPersistence persistence;
         private AudioRLSafetyFilter safetyFilter;
         private AudioRLRewardCalculator rewardCalculator;
         private AudioRLReplayBuffer replayBuffer;
-        private PendingDecision pendingDecision;
-        private SignalPacket previousDecisionSignal;
-        private bool hasPreviousDecisionSignal;
+        private AudioSessionBaseline baseline;
+        private PendingDecision pending;
         private AudioRLAction previousSafeAction;
-        private int observationCount;
-        private int decisionCount;
+        private SignalPacket previousObservation;
+        private bool hasPreviousObservation;
+        private bool? productionDomain;
+        private bool adaptiveAllowed = true;
+        private bool outcomesAllowed = true;
+        private string gateReason = string.Empty;
+        private bool hasPlaybackFeedback;
+        private AudioParameters appliedPlayback;
+        private double lastWindowEnd = double.MinValue;
+        private double lastUsedPostEnd = double.MinValue;
+        private double lastDecisionTime = double.NegativeInfinity;
+        private double lastObservationTime = double.NegativeInfinity;
+        private double resumeAfterUtc;
+        private double now;
+        private double utcNow;
         private int noveltyCount;
-        private float nextSimulationDecisionTime;
-        private float lastDecisionUnityTime = float.MinValue;
-        private double lastProcessedWindowEnd = double.MinValue;
-        private string sessionId;
+        private int conditionSegment;
 
-        public void Initialize(AudioProfile profile, PersonalizationStrategy strategy)
+        public void Initialize(AudioProfile profile, PersonalizationStrategy strategy, string relaySessionId = null)
         {
+            InvalidatePendingOutcome("Audio profile/session reinitialized");
+            SaveModel();
             ActiveProfile = profile;
             ActiveStrategy = strategy ?? PersonalizationStrategy.CreateNeutral();
-            PersonalizedBaseline = ActiveStrategy.ApplyTo(profile != null ? profile.ToBaselineParameters() : default);
-            PersonalizedBaseline.NormalizeMix();
-            CurrentParameters = PersonalizedBaseline;
-            CurrentTargetParameters = PersonalizedBaseline;
+            var safeBaseline = ActiveStrategy.ApplyTo(profile != null ? profile.ToBaselineParameters() : default).Clamp01();
+            safeBaseline.musicMix = Mathf.Clamp(safeBaseline.musicMix, 0f, Mathf.Min(maximumMusicMix, 1f - minimumAmbientMix));
+            safeBaseline.ambientMix = 1f - safeBaseline.musicMix;
+            safeBaseline.brightness = Mathf.Min(safeBaseline.brightness, 0.90f);
+            PersonalizedBaseline = safeBaseline;
+            CurrentParameters = CurrentTargetParameters = PersonalizedBaseline;
             CurrentSignal = SignalPacket.CreateDefault();
-            CurrentControllerMode = AdaptiveControllerMode.Initialized;
-            CurrentSafetyMode = AudioRLSafetyMode.Normal;
             CurrentRewardBreakdown = AudioRLRewardBreakdown.Zero;
-            CurrentRuleAction = AudioRLAction.NoChange;
-            CurrentResidualAction = AudioRLAction.NoChange;
-            CurrentFinalSafeAction = AudioRLAction.NoChange;
-            CurrentActionName = "Warmup hold";
-            CurrentSafetyReason = "Waiting for the first complete observation.";
-            CurrentStateSummary = "Waiting for the first complete observation.";
-
-            observationCount = 0;
-            decisionCount = 0;
-            noveltyCount = 0;
-            RewardVersion = 0;
-            hasPreviousDecisionSignal = false;
-            previousSafeAction = AudioRLAction.NoChange;
-            pendingDecision = null;
-            recentResidualActions.Clear();
-            for (int i = 0; i < 3; i++)
-            {
-                recentResidualActions.Enqueue(AudioRLAction.NoChange);
-            }
-
-            nextSimulationDecisionTime = Time.time;
-            lastDecisionUnityTime = float.MinValue;
-            lastProcessedWindowEnd = double.MinValue;
-            sessionId = $"{DateTime.UtcNow:yyyyMMdd_HHmmss}_{SanitizeId(profile != null ? profile.userId : "unknown")}";
-
-            rulePolicy = new AudioRuleBaselinePolicy(lowConfidenceThreshold, highStressThreshold, lowStressThreshold);
-            safetyFilter = new AudioRLSafetyFilter(
-                maximumActionDelta,
-                confidenceFreezeThreshold,
-                lowConfidenceThreshold,
-                signalQualityFreezeThreshold,
-                lowSignalQualityThreshold,
-                maximumBaselineDistance,
-                maximumActionAcceleration,
-                minimumAmbientMix,
-                maximumMusicMix);
+            CurrentRuleAction = CurrentProposedAction = CurrentFinalSafeAction = previousSafeAction = AudioRLAction.NoChange;
+            DecisionCount = RewardVersion = InvalidOutcomeCount = noveltyCount = conditionSegment = 0;
+            productionDomain = null;
+            pending = null;
+            persistence = null;
+            hasPreviousObservation = hasPlaybackFeedback = false;
+            lastWindowEnd = lastUsedPostEnd = double.MinValue;
+            lastDecisionTime = lastObservationTime = double.NegativeInfinity;
+            resumeAfterUtc = 0;
+            baseline = new AudioSessionBaseline();
+            microActionDelta = Mathf.Min(microActionDelta, maximumActionDelta, maximumActionAcceleration);
+            policy = new AudioOnlinePolicy(microActionDelta, explorationAlpha, ridge);
+            safetyFilter = new AudioRLSafetyFilter(maximumActionDelta, confidenceFreezeThreshold, lowConfidenceThreshold,
+                signalQualityFreezeThreshold, lowSignalQualityThreshold, maximumBaselineDistance,
+                maximumActionAcceleration, minimumAmbientMix, maximumMusicMix);
             rewardCalculator = new AudioRLRewardCalculator(rewardWeights, maximumActionDelta);
             replayBuffer = new AudioRLReplayBuffer(replayBufferCapacity);
-
+            SessionId = string.IsNullOrWhiteSpace(relaySessionId)
+                ? DateTime.UtcNow.ToString("yyyyMMdd_HHmmss_fffffff") + "_audio"
+                : relaySessionId;
             transitionLogger ??= GetComponent<AudioRLTransitionLogger>();
-            if (transitionLogger == null)
-            {
-                transitionLogger = gameObject.AddComponent<AudioRLTransitionLogger>();
-            }
-            transitionLogger.StartSession(sessionId);
-
-            directPpoPolicy = new PpoDirectResidualPolicy();
-            sampledPpoPolicy = new PpoSampledResidualPolicy(importedPolicyNeighbors);
-            activeResidualPolicy = null;
-            string directPath = GetDefaultDirectPpoPolicyPath();
-            string sampledPath = GetDefaultImportedPolicyPath();
-            string loadError;
-
-            if (directPpoPolicy.TryLoad(directPath, out string directError))
-            {
-                activeResidualPolicy = directPpoPolicy;
-                CurrentPolicyStatus = policyMode == AudioRLPolicyMode.PpoResidual
-                    ? directPpoPolicy.DisplayName
-                    : "Rule-only mode; direct PPO policy is loaded but inactive";
-                if (logPolicyLoad)
-                {
-                    Debug.Log($"[AudioRLAgent] Loaded {directPpoPolicy.DisplayName} from {directPath}.", this);
-                }
-            }
-            else if (sampledPpoPolicy.TryLoad(sampledPath, out string sampledError))
-            {
-                activeResidualPolicy = sampledPpoPolicy;
-                loadError = $"Direct PPO load failed ({directError}); using sampled fallback.";
-                CurrentPolicyStatus = policyMode == AudioRLPolicyMode.PpoResidual
-                    ? $"{sampledPpoPolicy.DisplayName} | {loadError}"
-                    : "Rule-only mode; sampled PPO fallback is loaded but inactive";
-                Debug.LogWarning($"[AudioRLAgent] {loadError}", this);
-            }
-            else
-            {
-                loadError = $"Direct PPO load failed: {directError}; sampled fallback failed: {sampledError}";
-                CurrentPolicyStatus = $"Rule-only fallback; {loadError}";
-                Debug.LogWarning($"[AudioRLAgent] {CurrentPolicyStatus}", this);
-            }
-        }
-
-        public AudioParameters Evaluate(SignalPacket signal, float deltaTime, bool safeToRun)
-        {
-            if (!IsInitialized)
-            {
-                return CurrentParameters;
-            }
-
-            CurrentSignal = signal;
-            float timeout = signal.hasPhysiologyWindow ? productionSignalTimeoutSeconds : simulationSignalTimeoutSeconds;
-            bool signalIsRecent = signal.IsRecent(timeout);
-
-            if (!safeToRun)
-            {
-                EnterEmergencyHold(signal);
-            }
-            else if (!signalIsRecent)
-            {
-                EnterStaleSignalRecovery(signal);
-            }
-            else if (ShouldProcessObservation(signal))
-            {
-                ProcessObservation(signal, safeToRun, signalIsRecent);
-            }
-
-            float maximumStep = outputSlewPerSecond * Mathf.Max(0f, deltaTime);
-            CurrentParameters = AudioParameters.MoveTowards(CurrentParameters, CurrentTargetParameters, maximumStep);
-            return CurrentParameters.Clamp01();
+            if (transitionLogger == null) transitionLogger = gameObject.AddComponent<AudioRLTransitionLogger>();
+            transitionLogger.StartSession(SessionId);
+            RefreshPolicyStatus();
         }
 
         public void SetPolicyMode(AudioRLPolicyMode mode)
         {
+            if (!Enum.IsDefined(typeof(AudioRLPolicyMode), mode)) throw new ArgumentOutOfRangeException(nameof(mode));
+            if (mode == policyMode) return;
+            InvalidatePendingOutcome("Controller condition changed");
+            SaveModel();
             policyMode = mode;
-            CurrentPolicyStatus = mode == AudioRLPolicyMode.PpoResidual && activeResidualPolicy != null && activeResidualPolicy.IsReady
-                ? activeResidualPolicy.DisplayName
-                : "Rule-only safe baseline";
+            conditionSegment++;
+            noveltyCount = 0;
+            CurrentRewardBreakdown = AudioRLRewardBreakdown.Zero;
+            CurrentTargetParameters = PersonalizedBaseline;
+            previousSafeAction = AudioRLAction.NoChange;
+            CurrentProposedAction = CurrentRuleAction = CurrentFinalSafeAction = AudioRLAction.NoChange;
+            CurrentActionName = "Returning to personalized baseline";
+            lastDecisionTime = double.NegativeInfinity;
+            resumeAfterUtc = UtcSeconds();
+            RefreshPolicyStatus();
         }
 
-        public string GetDefaultDirectPpoPolicyPath()
+        public void SetControlContext(bool canAdapt, bool canObserveOutcomes, string reason)
         {
-            return Path.Combine(
-                Application.streamingAssetsPath,
-                "AdaptiveAudioVR",
-                "Training",
-                directPpoPolicyFileName);
+            if ((adaptiveAllowed && !canAdapt) || (outcomesAllowed && !canObserveOutcomes))
+                InvalidatePendingOutcome(reason);
+            if ((!adaptiveAllowed && canAdapt) || (!outcomesAllowed && canObserveOutcomes))
+                resumeAfterUtc = UtcSeconds();
+            adaptiveAllowed = canAdapt;
+            outcomesAllowed = canObserveOutcomes;
+            gateReason = reason ?? string.Empty;
         }
 
-        public string GetDefaultImportedPolicyPath()
+        public void ObservePlayback(AudioParameters applied)
         {
-            return Path.Combine(
-                Application.streamingAssetsPath,
-                "AdaptiveAudioVR",
-                "Training",
-                importedPolicyFileName);
+            appliedPlayback = applied;
+            hasPlaybackFeedback = true;
         }
 
-        public IReadOnlyList<AudioRLTransition> GetReplaySnapshot()
-        {
-            return replayBuffer != null ? replayBuffer.Snapshot() : Array.Empty<AudioRLTransition>();
-        }
+        public AudioParameters Evaluate(SignalPacket signal, float deltaTime, bool safeToRun) =>
+            EvaluateAt(signal, deltaTime, safeToRun, Time.realtimeSinceStartupAsDouble, UtcSeconds());
 
-        private bool ShouldProcessObservation(SignalPacket signal)
+        // Explicit clocks allow deterministic tests of cadence and reward attribution.
+        public AudioParameters EvaluateAt(SignalPacket signal, float deltaTime, bool safeToRun, double monotonicSeconds, double utcSeconds)
         {
-            if (signal.hasPhysiologyWindow)
+            if (!IsInitialized) return default;
+            now = monotonicSeconds;
+            utcNow = utcSeconds;
+            CurrentSignal = signal;
+            if (hasPlaybackFeedback) CurrentParameters = appliedPlayback;
+            if (!safeToRun)
             {
-                bool hasUnprocessedWindow = signal.windowEnd > lastProcessedWindowEnd + 0.001d;
-                bool cadenceReady = lastDecisionUnityTime == float.MinValue
-                                    || Time.time - lastDecisionUnityTime >= productionMinimumDecisionIntervalSeconds;
-                bool isValidPostWindow = pendingDecision == null
-                                         || signal.IsNonOverlappingAfter(pendingDecision.state.signal);
-                return hasUnprocessedWindow && cadenceReady && isValidPostWindow;
+                Hold("Emergency mute", AudioRLSafetyMode.EmergencyMuted);
+                InvalidatePendingOutcome("Emergency mute");
+                resumeAfterUtc = utcNow;
+                return CurrentParameters;
             }
-
-            return Time.time >= nextSimulationDecisionTime;
-        }
-
-        private void ProcessObservation(SignalPacket signal, bool safeToRun, bool signalIsRecent)
-        {
-            AudioRLState state = BuildState(signal);
-            observationCount++;
-
-            if (pendingDecision != null)
+            float timeout = signal.hasPhysiologyWindow ? productionSignalTimeoutSeconds : simulationSignalTimeoutSeconds;
+            if (Time.time - signal.timestamp > timeout)
             {
-                CompletePendingTransition(state);
+                Hold("Stale signal hold", AudioRLSafetyMode.StaleSignalRecovery);
+                InvalidatePendingOutcome("Stale signal");
+                resumeAfterUtc = utcNow;
+                return CurrentParameters;
             }
-
-            if (observationCount <= warmupObservationCount)
+            if (!AudioOutcomeGate.IsValidWindow(signal, utcNow, lowSignalQualityThreshold, lowConfidenceThreshold, out string invalid))
             {
-                CurrentActionName = $"Warmup hold ({observationCount}/{warmupObservationCount})";
-                CurrentPolicyStatus = ResolvePolicyStatus();
-                CurrentStateSummary = state.ToSummary();
-                CurrentControllerMode = AdaptiveControllerMode.Initialized;
-                CurrentSafetyMode = AudioRLSafetyMode.Normal;
-                CurrentSafetyReason = "Collecting an initial observation before adapting audio.";
-                MarkObservationProcessed(signal);
-                return;
+                Hold(invalid, signal.signalQuality < lowSignalQualityThreshold
+                    ? AudioRLSafetyMode.SignalQualityFreeze : AudioRLSafetyMode.ConfidenceFreeze);
+                InvalidatePendingOutcome(invalid);
+                resumeAfterUtc = utcNow;
+                return CurrentParameters;
             }
-
-            CurrentRuleAction = rulePolicy.GetAction(state, maximumActionDelta);
-            CurrentResidualAction = policyMode == AudioRLPolicyMode.PpoResidual && activeResidualPolicy != null && activeResidualPolicy.IsReady
-                ? activeResidualPolicy.GetResidualAction(state)
-                : AudioRLAction.NoChange;
-
-            AudioRLAction combined = CurrentRuleAction + CurrentResidualAction;
-            AudioRLSafetyResult safety = safetyFilter.Apply(combined, previousSafeAction, state, safeToRun, signalIsRecent);
-            CurrentFinalSafeAction = safety.finalSafeAction;
-            CurrentTargetParameters = safety.safeTarget;
-            CurrentSafetyMode = safety.safetyMode;
-            CurrentSafetyReason = safety.reason;
-            CurrentControllerMode = ResolveControllerMode(signal, safety.safetyMode);
-            CurrentActionName = DescribeAction(CurrentFinalSafeAction, policyMode == AudioRLPolicyMode.PpoResidual && activeResidualPolicy != null && activeResidualPolicy.IsReady);
-            CurrentPolicyStatus = ResolvePolicyStatus();
-            CurrentStateSummary = state.ToSummary();
-
-            if (CurrentResidualAction.MeanAbsoluteMagnitude > maximumActionDelta * 0.20f)
+            EnsureDomain(signal.hasPhysiologyWindow);
+            if (!outcomesAllowed)
             {
-                noveltyCount++;
+                Hold(gateReason, AudioRLSafetyMode.Normal);
+                InvalidatePendingOutcome(gateReason);
+                return CurrentParameters;
             }
-
-            StoreRecentResidual(CurrentResidualAction);
-            pendingDecision = safeToRun
-                ? new PendingDecision
+            if (pending != null)
+            {
+                if (now - pending.startedAt > outcomeTimeoutSeconds)
+                    InvalidatePendingOutcome("No eligible outcome arrived before timeout");
+                else if (double.IsPositiveInfinity(pending.eligiblePostStartUtc) && AtTarget())
                 {
-                    state = state.Snapshot(),
-                    ruleAction = CurrentRuleAction,
-                    residualAction = CurrentResidualAction,
-                    safeAction = CurrentFinalSafeAction,
-                    policyMode = policyMode.ToString(),
-                    policyStatus = CurrentPolicyStatus,
-                    controllerMode = CurrentControllerMode.ToString(),
-                    safetyMode = CurrentSafetyMode.ToString(),
-                    safetyReason = CurrentSafetyReason
+                    pending.eligiblePostStartUtc = utcNow + (signal.hasPhysiologyWindow ? settlingSeconds : 0);
+                    pending.settledAt = now + (signal.hasPhysiologyWindow ? settlingSeconds : 0);
                 }
-                : null;
-
-            previousSafeAction = CurrentFinalSafeAction;
-            decisionCount++;
-            MarkObservationProcessed(signal);
+            }
+            bool fresh = signal.hasPhysiologyWindow ? signal.windowEnd > lastWindowEnd
+                : now - lastObservationTime >= simulationDecisionIntervalSeconds;
+            if (fresh)
+            {
+                lastObservationTime = now;
+                if (signal.hasPhysiologyWindow) lastWindowEnd = signal.windowEnd;
+                AudioRLState state = BuildState(signal);
+                CurrentStateSummary = state.ToSummary();
+                if (baseline.Count < Mathf.Max(2, warmupObservationCount)) baseline.Add(signal);
+                if (pending != null && now >= pending.settledAt
+                    && AudioOutcomeGate.CanAttribute(pending.state.signal, signal, pending.eligiblePostStartUtc, lastUsedPostEnd, out _))
+                    CompleteOutcome(state);
+                bool freshAfterResume = !signal.hasPhysiologyWindow || signal.windowStart >= resumeAfterUtc;
+                double interval = signal.hasPhysiologyWindow ? productionMinimumDecisionIntervalSeconds : simulationDecisionIntervalSeconds;
+                if (pending == null && adaptiveAllowed && baseline.Count >= Mathf.Max(2, warmupObservationCount)
+                    && freshAfterResume && now - lastDecisionTime >= interval && AtTarget())
+                    Decide(state);
+                previousObservation = signal;
+                hasPreviousObservation = true;
+            }
+            CurrentParameters = AudioParameters.MoveTowards(CurrentParameters, CurrentTargetParameters,
+                outputSlewPerSecond * Mathf.Max(0, deltaTime));
+            RefreshPolicyStatus();
+            return CurrentParameters;
         }
 
-        private void CompletePendingTransition(AudioRLState nextState)
+        public IReadOnlyList<AudioRLTransition> GetReplaySnapshot() => replayBuffer?.Snapshot() ?? Array.Empty<AudioRLTransition>();
+
+        public void InvalidatePendingOutcome(string reason)
         {
-            CurrentRewardBreakdown = rewardCalculator.Compute(
-                pendingDecision.state,
-                nextState,
-                pendingDecision.safeAction,
-                noveltyCount);
+            CurrentLearningStatus = "No update: " + reason;
+            resumeAfterUtc = Math.Max(resumeAfterUtc, UtcSeconds());
+            if (pending == null) return;
+            LogOutcome(null, false, false, reason);
+            InvalidOutcomeCount++;
+            pending = null;
+        }
 
-            AudioRLTransition transition = new AudioRLTransition
+        private void Decide(AudioRLState state)
+        {
+            var eligible = new List<int> { 0 };
+            for (int arm = 1; arm < AudioActionCatalog.Count; arm++)
             {
-                sessionId = sessionId,
-                userId = ActiveProfile != null ? ActiveProfile.userId : "unknown",
-                createdUtc = DateTime.UtcNow.ToString("O"),
-                state = pendingDecision.state.Snapshot(),
-                ruleBaselineAction = pendingDecision.ruleAction,
-                residualPolicyAction = pendingDecision.residualAction,
-                finalSafeAction = pendingDecision.safeAction,
-                reward = CurrentRewardBreakdown,
-                nextState = nextState.Snapshot(),
-                policyMode = pendingDecision.policyMode,
-                policyStatus = pendingDecision.policyStatus,
-                controllerMode = pendingDecision.controllerMode,
-                safetyMode = pendingDecision.safetyMode,
-                safetyReason = pendingDecision.safetyReason,
-                usedProductionPhysiology = pendingDecision.state.signal.hasPhysiologyWindow && nextState.signal.hasPhysiologyWindow
+                var action = AudioActionCatalog.Action(arm, microActionDelta);
+                var filtered = safetyFilter.Apply(action, previousSafeAction, state, true, true);
+                if (!filtered.interventionApplied && AudioActionCatalog.Same(action, filtered.finalSafeAction)) eligible.Add(arm);
+            }
+            double[] features = AudioBanditFeatures.Encode(state, maximumActionDelta);
+            bool learningEnabled = allowOnlineLearning && (state.isProductionWindow || allowSimulationLearning);
+            AudioBanditSelection selected = policy.Select(policyMode, state, features, eligible, explore: learningEnabled);
+            CurrentProposedAction = AudioActionCatalog.Action(selected.Arm, microActionDelta);
+            CurrentRuleAction = policyMode == AudioRLPolicyMode.RuleBasedAdaptive ? CurrentProposedAction : AudioRLAction.NoChange;
+            var safe = safetyFilter.Apply(CurrentProposedAction, previousSafeAction, state, true, true);
+            CurrentFinalSafeAction = safe.finalSafeAction;
+            CurrentTargetParameters = safe.safeTarget;
+            CurrentSafetyMode = safe.safetyMode;
+            CurrentSafetyReason = safe.reason;
+            CurrentControllerMode = ResolveControllerMode(state.signal);
+            int executedArm = AudioActionCatalog.Match(safe.finalSafeAction, microActionDelta);
+            CurrentActionName = AudioActionCatalog.Name(executedArm);
+            pending = new PendingDecision
+            {
+                id = SessionId + "-" + (DecisionCount + 1), state = state.Snapshot(), features = features,
+                proposedArm = selected.Arm, executedArm = executedArm, action = safe.finalSafeAction,
+                proposal = CurrentProposedAction, mode = policyMode, segment = conditionSegment,
+                safety = safe, selection = selected, startedAt = now,
+                eligiblePostStartUtc = double.PositiveInfinity, settledAt = double.PositiveInfinity
             };
+            if (safe.finalSafeAction.MaximumAbsoluteMagnitude > 0.00001f) noveltyCount++;
+            previousSafeAction = safe.finalSafeAction;
+            lastDecisionTime = now;
+            DecisionCount++;
+            CurrentLearningStatus = "Awaiting transition completion and a fresh delayed outcome";
+            LogOutcome(null, false, false, "Pending delayed outcome", "decision");
+        }
 
-            replayBuffer.Add(transition);
-            transitionLogger?.Log(transition);
+        private void CompleteOutcome(AudioRLState next)
+        {
+            CurrentRewardBreakdown = rewardCalculator.Compute(pending.state, next, pending.action, noveltyCount, baseline);
+            bool update = pending.mode == AudioRLPolicyMode.PersonalizedBandit && allowOnlineLearning
+                && (next.isProductionWindow || allowSimulationLearning) && pending.executedArm >= 0
+                && !pending.safety.interventionApplied;
+            if (update) policy.Model.Observe(pending.executedArm, pending.features, CurrentReward);
+            CurrentLearningStatus = update ? "Valid delayed outcome: personalized LinUCB updated"
+                : "Valid delayed outcome: evaluation only; model unchanged";
+            LogOutcome(next, true, update, CurrentLearningStatus);
+            if (next.signal.hasPhysiologyWindow) lastUsedPostEnd = next.signal.windowEnd;
             RewardVersion++;
-            pendingDecision = null;
+            pending = null;
+            if (update) SaveModel();
         }
 
-        private AudioRLState BuildState(SignalPacket signal)
+        private void LogOutcome(AudioRLState next, bool valid, bool updated, string reason, string eventType = "outcome")
         {
-            float stressTrend = hasPreviousDecisionSignal ? signal.stress - previousDecisionSignal.stress : 0f;
-            float confidenceTrend = hasPreviousDecisionSignal ? signal.confidence - previousDecisionSignal.confidence : 0f;
-            float heartRateTrend = hasPreviousDecisionSignal && signal.hasPhysiologyWindow
-                ? signal.heartRate - previousDecisionSignal.heartRate
-                : 0f;
-            float rmssdTrend = hasPreviousDecisionSignal && signal.hasPhysiologyWindow
-                ? signal.rmssd - previousDecisionSignal.rmssd
-                : 0f;
-
-            return new AudioRLState
+            var transition = new AudioRLTransition
             {
-                userId = ActiveProfile != null ? ActiveProfile.userId : "unknown",
-                signal = signal,
-                stressTrend = stressTrend,
-                confidenceTrend = confidenceTrend,
-                heartRateTrend = heartRateTrend,
-                rmssdTrend = rmssdTrend,
-                currentParameters = CurrentParameters,
-                personalizedBaseline = PersonalizedBaseline,
-                preferenceEncoding = AudioRLStateEncoder.BuildPreferenceEncoding(ActiveProfile, PersonalizedBaseline),
-                recentMeanResidualAction = GetMeanRecentResidual(),
-                sessionProgress = Mathf.Clamp01(decisionCount / (float)Mathf.Max(1, episodeHorizon)),
-                timeSinceLastActionSeconds = lastDecisionUnityTime == float.MinValue ? 0f : Mathf.Max(0f, Time.time - lastDecisionUnityTime),
-                noveltyCount = noveltyCount,
-                decisionIndex = decisionCount,
-                isProductionWindow = signal.hasPhysiologyWindow
+                sessionId = SessionId, userId = ActiveProfile.userId, createdUtc = DateTime.UtcNow.ToString("O"),
+                eventType = eventType,
+                decisionId = pending.id, conditionSegment = pending.segment,
+                state = pending.state.Snapshot(), proposedPolicyAction = pending.proposal,
+                ruleBaselineAction = pending.mode == AudioRLPolicyMode.RuleBasedAdaptive ? pending.proposal : AudioRLAction.NoChange,
+                finalSafeAction = pending.action, reward = valid ? CurrentRewardBreakdown : null, nextState = next?.Snapshot(),
+                policyMode = pending.mode.ToString(), policyStatus = pending.mode + " / whole controller",
+                controllerMode = CurrentControllerMode.ToString(), safetyMode = pending.safety.safetyMode.ToString(),
+                safetyReason = pending.safety.reason, usedProductionPhysiology = pending.state.isProductionWindow,
+                rewardValid = valid, onlineUpdateApplied = updated, outcomeReason = reason,
+                proposedArm = pending.proposedArm, executedArm = pending.executedArm,
+                featureSchema = AudioBanditFeatures.Schema, contextFeatures = (double[])pending.features.Clone(),
+                predictedReward = pending.selection.Mean, uncertainty = pending.selection.Uncertainty,
+                selectionScore = pending.selection.Score, onlineUpdateCount = OnlineUpdateCount,
+                eligiblePostStartUtc = double.IsPositiveInfinity(pending.eligiblePostStartUtc) ? 0 : pending.eligiblePostStartUtc
             };
+            if (eventType == "outcome") replayBuffer.Add(transition);
+            transitionLogger?.Log(transition);
         }
 
-        private void EnterEmergencyHold(SignalPacket signal)
+        private void EnsureDomain(bool production)
+        {
+            if (productionDomain == production) return;
+            InvalidatePendingOutcome("Signal domain changed");
+            SaveModel();
+            productionDomain = production;
+            baseline = new AudioSessionBaseline();
+            hasPreviousObservation = false;
+            lastWindowEnd = lastUsedPostEnd = double.MinValue;
+            lastDecisionTime = lastObservationTime = double.NegativeInfinity;
+            previousSafeAction = AudioRLAction.NoChange;
+            policy = new AudioOnlinePolicy(microActionDelta, explorationAlpha, ridge);
+            float[] settings = { microActionDelta, maximumActionDelta, maximumActionAcceleration, maximumBaselineDistance,
+                lowConfidenceThreshold, lowSignalQualityThreshold, minimumAmbientMix, maximumMusicMix,
+                explorationAlpha, ridge, productionMinimumDecisionIntervalSeconds, settlingSeconds, outcomeTimeoutSeconds };
+            string configuration = JsonUtility.ToJson(rewardWeights) + "|" + string.Join("|", Array.ConvertAll(settings,
+                value => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+            persistence = new AudioBanditPersistence(Path.Combine(Application.persistentDataPath, "AudioOnlineModels"),
+                ActiveProfile.userId, environmentId, !production, configuration);
+            if (persistPersonalizedModel && !string.IsNullOrWhiteSpace(ActiveProfile.userId))
+            {
+                persistence.TryLoad(policy.Model, out string status);
+                PersistenceStatus = status;
+            }
+        }
+
+        private AudioRLState BuildState(SignalPacket signal) => new AudioRLState
+        {
+            userId = ActiveProfile.userId, signal = signal,
+            stressTrend = hasPreviousObservation ? signal.stress - previousObservation.stress : 0,
+            confidenceTrend = hasPreviousObservation ? signal.confidence - previousObservation.confidence : 0,
+            heartRateTrend = hasPreviousObservation && signal.hasHeartRate && previousObservation.hasHeartRate
+                ? signal.heartRate - previousObservation.heartRate : 0,
+            rmssdTrend = hasPreviousObservation && signal.hasRmssd && previousObservation.hasRmssd
+                ? signal.rmssd - previousObservation.rmssd : 0,
+            currentParameters = CurrentParameters, personalizedBaseline = PersonalizedBaseline,
+            preferenceEncoding = AudioRLStateEncoder.BuildPreferenceEncoding(ActiveProfile, PersonalizedBaseline),
+            recentSafeAction = previousSafeAction,
+            sessionProgress = Mathf.Clamp01(DecisionCount / (float)Mathf.Max(1, episodeHorizon)),
+            timeSinceLastActionSeconds = double.IsNegativeInfinity(lastDecisionTime) ? 0 : (float)(now - lastDecisionTime),
+            noveltyCount = noveltyCount, decisionIndex = DecisionCount, isProductionWindow = signal.hasPhysiologyWindow
+        };
+
+        private bool AtTarget() => AudioActionCatalog.Same(AudioRLAction.Between(CurrentParameters, CurrentTargetParameters), AudioRLAction.NoChange, 0.002f);
+
+        private void Hold(string reason, AudioRLSafetyMode mode)
         {
             CurrentTargetParameters = CurrentParameters;
-            CurrentRuleAction = AudioRLAction.NoChange;
-            CurrentResidualAction = AudioRLAction.NoChange;
-            CurrentFinalSafeAction = AudioRLAction.NoChange;
-            CurrentControllerMode = AdaptiveControllerMode.LowConfidenceDampened;
-            CurrentSafetyMode = AudioRLSafetyMode.EmergencyMuted;
-            CurrentSafetyReason = "Emergency mute is active; pending reward attribution was cancelled.";
-            CurrentActionName = "Emergency hold";
-            CurrentStateSummary = BuildState(signal).ToSummary();
-            previousSafeAction = AudioRLAction.NoChange;
-            pendingDecision = null;
+            CurrentProposedAction = CurrentRuleAction = CurrentFinalSafeAction = previousSafeAction = AudioRLAction.NoChange;
+            CurrentActionName = "Hold: " + reason;
+            CurrentSafetyMode = mode;
+            CurrentControllerMode = mode == AudioRLSafetyMode.Normal ? AdaptiveControllerMode.Initialized
+                : AdaptiveControllerMode.LowConfidenceDampened;
+            CurrentSafetyReason = reason;
         }
 
-        private void EnterStaleSignalRecovery(SignalPacket signal)
+        private void RefreshPolicyStatus()
         {
-            AudioRLState state = BuildState(signal);
-            AudioRLSafetyResult recovery = safetyFilter.Apply(
-                AudioRLAction.NoChange,
-                previousSafeAction,
-                state,
-                true,
-                false);
-            CurrentTargetParameters = recovery.safeTarget;
-            CurrentRuleAction = AudioRLAction.NoChange;
-            CurrentResidualAction = AudioRLAction.NoChange;
-            CurrentFinalSafeAction = recovery.finalSafeAction;
-            CurrentControllerMode = AdaptiveControllerMode.LowConfidenceDampened;
-            CurrentSafetyMode = recovery.safetyMode;
-            CurrentSafetyReason = recovery.reason + " Pending reward attribution was cancelled.";
-            CurrentActionName = "Stale signal baseline recovery";
-            CurrentStateSummary = state.ToSummary();
-            previousSafeAction = recovery.finalSafeAction;
-            pendingDecision = null;
+            string source = productionDomain == true ? "physiology" : "simulation";
+            bool learningEnabled = allowOnlineLearning && (productionDomain == true || allowSimulationLearning);
+            CurrentPolicyStatus = policyMode == AudioRLPolicyMode.PersonalizedBandit
+                ? $"Personalized LinUCB | {source} | Updates {OnlineUpdateCount} | {(learningEnabled ? "online" : "evaluation frozen")}"
+                : policyMode + " | evaluation only";
         }
 
-        private void MarkObservationProcessed(SignalPacket signal)
+        private static AdaptiveControllerMode ResolveControllerMode(SignalPacket signal) => signal.stress >= 0.65f
+            ? AdaptiveControllerMode.HighStressAdaptive : signal.stress <= 0.35f
+                ? AdaptiveControllerMode.LowStressCalming : AdaptiveControllerMode.MidRangeStabilizing;
+
+        private void SaveModel()
         {
-            previousDecisionSignal = signal;
-            hasPreviousDecisionSignal = true;
-            lastDecisionUnityTime = Time.time;
-            nextSimulationDecisionTime = Time.time + Mathf.Max(0.5f, simulationDecisionIntervalSeconds);
-            if (signal.hasPhysiologyWindow)
-            {
-                lastProcessedWindowEnd = signal.windowEnd;
-            }
+            if (!persistPersonalizedModel || persistence == null || policy == null || policy.Model.UpdateCount == 0) return;
+            persistence.TrySave(policy.Model, out string status);
+            PersistenceStatus = status;
         }
 
-        private void StoreRecentResidual(AudioRLAction action)
+        private void OnDisable()
         {
-            if (recentResidualActions.Count >= 3)
-            {
-                recentResidualActions.Dequeue();
-            }
-
-            recentResidualActions.Enqueue(action);
+            InvalidatePendingOutcome("Audio agent disabled");
+            SaveModel();
         }
 
-        private AudioRLAction GetMeanRecentResidual()
-        {
-            if (recentResidualActions.Count == 0)
-            {
-                return AudioRLAction.NoChange;
-            }
+        private static double UtcSeconds() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000d;
 
-            float[] mean = new float[7];
-            foreach (AudioRLAction action in recentResidualActions)
-            {
-                float[] values = action.ToArray();
-                for (int i = 0; i < mean.Length; i++)
-                {
-                    mean[i] += values[i];
-                }
-            }
-
-            for (int i = 0; i < mean.Length; i++)
-            {
-                mean[i] /= recentResidualActions.Count;
-            }
-
-            return AudioRLAction.FromArray(mean);
-        }
-
-        private string ResolvePolicyStatus()
-        {
-            if (policyMode == AudioRLPolicyMode.RuleOnly)
-            {
-                return "Rule-only safe baseline";
-            }
-
-            return activeResidualPolicy != null && activeResidualPolicy.IsReady
-                ? activeResidualPolicy.DisplayName
-                : "Rule-only fallback; PPO-derived residual policy unavailable";
-        }
-
-        private static AdaptiveControllerMode ResolveControllerMode(SignalPacket signal, AudioRLSafetyMode safetyMode)
-        {
-            if (safetyMode == AudioRLSafetyMode.ConfidenceFreeze
-                || safetyMode == AudioRLSafetyMode.LowConfidenceDampened
-                || safetyMode == AudioRLSafetyMode.SignalQualityFreeze
-                || safetyMode == AudioRLSafetyMode.LowSignalQualityDampened
-                || safetyMode == AudioRLSafetyMode.StaleSignalRecovery)
-            {
-                return AdaptiveControllerMode.LowConfidenceDampened;
-            }
-
-            if (signal.stress >= 0.65f)
-            {
-                return AdaptiveControllerMode.HighStressAdaptive;
-            }
-
-            if (signal.stress <= 0.35f)
-            {
-                return AdaptiveControllerMode.LowStressCalming;
-            }
-
-            return AdaptiveControllerMode.MidRangeStabilizing;
-        }
-
-        private static string DescribeAction(AudioRLAction action, bool usedPpo)
-        {
-            float[] values = action.ToArray();
-            string[] positive = { "Increase intensity", "Increase density", "Increase brightness", "Increase tempo", "Lengthen fade", "Increase music", "Increase ambience" };
-            string[] negative = { "Reduce intensity", "Reduce density", "Darken", "Reduce tempo", "Shorten fade", "Reduce music", "Reduce ambience" };
-            int dominantIndex = 0;
-            float dominantMagnitude = 0f;
-            for (int i = 0; i < values.Length; i++)
-            {
-                float magnitude = Mathf.Abs(values[i]);
-                if (magnitude > dominantMagnitude)
-                {
-                    dominantMagnitude = magnitude;
-                    dominantIndex = i;
-                }
-            }
-
-            string prefix = usedPpo ? "PPO residual + rule: " : "Rule: ";
-            if (dominantMagnitude <= 0.004f)
-            {
-                return prefix + "hold stable";
-            }
-
-            return prefix + (values[dominantIndex] >= 0f ? positive[dominantIndex] : negative[dominantIndex]);
-        }
-
-        private static string SanitizeId(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return "unknown";
-            }
-
-            foreach (char invalid in Path.GetInvalidFileNameChars())
-            {
-                value = value.Replace(invalid, '_');
-            }
-
-            return value.Replace(' ', '_');
-        }
-
-        [Serializable]
         private sealed class PendingDecision
         {
+            public string id;
             public AudioRLState state;
-            public AudioRLAction ruleAction;
-            public AudioRLAction residualAction;
-            public AudioRLAction safeAction;
-            public string policyMode;
-            public string policyStatus;
-            public string controllerMode;
-            public string safetyMode;
-            public string safetyReason;
+            public double[] features;
+            public int proposedArm;
+            public int executedArm;
+            public AudioRLAction action;
+            public AudioRLAction proposal;
+            public AudioRLPolicyMode mode;
+            public int segment;
+            public AudioRLSafetyResult safety;
+            public AudioBanditSelection selection;
+            public double startedAt;
+            public double eligiblePostStartUtc;
+            public double settledAt;
         }
     }
 }

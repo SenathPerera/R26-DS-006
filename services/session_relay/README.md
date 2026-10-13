@@ -10,6 +10,15 @@ The relay does not start a paired session immediately. It waits for Quest to
 publish its validated `ready` phase, then observes a 30-second initialization
 delay before sending the single `start` command.
 
+Mobile also sends `audioPreferences` in `POST /sessions`: schema version
+`mindsync-audio-preferences-v1`, a complete `longTerm` audio profile,
+`preferenceMode` (`usual` or `adjust`), and a `sessionOverride` profile only
+for `adjust`. The relay validates and forwards the bundle in
+`session_configuration` alongside the stable participant pseudonym and scene.
+Audio on Quest waits for that bundle before preparing its model or requesting
+Lyria music. Older clients without the optional field can still use the
+visual relay, but cannot start integrated personalized audio.
+
 When Quest publishes `completed` or `aborted`, the relay finalizes that
 session's append-only visual log. Mobile downloads the snapshot from
 `GET /sessions/{sessionId}/visual-log` and confirms the exact message count and

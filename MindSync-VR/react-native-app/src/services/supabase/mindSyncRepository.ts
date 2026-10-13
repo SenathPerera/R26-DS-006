@@ -1,5 +1,7 @@
 import type {User} from '@supabase/supabase-js';
+import {audioPreferencesFromOnboarding} from '../preferences/audioPreferences';
 import type {
+  AudioControlPreferences,
   MeditationSession,
   OnboardingProfile,
   QuestionnaireSubmission,
@@ -81,6 +83,7 @@ class MindSyncRepository {
       goals: profile.goals,
       meditation_style: profile.meditationStyle,
       audio_preferences: profile.audioPreferences,
+      audio_control_preferences: JSON.parse(JSON.stringify(audioPreferencesFromOnboarding(profile))) as Json,
       environment_preferences: profile.environmentPreferences,
       sensitivities: profile.sensitivities,
       preferred_illumination: profile.preferredIllumination,
@@ -119,6 +122,13 @@ class MindSyncRepository {
     return profileFromRow(updated.data);
   }
 
+  async updateAudioPreferences(userId: string, preferences: AudioControlPreferences): Promise<void> {
+    const {error} = await getSupabaseClient().from('onboarding_profiles')
+      .update({audio_control_preferences: JSON.parse(JSON.stringify(preferences)) as Json})
+      .eq('user_id', userId).select('user_id').single();
+    if (error) throw error;
+  }
+
   async saveSession(userId: string, session: MeditationSession, status = 'ready'): Promise<void> {
     const row: SessionInsert = {
       id: session.id,
@@ -135,6 +145,8 @@ class MindSyncRepository {
       session_context: session.sessionContext
         ? JSON.parse(JSON.stringify(session.sessionContext)) as Json
         : null,
+      effective_audio_preference: session.effectiveAudioPreference
+        ? JSON.parse(JSON.stringify(session.effectiveAudioPreference)) as Json : null,
       effective_environment_preference: session.effectiveEnvironmentPreference
         ? JSON.parse(JSON.stringify(session.effectiveEnvironmentPreference)) as Json
         : null,
@@ -183,7 +195,7 @@ class MindSyncRepository {
     const durationMinutes = Math.max(0, Math.ceil(
       (record.completedAtUnixSeconds - record.startedAtUnixSeconds) / 60,
     ));
-    await this.saveSession(userId, {
+    const completion = {
       id: record.sessionId,
       title: 'Adaptive VR meditation',
       date: new Date(record.startedAtUnixSeconds * 1000).toISOString().slice(0, 10),
@@ -194,7 +206,17 @@ class MindSyncRepository {
       moodBefore: 0,
       moodAfter: 0,
       validationComplete: true,
-    }, record.visual.completionPhase === 'completed' ? 'complete' : 'aborted');
+    };
+    const status = record.visual.completionPhase === 'completed' ? 'complete' : 'aborted';
+    const completionUpdate = await getSupabaseClient().from('meditation_sessions')
+      .update({
+        duration_minutes: durationMinutes,
+        completion_rate: completion.completionRate,
+        validation_complete: true,
+        status,
+      }).eq('id', record.sessionId).eq('user_id', userId).select('id').maybeSingle();
+    if (completionUpdate.error) throw completionUpdate.error;
+    if (!completionUpdate.data) await this.saveSession(userId, completion, status);
     const {error} = await getSupabaseClient().from('complete_session_records').upsert({
       record_id: record.recordId,
       user_id: userId,

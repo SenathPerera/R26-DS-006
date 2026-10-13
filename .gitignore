@@ -68,6 +68,10 @@ Thumbs.db
 /.demo-runtime/
 /docs/LOCAL_FULL_SYSTEM_DEMO.md
 
+# Local thesis drafts, page renders, screenshots, and verification outputs
+/.codex_tmp/
+/docs/thesis/
+
 # Python environments, caches, and local secrets
 **/.env
 **/.venv/

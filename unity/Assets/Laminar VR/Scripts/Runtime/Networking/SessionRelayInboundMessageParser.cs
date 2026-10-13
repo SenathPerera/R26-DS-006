@@ -194,7 +194,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                     envelope.payload.sessionId,
                     envelope.payload.participantPseudonym,
                     envelope.payload.sceneId,
-                    preference);
+                    preference,
+                    json);
                 message = SessionRelayInboundMessage.ForConfiguration(
                     configuration);
                 return true;

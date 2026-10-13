@@ -72,6 +72,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         public string LastInboundRejection { get; private set; } = string.Empty;
 
+        public SessionRelayConfigurationMessage CurrentConfiguration { get; private set; }
+
+        public event Action<SessionRelayConfigurationMessage> SessionConfigurationAccepted;
+
         public SessionTransportConnectionState ConnectionState =>
             GetActiveTransport()?.ConnectionState
             ?? SessionTransportConnectionState.Disconnected;
@@ -221,6 +225,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 {
                     DetachTransport(transport);
                     acceptedSessionId = null;
+                    CurrentConfiguration = null;
                     terminalQuestStateDeferred = false;
                     ClearPendingQuestStates();
                 }
@@ -343,11 +348,23 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 return;
             }
 
+            if (CurrentConfiguration != null
+                && !string.Equals(
+                    CurrentConfiguration.ParticipantPseudonym,
+                    configuration.ParticipantPseudonym,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("participant-context-conflict");
+                return;
+            }
+
             acceptedSessionId = configuration.SessionId;
             visualSessionBoundary.ReceiveSessionContext(
                 configuration.SessionId,
                 configuration.ParticipantPseudonym,
                 configuration.PreferredEnvironment);
+            CurrentConfiguration = configuration;
+            SessionConfigurationAccepted?.Invoke(configuration);
         }
 
         private void ProcessCommand(SessionRelayCommandMessage command)
@@ -679,6 +696,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             DetachTransport(transport);
             acceptedSessionId = null;
+            CurrentConfiguration = null;
             terminalQuestStateDeferred = false;
             ClearPendingQuestStates();
             visualSessionBoundary?.ReceiveConnectionState(

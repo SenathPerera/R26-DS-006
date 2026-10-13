@@ -33,10 +33,12 @@ namespace AdaptiveAudioVR.Profile
                 baseBrightness = Mathf.Clamp01(ResolveBrightness(preferences.brightnessPreference) + (GetMoodBrightnessOffset(preferences.mood) * 0.35f) + (GetAmbienceBrightnessOffset(preferences.preferredAmbience) * 0.25f) - (preferences.avoidDissonance ? 0.03f : 0f)),
                 baseTempo = ResolveTempo(preferences.tempoPreference),
                 baseFade = ResolveFade(preferences.tempoPreference, preferences.noveltyTolerance, preferences.reverbPreference),
-                baseAmbientMix = ResolveAmbientMix(preferences.ambientMusicBalance),
-                baseMusicMix = 1f - ResolveAmbientMix(preferences.ambientMusicBalance),
+                baseAmbientMix = Mathf.Clamp01(ResolveAmbientMix(preferences.ambientMusicBalance)
+                    + GetNatureMixOffset(preferences.natureSoundPreference)),
+                baseMusicMix = 1f - Mathf.Clamp01(ResolveAmbientMix(preferences.ambientMusicBalance)
+                    + GetNatureMixOffset(preferences.natureSoundPreference)),
                 rhythmAmount = ResolveLevel(preferences.rhythmPreference, 0.2f, 0.5f, 0.8f),
-                natureLevel = ResolveLevel(preferences.natureSoundPreference, 0f, 0.55f, 0.85f),
+                natureLevel = ResolveNatureLevel(preferences.natureSoundPreference),
                 reverbAmount = ResolveLevel(preferences.reverbPreference, 0.2f, 0.5f, 0.8f),
                 volumeLevel = ResolveLevel(preferences.volumePreference, 0.25f, 0.55f, 0.8f),
                 relaxationResponsiveness = ResolveRelaxationResponsiveness(preferences),
@@ -123,6 +125,22 @@ namespace AdaptiveAudioVR.Profile
                 default:
                     return low;
             }
+        }
+
+        private static float ResolveNatureLevel(string value)
+        {
+            switch (value)
+            {
+                case "none": return 0f;
+                case "low": return 0.25f;
+                case "high": return 0.85f;
+                default: return 0.55f;
+            }
+        }
+
+        private static float GetNatureMixOffset(string value)
+        {
+            return (ResolveNatureLevel(value) - 0.5f) * 0.15f;
         }
 
         private static float ResolveRelaxationResponsiveness(UserPreferences preferences)

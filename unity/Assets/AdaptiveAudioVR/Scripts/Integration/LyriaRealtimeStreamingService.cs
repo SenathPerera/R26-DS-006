@@ -149,6 +149,11 @@ namespace AdaptiveAudioVR.Integration
             _ = StopRealtimeStreamAsync();
         }
 
+        public void StopForParticipantChange()
+        {
+            if (IsRealtimeActive) _ = DisconnectAsync(restoreClip: false);
+        }
+
         public void PushCurrentFrameToRealtime()
         {
             _ = SendCurrentFrameSyncAsync(autoPlay: IsStreaming || !IsPaused);
@@ -408,7 +413,7 @@ namespace AdaptiveAudioVR.Integration
             promptSignature = string.Empty;
 
             ResolveReferences();
-            if (bootstrap == null || bootstrap.CurrentLyriaFrame == null)
+            if (bootstrap == null || !bootstrap.IsPrepared || bootstrap.CurrentLyriaFrame == null)
             {
                 return false;
             }

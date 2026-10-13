@@ -123,6 +123,7 @@ namespace AdaptiveAudioVR.Integration
         private string pendingAdaptiveSignature = string.Empty;
         private string pendingAdaptiveReason = string.Empty;
         private float pendingAdaptiveSince = float.NegativeInfinity;
+        private bool hasStarted;
 
         private void Awake()
         {
@@ -133,6 +134,7 @@ namespace AdaptiveAudioVR.Integration
 
         private void Start()
         {
+            hasStarted = true;
             ResolveReferences();
 
             if (audioMixerController != null)
@@ -350,6 +352,12 @@ namespace AdaptiveAudioVR.Integration
             if (bootstrap == null || audioMixerController == null)
             {
                 LastStatusMessage = "Generation unavailable because references are missing.";
+                return false;
+            }
+
+            if (!bootstrap.IsPrepared)
+            {
+                LastStatusMessage = "Waiting for participant audio preferences.";
                 return false;
             }
 
@@ -1144,6 +1152,11 @@ namespace AdaptiveAudioVR.Integration
             frame.Normalize();
 
             var builder = new StringBuilder();
+            if (!string.IsNullOrWhiteSpace(bootstrap?.RelaySessionId))
+            {
+                builder.Append(bootstrap.RelaySessionId);
+                builder.Append('|');
+            }
             builder.Append(frame.environmentId.Trim().ToLowerInvariant());
             builder.Append('|');
             builder.Append(frame.strategyName.Trim().ToLowerInvariant());
@@ -1179,6 +1192,26 @@ namespace AdaptiveAudioVR.Integration
             }
 
             return builder.ToString();
+        }
+
+        public void ResetForParticipantSession()
+        {
+            StopAllCoroutines();
+            IsGenerating = false;
+            IsRefreshingBackendHealth = false;
+            UsingGeneratedMeditationClip = false;
+            lastAppliedPromptSignature = string.Empty;
+            ClearPendingAdaptiveCandidate();
+            if (standbyClip != null) Destroy(standbyClip);
+            standbyClip = null;
+            standbyClipPath = string.Empty;
+            standbyContext = default;
+            audioMixerController?.HoldSessionPlayback();
+            if (originalMeditationClip != null)
+                audioMixerController?.ReplaceMeditationClip(originalMeditationClip, false);
+            LastStatusMessage = "Waiting for the participant's personalized meditation clip.";
+            if (hasStarted && requireGeneratedClipBeforeSession && isActiveAndEnabled)
+                StartCoroutine(PrepareRequiredInitialClipCoroutine());
         }
 
         private void ClearPendingAdaptiveCandidate()

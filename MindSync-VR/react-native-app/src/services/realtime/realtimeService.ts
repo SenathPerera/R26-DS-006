@@ -1,6 +1,7 @@
 import {environment} from '../../config/environment';
 import {
   PreferredEnvironment,
+  AudioPreferenceBundle,
   PreparedVrSession,
   RelayEnvelope,
   VisualLogSnapshot,
@@ -15,6 +16,7 @@ export type CreatePreparedSessionInput = {
   participantPseudonym: string;
   sceneId: string;
   preferredEnvironment: PreferredEnvironment;
+  audioPreferences?: AudioPreferenceBundle;
 };
 
 type RelayHandlers = {
