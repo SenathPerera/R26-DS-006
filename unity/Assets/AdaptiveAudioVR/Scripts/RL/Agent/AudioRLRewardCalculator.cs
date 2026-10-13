@@ -34,6 +34,7 @@ namespace AdaptiveAudioVR.RL.Agent
         public float reliabilityWeight;
 
         public static AudioRLRewardBreakdown Zero => new AudioRLRewardBreakdown();
+        public AudioRLRewardBreakdown Snapshot() => (AudioRLRewardBreakdown)MemberwiseClone();
     }
 
     public sealed class AudioRLRewardCalculator
@@ -51,28 +52,31 @@ namespace AdaptiveAudioVR.RL.Agent
             AudioRLState previousState,
             AudioRLState nextState,
             AudioRLAction finalSafeAction,
-            int noveltyCount)
+            int noveltyCount,
+            AudioSessionBaseline baseline = null)
         {
             if (previousState == null || nextState == null)
             {
                 return AudioRLRewardBreakdown.Zero;
             }
 
-            float reliability = Mathf.Clamp01(nextState.signal.confidence * nextState.signal.signalQuality);
-            float stressImprovement = Mathf.Clamp(previousState.signal.stress - nextState.signal.stress, -1f, 1f);
+            float reliability = Mathf.Clamp01(Mathf.Min(previousState.signal.confidence, nextState.signal.confidence)
+                * Mathf.Min(previousState.signal.signalQuality, nextState.signal.signalQuality));
+            float stressImprovement = Mathf.Clamp((previousState.signal.stress - nextState.signal.stress)
+                / (baseline != null ? baseline.StressScale : 1f), -1f, 1f);
             float rmssdImprovement = 0f;
             float heartRateImprovement = 0f;
 
             if (previousState.signal.hasPhysiologyWindow && nextState.signal.hasPhysiologyWindow)
             {
-                rmssdImprovement = Mathf.Clamp(
-                    (nextState.signal.rmssd - previousState.signal.rmssd) / Mathf.Max(20f, previousState.signal.rmssd),
+                rmssdImprovement = previousState.signal.hasRmssd && nextState.signal.hasRmssd ? Mathf.Clamp(
+                    (nextState.signal.rmssd - previousState.signal.rmssd) / (baseline != null ? baseline.RmssdScale : Mathf.Max(20f, previousState.signal.rmssd)),
                     -1f,
-                    1f);
-                heartRateImprovement = Mathf.Clamp(
-                    (previousState.signal.heartRate - nextState.signal.heartRate) / 20f,
+                    1f) : 0f;
+                heartRateImprovement = previousState.signal.hasHeartRate && nextState.signal.hasHeartRate ? Mathf.Clamp(
+                    (previousState.signal.heartRate - nextState.signal.heartRate) / (baseline != null ? baseline.HeartRateScale : 20f),
                     -1f,
-                    1f);
+                    1f) : 0f;
             }
 
             float preferenceMatch = 1f - MeanDistance(nextState.currentParameters, nextState.personalizedBaseline);

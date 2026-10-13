@@ -22,7 +22,15 @@ import {
   TEMPLE_POND_SAFE_DEFAULT,
 } from '../services/preferences/preferenceProfile';
 import {
+  buildAudioPreferenceBundle,
+  effectiveAudioPreference,
+  isAudioControlPreferences,
+  normalizeAudioPreferences,
+  requireParticipantPseudonym,
+} from '../services/preferences/audioPreferences';
+import {
   AuthStatus,
+  AudioControlPreferences,
   BleIngestionState,
   ComponentBPipelineState,
   ConnectionState,
@@ -121,6 +129,7 @@ type MindSyncStore = {
   syncNow: () => Promise<void>;
   updateOnboarding: (patch: Partial<OnboardingProfile>) => void;
   completeOnboarding: () => Promise<void>;
+  saveUsualAudioPreferences: (preferences: AudioControlPreferences) => Promise<void>;
   setSessionContext: (context: SessionContext) => void;
   scanWearables: () => Promise<void>;
   connectWearable: (device: WearableDevice) => Promise<void>;
@@ -323,6 +332,29 @@ export const useMindSyncStore = create<MindSyncStore>()(
           throw error;
         }
       },
+      saveUsualAudioPreferences: async preferences => {
+        if (!isAudioControlPreferences(preferences)) throw new Error('audio-preferences-invalid');
+        const state = get();
+        if (!state.user) throw new Error('Sign in before saving audio preferences');
+        const onboarding = {
+          ...state.onboarding,
+          audioControlPreferences: normalizeAudioPreferences(preferences),
+        };
+        if (isSupabaseConfigured) {
+          set({dataSyncStatus: 'syncing', dataSyncError: null});
+          try {
+            await mindSyncRepository.updateAudioPreferences(
+              state.user.id, onboarding.audioControlPreferences!,
+            );
+            set({onboarding, dataSyncStatus: 'synced', lastSyncedAt: new Date().toISOString()});
+          } catch (error) {
+            set({dataSyncStatus: 'offline', dataSyncError: errorMessage(error)});
+            throw error;
+          }
+        } else {
+          set({onboarding});
+        }
+      },
       setSessionContext: sessionContext => set({sessionContext}),
       scanWearables: async () => { await wearableBleService.scan(); },
       connectWearable: async device => {
@@ -387,19 +419,21 @@ export const useMindSyncStore = create<MindSyncStore>()(
           const createRequestId = prepared && !codeIsFresh ? `${requestId}-${Date.now()}` : requestId;
           const newPrepared = await realtimeService.createPreparedSession({
             requestId: createRequestId,
-            participantPseudonym: state.user?.id ?? 'anonymous',
+            participantPseudonym: requireParticipantPseudonym(state.user?.id),
             sceneId: 'temple-pond',
             studyCondition: environment.studyCondition,
             preferredEnvironment: effectiveEnvironmentPreference(
               state.onboarding,
               state.sessionContext,
             ),
+            audioPreferences: buildAudioPreferenceBundle(state.onboarding, state.sessionContext),
             sessionContext: questSessionContext(state.sessionContext),
           });
           const activeSession = state.activeSession ?? get().createSession();
           const preparedActiveSession: MeditationSession = {
             ...activeSession,
             id: newPrepared.sessionId,
+            effectiveAudioPreference: effectiveAudioPreference(state.onboarding, state.sessionContext),
             sessionContext: state.sessionContext,
             effectiveEnvironmentPreference: effectiveEnvironmentPreference(
               state.onboarding,
@@ -486,6 +520,7 @@ export const useMindSyncStore = create<MindSyncStore>()(
           durationMinutes: 20, environment: 'Temple Pond', audioProfile: 'Adaptive audio',
           completionRate: 0, moodBefore: 5, moodAfter: 0, validationComplete: false,
           sessionContext: get().sessionContext,
+          effectiveAudioPreference: effectiveAudioPreference(get().onboarding, get().sessionContext),
           effectiveEnvironmentPreference: effectiveEnvironmentPreference(
             get().onboarding,
             get().sessionContext,

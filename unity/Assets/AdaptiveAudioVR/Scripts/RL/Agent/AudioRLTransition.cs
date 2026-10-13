@@ -5,6 +5,23 @@ namespace AdaptiveAudioVR.RL.Agent
     [Serializable]
     public sealed class AudioRLTransition
     {
+        public int schemaVersion = 2;
+        public string eventType = "outcome";
+        public string decisionId;
+        public int conditionSegment;
+        public AudioRLAction proposedPolicyAction;
+        public bool rewardValid;
+        public bool onlineUpdateApplied;
+        public string outcomeReason;
+        public int proposedArm;
+        public int executedArm;
+        public string featureSchema;
+        public double[] contextFeatures;
+        public double predictedReward;
+        public double uncertainty;
+        public double selectionScore;
+        public int onlineUpdateCount;
+        public double eligiblePostStartUtc;
         public string sessionId;
         public string userId;
         public string createdUtc;
@@ -25,6 +42,23 @@ namespace AdaptiveAudioVR.RL.Agent
         {
             return new AudioRLTransition
             {
+                schemaVersion = schemaVersion,
+                eventType = eventType,
+                decisionId = decisionId,
+                conditionSegment = conditionSegment,
+                proposedPolicyAction = proposedPolicyAction,
+                rewardValid = rewardValid,
+                onlineUpdateApplied = onlineUpdateApplied,
+                outcomeReason = outcomeReason,
+                proposedArm = proposedArm,
+                executedArm = executedArm,
+                featureSchema = featureSchema,
+                contextFeatures = contextFeatures != null ? (double[])contextFeatures.Clone() : null,
+                predictedReward = predictedReward,
+                uncertainty = uncertainty,
+                selectionScore = selectionScore,
+                onlineUpdateCount = onlineUpdateCount,
+                eligiblePostStartUtc = eligiblePostStartUtc,
                 sessionId = sessionId,
                 userId = userId,
                 createdUtc = createdUtc,
@@ -32,7 +66,7 @@ namespace AdaptiveAudioVR.RL.Agent
                 ruleBaselineAction = ruleBaselineAction,
                 residualPolicyAction = residualPolicyAction,
                 finalSafeAction = finalSafeAction,
-                reward = reward,
+                reward = reward?.Snapshot(),
                 nextState = nextState?.Snapshot(),
                 policyMode = policyMode,
                 policyStatus = policyStatus,

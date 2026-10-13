@@ -108,8 +108,11 @@ namespace AdaptiveAudioVR.UI
 
         public void SetPpoResidualMode()
         {
-            bootstrap?.SetPpoResidualMode();
+            bootstrap?.SetPersonalizedBanditMode();
         }
+
+        public void SetStaticPersonalizedMode() => bootstrap?.SetStaticPersonalizedMode();
+        public void SetPersonalizedBanditMode() => bootstrap?.SetPersonalizedBanditMode();
 
         private void OnStressSliderChanged(float value)
         {

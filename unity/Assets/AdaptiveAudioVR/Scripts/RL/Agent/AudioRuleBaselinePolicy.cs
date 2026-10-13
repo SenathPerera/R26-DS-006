@@ -29,13 +29,13 @@ namespace AdaptiveAudioVR.RL.Agent
             }
             else if (stress > highStressThreshold)
             {
-                target.intensity += 0.10f;
-                target.density += 0.08f;
-                target.brightness += 0.05f;
+                target.intensity -= 0.06f;
+                target.density -= 0.06f;
+                target.brightness -= 0.04f;
                 target.tempo -= 0.03f;
                 target.fade += 0.05f;
-                target.musicMix += 0.10f;
-                target.ambientMix -= 0.10f;
+                target.musicMix -= 0.04f;
+                target.ambientMix += 0.04f;
             }
             else if (stress < lowStressThreshold)
             {

@@ -14,6 +14,8 @@ import {
   preferredEnvironmentFromOnboarding,
 } from '../../services/preferences/preferenceProfile';
 import {useMindSyncStore} from '../../store/useMindSyncStore';
+import {AudioPreferenceFields} from '../../components/AudioPreferenceFields';
+import {audioPreferencesFromOnboarding} from '../../services/preferences/audioPreferences';
 import type {
   PreferredEnvironment,
   SessionPreferenceMode,
@@ -35,6 +37,8 @@ export function SessionContextScreen({navigation}: any) {
   const [headacheOrEyeStrainToday, setHeadacheOrEyeStrainToday] = useState<boolean | null>(null);
   const [preferenceMode, setPreferenceMode] = useState<SessionPreferenceMode | null>(null);
   const [temporaryPreference, setTemporaryPreference] = useState<PreferredEnvironment>(usualPreference);
+  const [audioPreferenceMode, setAudioPreferenceMode] = useState<SessionPreferenceMode>('usual');
+  const [temporaryAudioPreference, setTemporaryAudioPreference] = useState(() => audioPreferencesFromOnboarding(onboarding));
 
   const updateTemporary = (patch: Partial<PreferredEnvironment>) => {
     setTemporaryPreference(current => ({...current, ...patch}));
@@ -49,6 +53,8 @@ export function SessionContextScreen({navigation}: any) {
       headacheOrEyeStrainToday,
       preferenceMode,
       temporaryPreference: preferenceMode === 'adjust' ? temporaryPreference : null,
+      audioPreferenceMode,
+      temporaryAudioPreference: audioPreferenceMode === 'adjust' ? temporaryAudioPreference : null,
     }, sessions);
     saveContext(context);
     createSession();
@@ -59,7 +65,7 @@ export function SessionContextScreen({navigation}: any) {
     <Screen>
       <Header
         title="Before today's session"
-        subtitle="These answers apply only to this session and will not change your usual garden preferences."
+        subtitle="These answers apply only to this session and will not change your usual garden or sound preferences."
         onBack={navigation.goBack}
       />
       <Card>
@@ -111,6 +117,15 @@ export function SessionContextScreen({navigation}: any) {
           </>
         ) : null}
       </Card>
+      <Card>
+        <Text style={uiStyles.value}>Use your usual sound preferences today?</Text>
+        <View style={uiStyles.wrap}>
+          <ChoiceChip label="Use usual sound" selected={audioPreferenceMode === 'usual'} onPress={() => setAudioPreferenceMode('usual')} />
+          <ChoiceChip label="Adjust sound for today" selected={audioPreferenceMode === 'adjust'} onPress={() => setAudioPreferenceMode('adjust')} />
+        </View>
+        <Text style={uiStyles.body}>Sound changes here apply only to this session. The VR scene still determines the environmental musical character.</Text>
+      </Card>
+      {audioPreferenceMode === 'adjust' ? <AudioPreferenceFields value={temporaryAudioPreference} onChange={setTemporaryAudioPreference} /> : null}
       <PrimaryButton
         label="Continue to voice check-in"
         disabled={headacheOrEyeStrainToday === null || preferenceMode === null}

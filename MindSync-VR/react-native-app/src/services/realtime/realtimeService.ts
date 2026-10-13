@@ -1,6 +1,7 @@
 import {environment} from '../../config/environment';
 import {
   PreferredEnvironment,
+  AudioPreferenceBundle,
   PreparedVrSession,
   QuestSessionContext,
   RelayEnvelope,
@@ -18,6 +19,7 @@ export type CreatePreparedSessionInput = {
   sceneId: string;
   studyCondition: StudyCondition;
   preferredEnvironment: PreferredEnvironment;
+  audioPreferences?: AudioPreferenceBundle;
   sessionContext: QuestSessionContext;
 };
 

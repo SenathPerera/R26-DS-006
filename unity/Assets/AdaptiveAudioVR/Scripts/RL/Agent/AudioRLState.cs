@@ -17,6 +17,7 @@ namespace AdaptiveAudioVR.RL.Agent
         public AudioParameters personalizedBaseline;
         public float[] preferenceEncoding;
         public AudioRLAction recentMeanResidualAction;
+        public AudioRLAction recentSafeAction;
         public float sessionProgress;
         public float timeSinceLastActionSeconds;
         public int noveltyCount;
@@ -37,6 +38,7 @@ namespace AdaptiveAudioVR.RL.Agent
                 personalizedBaseline = personalizedBaseline,
                 preferenceEncoding = preferenceEncoding != null ? (float[])preferenceEncoding.Clone() : Array.Empty<float>(),
                 recentMeanResidualAction = recentMeanResidualAction,
+                recentSafeAction = recentSafeAction,
                 sessionProgress = sessionProgress,
                 timeSinceLastActionSeconds = timeSinceLastActionSeconds,
                 noveltyCount = noveltyCount,

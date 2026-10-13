@@ -4,10 +4,11 @@ import {Card, ChoiceChip, Field, Header, PreferenceSlider, PrimaryButton, Screen
 import {useMindSyncStore} from '../../store/useMindSyncStore';
 import {describeSupabaseError} from '../../services/supabase/supabaseError';
 import {colors} from '../../theme/theme';
+import {AudioPreferenceFields} from '../../components/AudioPreferenceFields';
+import {audioPreferencesFromOnboarding} from '../../services/preferences/audioPreferences';
 
 const steps = ['Profile', 'Practice', 'Goals', 'Sound', 'Garden', 'Consent'];
 const goals = ['Stress reduction', 'Better focus', 'Relaxation', 'Sleep preparation', 'Emotional balance'];
-const audio = ['Nature heavy', 'Soft drone', 'Warm pads', 'Subtle rhythm', 'No vocals', 'Neutral tone'];
 
 export function OnboardingScreen({navigation}: any) {
   const [step, setStep] = useState(0);
@@ -39,7 +40,7 @@ export function OnboardingScreen({navigation}: any) {
       {step === 0 ? <Card><Text style={uiStyles.value}>A little about you</Text><Field label="Preferred name" value={profile.name} onChangeText={name => update({name})} /><Text style={uiStyles.label}>Age range</Text><View style={uiStyles.wrap}>{['18-24', '25-34', '35-44', '45-54', '55+'].map(item => <ChoiceChip key={item} label={item} selected={profile.ageRange === item} onPress={() => update({ageRange: item})} />)}</View></Card> : null}
       {step === 1 ? <Card><Text style={uiStyles.value}>Meditation experience</Text><Text style={uiStyles.body}>Choose the closest fit. There is no preferred answer.</Text><View style={uiStyles.wrap}>{['New to meditation', 'Occasional', 'Regular', 'Experienced'].map(item => <ChoiceChip key={item} label={item} selected={profile.meditationExperience === item} onPress={() => update({meditationExperience: item})} />)}</View><Text style={uiStyles.label}>Preferred duration</Text><View style={uiStyles.wrap}>{[5, 10, 15, 20, 30].map(item => <ChoiceChip key={item} label={`${item} min`} selected={profile.preferredDuration === item} onPress={() => update({preferredDuration: item})} />)}</View></Card> : null}
       {step === 2 ? <Selection title="What would you like support with?" values={goals} selected={profile.goals} onToggle={value => toggle('goals', value)} /> : null}
-      {step === 3 ? <Selection title="Your sound profile" values={audio} selected={profile.audioPreferences} onToggle={value => toggle('audioPreferences', value)} /> : null}
+      {step === 3 ? <AudioPreferenceFields value={audioPreferencesFromOnboarding(profile)} onChange={audioControlPreferences => update({audioControlPreferences})} /> : null}
       {step === 4 ? (
         <Card>
           <Text style={uiStyles.value}>Your usual Temple Pond garden</Text>
