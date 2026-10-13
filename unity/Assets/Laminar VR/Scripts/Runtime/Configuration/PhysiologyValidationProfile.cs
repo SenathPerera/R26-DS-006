@@ -23,7 +23,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Window and Freshness Validation")]
-        // TODO(RESEARCH_DECISION): These values must be aligned with Component B.
+        // Approved values must remain aligned with Component B and versioned.
         [SerializeField, Min(0f)]
         private float staleAfterSeconds = 0f;
 
@@ -40,7 +40,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private float probabilitySumTolerance = 0f;
 
         [Header("Signal Quality Gates")]
-        // TODO(RESEARCH_DECISION): Do not infer final thresholds from blueprint examples.
+        // Approved thresholds live only in versioned profiles.
         [SerializeField, Range(0f, 1f)]
         private float minimumDecisionSignalQuality = 0f;
 

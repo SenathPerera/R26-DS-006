@@ -2,8 +2,8 @@
 
 ## Status
 
-Accepted for the adaptive-environment architecture. Individual numerical values
-remain unapproved research configuration until the scene profile is approved.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. The values
+remain pilot engineering settings rather than participant-validated optima.
 
 ## Context
 

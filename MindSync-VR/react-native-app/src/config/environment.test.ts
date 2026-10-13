@@ -1,5 +1,6 @@
 import {
   buildDevelopmentEndpoints,
+  parseStudyCondition,
   resolvePersistedComponentBEndpoint,
 } from './environment';
 
@@ -23,5 +24,17 @@ describe('development transport endpoints', () => {
   test('preserves an explicitly configured remote endpoint', () => {
     const endpoint = 'wss://pilot.example.org/component-b/ingest';
     expect(resolvePersistedComponentBEndpoint(endpoint)).toBe(endpoint);
+  });
+
+  test.each([
+    'StaticPersonalized',
+    'RuleBasedAdaptive',
+    'ContextualBandit',
+  ] as const)('accepts the contract study condition %s', condition => {
+    expect(parseStudyCondition(condition)).toBe(condition);
+  });
+
+  test('rejects an unknown study condition', () => {
+    expect(parseStudyCondition('ExperimentalPolicy')).toBeNull();
   });
 });

@@ -2,6 +2,7 @@ import type {OnboardingProfile} from '../../types/domain';
 import {
   createSessionContext,
   effectiveEnvironmentPreference,
+  questSessionContext,
 } from './preferenceProfile';
 
 const profile: OnboardingProfile = {
@@ -11,7 +12,6 @@ const profile: OnboardingProfile = {
   preferredIllumination: 0.25, preferredWarmth: 0.6,
   preferredAtmosphericSoftness: 0.1, preferredColorRichness: 0.7,
   preferredAmbientMotion: 0.35,
-  lightSensitivity: 'mild', motionSensitivity: 0.4,
   consentAccepted: true, researchConsent: false,
 };
 
@@ -84,4 +84,35 @@ describe('preference profile', () => {
     expect(context.sessionSequenceNumber).toBe(2);
     expect(context.daysSincePreviousSession).toBe(3);
   });
+
+  test('projects only analysis context into the Quest contract', () => {
+    const context = createSessionContext({
+      subjectiveStress: 6, moodValence: -0.2, fatigue: 0.7, sleepQuality: 0.3,
+      headacheOrEyeStrainToday: false, preferenceMode: 'adjust',
+      temporaryPreference: profileToPreference(profile),
+    }, [], new Date('2026-09-01T08:30:00Z'));
+
+    expect(questSessionContext(context)).toEqual({
+      schemaVersion: 'mindsync-session-context-v1',
+      collectedAt: '2026-09-01T08:30:00.000Z',
+      subjectiveStress: 6,
+      moodValence: -0.2,
+      fatigue: 0.7,
+      sleepQuality: 0.3,
+      headacheOrEyeStrainToday: false,
+      timeOfDayMinutes: context.timeOfDayMinutes,
+      sessionSequenceNumber: 1,
+      daysSincePreviousSession: null,
+    });
+  });
 });
+
+function profileToPreference(value: OnboardingProfile) {
+  return {
+    illumination: value.preferredIllumination,
+    warmth: value.preferredWarmth,
+    atmosphericSoftness: value.preferredAtmosphericSoftness,
+    colorRichness: value.preferredColorRichness,
+    ambientMotion: value.preferredAmbientMotion,
+  };
+}

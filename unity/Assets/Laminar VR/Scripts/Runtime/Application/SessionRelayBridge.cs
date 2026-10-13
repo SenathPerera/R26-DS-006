@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Networking;
+using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using LaminarVR.AdaptiveMeditation.Runtime.Networking;
 using LaminarVR.AdaptiveMeditation.Session;
 using LaminarVR.AdaptiveMeditation.Telemetry;
@@ -29,6 +30,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         [SerializeField]
         private VisualSessionBoundary visualSessionBoundary = null;
 
+        [SerializeField]
+        private ReconnectBackoffProfile reconnectBackoffProfile = null;
+
         [Header("Main-Thread Dispatch")]
         [SerializeField, Min(1)]
         private int maximumMessagesPerFrame = DefaultMaximumMessagesPerFrame;
@@ -46,6 +50,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private IRecordedTelemetrySource recordedTelemetrySource;
         private ISessionRelayTransport activeTransport;
         private CancellationTokenSource componentLifetime;
+        private CancellationTokenSource reconnectCancellation;
+        private ConnectionReconnectController reconnectController;
+        private Task<ReconnectAttemptResult> activeReconnect;
         private Task activeQuestStatePublish;
         private Task activeTelemetryPublish;
         private TelemetryEvent[] activeTelemetryBatch;
@@ -53,6 +60,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private bool telemetryPublishBlocked;
         private bool coordinatorSubscribed;
         private bool terminalQuestStateDeferred;
+        private bool maintainConnection;
+        private bool reconnectRequested;
+        private bool reconnectExhausted;
         private VrSessionPhase deferredTerminalPhase;
         private string acceptedSessionId;
 
@@ -112,7 +122,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             ProductionSessionCoordinator coordinator,
             VisualSessionBoundary boundary,
             ISessionRelayTransportFactory relayTransportFactory = null,
-            IRecordedTelemetrySource telemetrySource = null)
+            IRecordedTelemetrySource telemetrySource = null,
+            ReconnectBackoffProfile backoffProfile = null)
         {
             if (GetActiveTransport() != null)
             {
@@ -124,6 +135,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             applicationBootstrap = bootstrap;
             productionCoordinator = coordinator;
             visualSessionBoundary = boundary;
+            reconnectBackoffProfile = backoffProfile;
             transportFactory = relayTransportFactory;
             recordedTelemetrySource = telemetrySource ?? coordinator;
             SubscribeToCoordinator();
@@ -148,6 +160,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 ?? throw new InvalidOperationException(
                     "The session relay bridge must be enabled before connecting.");
 
+            if (!reconnectBackoffProfile.TryCreateRuntimeConfiguration(
+                    out var reconnectConfiguration,
+                    out var reconnectError))
+            {
+                LastValidationError = reconnectError;
+                throw new InvalidOperationException(reconnectError);
+            }
+
             maximumTelemetryEventsPerBatch =
                 connectionInfo.MaximumTelemetryEventsPerBatch;
 
@@ -162,6 +182,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 }
 
                 terminalQuestStateDeferred = false;
+                maintainConnection = true;
+                reconnectRequested = false;
+                reconnectExhausted = false;
 
                 var factory = transportFactory
                     ?? new SessionRelayTransportFactory();
@@ -173,6 +196,13 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 {
                     activeTransport = transport;
                 }
+                reconnectController = new ConnectionReconnectController(
+                    transport,
+                    reconnectConfiguration,
+                    new TaskReconnectDelay());
+                reconnectCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        lifetime.Token);
 
                 using (var linkedCancellation =
                     CancellationTokenSource.CreateLinkedTokenSource(
@@ -190,6 +220,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     {
                         ClearTransportIfCurrent(transport);
                         DetachTransport(transport);
+                        ResetReconnectState();
                         LastConnectionError =
                             "relay-connect-failed:"
                             + exception.GetType().Name;
@@ -206,24 +237,48 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public async Task DisconnectAsync(
             CancellationToken cancellationToken)
         {
+            maintainConnection = false;
+            reconnectCancellation?.Cancel();
             await lifecycleGate.WaitAsync(cancellationToken)
                 .ConfigureAwait(false);
             try
             {
+                if (activeReconnect != null)
+                {
+                    try
+                    {
+                        await activeReconnect.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch
+                    {
+                    }
+
+                    activeReconnect = null;
+                }
+
                 var transport = TakeActiveTransport();
                 if (transport == null)
                 {
+                    ResetReconnectState();
                     return;
                 }
 
                 try
                 {
-                    await transport.DisconnectAsync(cancellationToken)
-                        .ConfigureAwait(false);
+                    if (transport.ConnectionState
+                        == SessionTransportConnectionState.Connected)
+                    {
+                        await transport.DisconnectAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                    }
                 }
                 finally
                 {
                     DetachTransport(transport);
+                    ResetReconnectState();
                     acceptedSessionId = null;
                     CurrentConfiguration = null;
                     terminalQuestStateDeferred = false;
@@ -249,6 +304,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 processedCount++;
             }
 
+            ObserveReconnect();
+            TryStartReconnect();
             TryStartTelemetryPublish();
             TryQueueDeferredTerminalQuestState();
             TryStartQuestStatePublish();
@@ -276,6 +333,19 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 return false;
             }
 
+            if (reconnectBackoffProfile == null)
+            {
+                validationError = "Assign a ReconnectBackoffProfile.";
+                return false;
+            }
+
+            if (!reconnectBackoffProfile.TryCreateRuntimeConfiguration(
+                    out _,
+                    out validationError))
+            {
+                return false;
+            }
+
             validationError = string.Empty;
             LastValidationError = string.Empty;
             return true;
@@ -297,8 +367,20 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     if (inboundEvent.Status.CurrentState
                         == SessionTransportConnectionState.Connected)
                     {
+                        reconnectRequested = false;
+                        reconnectExhausted = false;
                         telemetryPublishBlocked = false;
                         QueueCurrentQuestState();
+                    }
+                    else if (maintainConnection
+                        && activeReconnect == null
+                        && (inboundEvent.Status.Reason
+                            == SessionTransportStatusReason.ConnectionLost
+                            || inboundEvent.Status.Reason
+                            == SessionTransportStatusReason.ConnectionFailed))
+                    {
+                        reconnectRequested = true;
+                        reconnectExhausted = false;
                     }
 
                     break;
@@ -309,6 +391,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         + inboundEvent.DiagnosticCode);
                     break;
                 case InboundRelayEventKind.TelemetryAcknowledged:
+                    ReportTelemetryTransferSucceeded(
+                        inboundEvent.AcknowledgedMessageId);
                     activeTelemetryBatch = null;
                     telemetryPublishBlocked = false;
                     LastTelemetryError = string.Empty;
@@ -321,23 +405,6 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private void ProcessConfiguration(
             SessionRelayConfigurationMessage configuration)
         {
-            if (!applicationBootstrap.IsInitialized
-                && !applicationBootstrap.TryInitialize(
-                    out var bootstrapError))
-            {
-                RejectInbound("bootstrap-invalid:" + bootstrapError);
-                return;
-            }
-
-            if (!string.Equals(
-                    configuration.SceneId,
-                    applicationBootstrap.SceneProfile.SceneId,
-                    StringComparison.Ordinal))
-            {
-                RejectInbound("scene-id-mismatch");
-                return;
-            }
-
             if (acceptedSessionId != null
                 && !string.Equals(
                     acceptedSessionId,
@@ -358,11 +425,37 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 return;
             }
 
+            if (!string.Equals(
+                    configuration.SceneId,
+                    applicationBootstrap.ConfiguredSceneId,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("scene-id-mismatch");
+                return;
+            }
+
+            if (!applicationBootstrap.TrySelectStudyPolicy(
+                    configuration.StudyPolicyMode,
+                    out var selectionError))
+            {
+                RejectInbound("study-condition-invalid:" + selectionError);
+                return;
+            }
+
+            if (!applicationBootstrap.IsInitialized
+                && !applicationBootstrap.TryInitialize(
+                    out var bootstrapError))
+            {
+                RejectInbound("bootstrap-invalid:" + bootstrapError);
+                return;
+            }
+
             acceptedSessionId = configuration.SessionId;
             visualSessionBoundary.ReceiveSessionContext(
                 configuration.SessionId,
                 configuration.ParticipantPseudonym,
-                configuration.PreferredEnvironment);
+                configuration.PreferredEnvironment,
+                configuration.SessionContext);
             CurrentConfiguration = configuration;
             SessionConfigurationAccepted?.Invoke(configuration);
         }
@@ -525,6 +618,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 LastTelemetryError =
                     "telemetry-publish-failed:"
                     + exception.GetType().Name;
+                ReportTelemetryTransferFailed(LastTelemetryError);
                 telemetryPublishBlocked = true;
                 activeTelemetryPublish = null;
             }
@@ -547,6 +641,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             catch (OperationCanceledException)
             {
                 LastTelemetryError = "telemetry-publish-cancelled";
+                ReportTelemetryTransferFailed(LastTelemetryError);
                 telemetryPublishBlocked = true;
             }
             catch (Exception exception)
@@ -554,10 +649,65 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 LastTelemetryError =
                     "telemetry-publish-failed:"
                     + exception.GetType().Name;
+                ReportTelemetryTransferFailed(LastTelemetryError);
                 telemetryPublishBlocked = true;
             }
 
             activeTelemetryPublish = null;
+        }
+
+        private void ReportTelemetryTransferSucceeded(
+            string acknowledgementId)
+        {
+            if (!TryGetActiveTelemetryBatchRange(
+                    out var eventCount,
+                    out var firstSequenceNumber,
+                    out var lastSequenceNumber))
+            {
+                return;
+            }
+
+            productionCoordinator?.ReportTelemetryTransferSucceeded(
+                acknowledgementId,
+                eventCount,
+                firstSequenceNumber,
+                lastSequenceNumber);
+        }
+
+        private void ReportTelemetryTransferFailed(string diagnosticCode)
+        {
+            if (!TryGetActiveTelemetryBatchRange(
+                    out var eventCount,
+                    out var firstSequenceNumber,
+                    out var lastSequenceNumber))
+            {
+                return;
+            }
+
+            productionCoordinator?.ReportTelemetryTransferFailed(
+                diagnosticCode,
+                eventCount,
+                firstSequenceNumber,
+                lastSequenceNumber);
+        }
+
+        private bool TryGetActiveTelemetryBatchRange(
+            out int eventCount,
+            out long firstSequenceNumber,
+            out long lastSequenceNumber)
+        {
+            eventCount = activeTelemetryBatch?.Length ?? 0;
+            if (eventCount == 0)
+            {
+                firstSequenceNumber = 0L;
+                lastSequenceNumber = 0L;
+                return false;
+            }
+
+            firstSequenceNumber = activeTelemetryBatch[0].SequenceNumber;
+            lastSequenceNumber = activeTelemetryBatch[eventCount - 1]
+                .SequenceNumber;
+            return true;
         }
 
         private IRecordedTelemetrySource ResolveTelemetrySource()
@@ -594,6 +744,61 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         {
             inboundEvents.Enqueue(
                 InboundRelayEvent.ForTelemetryAcknowledgement(messageId));
+        }
+
+        private void TryStartReconnect()
+        {
+            if (!maintainConnection
+                || !reconnectRequested
+                || reconnectExhausted
+                || activeReconnect != null
+                || reconnectController == null
+                || GetActiveTransport()?.ConnectionState
+                    != SessionTransportConnectionState.Disconnected)
+            {
+                return;
+            }
+
+            reconnectRequested = false;
+            activeReconnect = reconnectController.ReconnectAsync(
+                reconnectCancellation.Token);
+        }
+
+        private void ObserveReconnect()
+        {
+            if (activeReconnect == null || !activeReconnect.IsCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                var result = activeReconnect.GetAwaiter().GetResult();
+                if (result.Connected)
+                {
+                    LastConnectionError = string.Empty;
+                    reconnectExhausted = false;
+                }
+                else
+                {
+                    reconnectExhausted = true;
+                    LastConnectionError = "relay-reconnect-exhausted";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception exception)
+            {
+                reconnectExhausted = true;
+                LastConnectionError =
+                    "relay-reconnect-failed:"
+                    + exception.GetType().Name;
+            }
+            finally
+            {
+                activeReconnect = null;
+            }
         }
 
         private void HandlePhaseChanged(SessionPhaseTransition transition)
@@ -688,38 +893,87 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void BeginShutdown()
         {
+            maintainConnection = false;
+            reconnectCancellation?.Cancel();
             var transport = TakeActiveTransport();
             if (transport == null)
             {
+                ResetReconnectState();
                 return;
             }
+
+            var reconnectTask = activeReconnect;
+            var cancellationToDispose = reconnectCancellation;
 
             DetachTransport(transport);
             acceptedSessionId = null;
             CurrentConfiguration = null;
             terminalQuestStateDeferred = false;
             ClearPendingQuestStates();
+            ResetReconnectState(false);
             visualSessionBoundary?.ReceiveConnectionState(
                 SessionTransportConnectionState.Disconnected);
 
-            try
-            {
-                var shutdownTask = transport.DisconnectAsync(
-                    CancellationToken.None);
-                ObserveInBackground(shutdownTask);
-            }
-            catch (Exception exception)
-            {
-                LastConnectionError =
-                    "relay-disconnect-failed:"
-                    + exception.GetType().Name;
-            }
+            ObserveInBackground(
+                ShutdownTransportAsync(
+                    transport,
+                    reconnectTask,
+                    cancellationToDispose));
         }
 
         private void ClearPendingQuestStates()
         {
             while (pendingQuestStates.TryDequeue(out _))
             {
+            }
+        }
+
+        private void ResetReconnectState(bool disposeCancellation = true)
+        {
+            if (disposeCancellation)
+            {
+                reconnectCancellation?.Dispose();
+            }
+
+            reconnectCancellation = null;
+            reconnectController = null;
+            activeReconnect = null;
+            reconnectRequested = false;
+            reconnectExhausted = false;
+            maintainConnection = false;
+        }
+
+        private static async Task ShutdownTransportAsync(
+            ISessionRelayTransport transport,
+            Task reconnectTask,
+            CancellationTokenSource cancellationToDispose)
+        {
+            try
+            {
+                if (reconnectTask != null)
+                {
+                    try
+                    {
+                        await reconnectTask.ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                if (transport.ConnectionState
+                    == SessionTransportConnectionState.Connected)
+                {
+                    await transport.DisconnectAsync(CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                cancellationToDispose?.Dispose();
             }
         }
 

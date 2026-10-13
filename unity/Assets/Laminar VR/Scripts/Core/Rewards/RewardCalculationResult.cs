@@ -1,4 +1,5 @@
 using LaminarVR.AdaptiveMeditation.Environment;
+using LaminarVR.AdaptiveMeditation.Safety;
 
 namespace LaminarVR.AdaptiveMeditation.Rewards
 {
@@ -13,7 +14,58 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
         InvalidEnvironmentState,
         ActionEnvironmentMismatch,
         InvalidPenaltySeverity,
-        NonFiniteReward
+        NonFiniteReward,
+        MissingDiscomfortSeverity
+    }
+
+    public sealed class RewardPenaltyObservation
+    {
+        private RewardPenaltyObservation(
+            double? discomfortSeverity,
+            double safetySeverity,
+            bool safetyInterventionOccurred)
+        {
+            DiscomfortSeverity = discomfortSeverity;
+            SafetySeverity = safetySeverity;
+            SafetyInterventionOccurred = safetyInterventionOccurred;
+        }
+
+        public double? DiscomfortSeverity { get; }
+
+        public double SafetySeverity { get; }
+
+        public bool SafetyInterventionOccurred { get; }
+
+        public static RewardPenaltyObservation FromActionValidation(
+            ActionValidationResult validation)
+        {
+            if (!validation.Accepted)
+            {
+                throw new System.ArgumentException(
+                    "Reward penalties require an accepted safety validation.",
+                    nameof(validation));
+            }
+
+            // The MVP has one deterministic safety-severity level: an
+            // accepted action modified by the safety layer is a full
+            // intervention; an unmodified action is not an intervention.
+            var safetyInterventionOccurred = validation.Modified;
+            return new RewardPenaltyObservation(
+                null,
+                safetyInterventionOccurred ? 1d : 0d,
+                safetyInterventionOccurred);
+        }
+
+        internal static RewardPenaltyObservation CreateForTesting(
+            double? discomfortSeverity,
+            double safetySeverity,
+            bool safetyInterventionOccurred)
+        {
+            return new RewardPenaltyObservation(
+                discomfortSeverity,
+                safetySeverity,
+                safetyInterventionOccurred);
+        }
     }
 
     public readonly struct RewardBreakdown
@@ -29,8 +81,9 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
             double normalizedRmssdImprovement,
             double normalizedHeartRateIncrease,
             double actionMagnitude,
-            double discomfortSeverity,
+            double? discomfortSeverity,
             double safetySeverity,
+            bool safetyInterventionOccurred,
             double stressComponent,
             double rmssdComponent,
             double heartRateComponent,
@@ -51,6 +104,7 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
             ActionMagnitude = actionMagnitude;
             DiscomfortSeverity = discomfortSeverity;
             SafetySeverity = safetySeverity;
+            SafetyInterventionOccurred = safetyInterventionOccurred;
             StressComponent = stressComponent;
             RmssdComponent = rmssdComponent;
             HeartRateComponent = heartRateComponent;
@@ -80,9 +134,11 @@ namespace LaminarVR.AdaptiveMeditation.Rewards
 
         public double ActionMagnitude { get; }
 
-        public double DiscomfortSeverity { get; }
+        public double? DiscomfortSeverity { get; }
 
         public double SafetySeverity { get; }
+
+        public bool SafetyInterventionOccurred { get; }
 
         public double StressComponent { get; }
 

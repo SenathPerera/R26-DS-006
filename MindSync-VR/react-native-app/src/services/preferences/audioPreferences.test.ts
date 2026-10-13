@@ -14,7 +14,7 @@ const onboarding: OnboardingProfile = {
   audioPreferences: ['Warm pads', 'Nature heavy'], environmentPreferences: [], sensitivities: [],
   preferredIllumination: 0.5, preferredWarmth: 0.5,
   preferredAtmosphericSoftness: 0.5, preferredColorRichness: 0.5,
-  preferredAmbientMotion: 0.5, lightSensitivity: 'none', motionSensitivity: 0.5,
+  preferredAmbientMotion: 0.5,
   consentAccepted: true, researchConsent: true,
 };
 

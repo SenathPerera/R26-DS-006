@@ -40,7 +40,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 ""relayEndpoint"": ""ws://192.0.2.10:8080/session"",
                 ""schemaVersion"": ""relay-test-v1"",
                 ""maximumMessageBytes"": 65536,
-                ""maximumTelemetryEventsPerBatch"": 32
+                ""maximumTelemetryEventsPerBatch"": 32,
+                ""connectionTimeoutSeconds"": 20
             }";
             var asset = CreateProfile(Json);
             try
@@ -74,7 +75,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 ""relayEndpoint"": ""wss://relay.example.test/session"",
                 ""schemaVersion"": ""relay-test-v1"",
                 ""maximumMessageBytes"": 65536,
-                ""maximumTelemetryEventsPerBatch"": 32
+                ""maximumTelemetryEventsPerBatch"": 32,
+                ""connectionTimeoutSeconds"": 20
             }";
             var asset = CreateProfile(Json);
             try
@@ -104,6 +106,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 Assert.That(
                     connectionInfo.MaximumTelemetryEventsPerBatch,
                     Is.EqualTo(32));
+                Assert.That(
+                    connectionInfo.ConnectionTimeoutSeconds,
+                    Is.EqualTo(20d));
             }
             finally
             {

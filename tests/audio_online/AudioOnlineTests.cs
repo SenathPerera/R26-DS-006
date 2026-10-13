@@ -6,6 +6,7 @@ using AdaptiveAudioVR.RL.Agent;
 using AdaptiveAudioVR.Preference;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Networking;
+using LaminarVR.AdaptiveMeditation.Policy;
 using UnityEngine;
 
 internal static class AudioOnlineTests
@@ -115,20 +116,27 @@ internal static class AudioOnlineTests
         const string profile = "{\"preferredInstruments\":[\"piano\",\"flute\"],\"mood\":\"calm\",\"tempoPreference\":\"slow\",\"audioIntensity\":0.3,\"ambientMusicBalance\":\"balanced\",\"brightnessPreference\":\"soft_dark\",\"noveltyTolerance\":0.2,\"avoidDissonance\":true,\"rhythmPreference\":\"minimal\",\"natureSoundPreference\":\"medium\",\"reverbPreference\":\"spacious\",\"volumePreference\":\"low\"}";
         const string overrideProfile = "{\"preferredInstruments\":[\"bells\"],\"mood\":\"sleepy\",\"tempoPreference\":\"slow\",\"audioIntensity\":0.1,\"ambientMusicBalance\":\"mostly_ambience\",\"brightnessPreference\":\"soft_dark\",\"noveltyTolerance\":0.1,\"avoidDissonance\":true,\"rhythmPreference\":\"minimal\",\"natureSoundPreference\":\"low\",\"reverbPreference\":\"spacious\",\"volumePreference\":\"low\"}";
         string json = "{\"payload\":{\"sessionId\":\"session-7\",\"participantPseudonym\":\"participant-7\",\"sceneId\":\"temple-pond\",\"audioPreferences\":{\"schemaVersion\":\"mindsync-audio-preferences-v1\",\"longTerm\":" + profile + ",\"preferenceMode\":\"adjust\",\"sessionOverride\":" + overrideProfile + "}}}";
-        var configuration = new SessionRelayConfigurationMessage("mindsync-session-v1", "message-1", "session-7", "participant-7", "temple-pond", new EnvironmentState(0.5f, 0.5f, 0.5f, 0.5f, 0.5f), json);
+        var configuration = RelayAudioConfiguration("message-1", "participant-7", json);
         Check(AudioSessionPreferenceMapper.TryMap(configuration, out var mapped, out var error), error);
         Check(mapped.LongTerm.userId == "participant-7" && mapped.Effective.userId == "participant-7", "Wrong participant profile");
         Check(mapped.LongTerm.preferredInstruments[0] == "piano" && mapped.Effective.preferredInstruments[0] == "bells", "Session adjustment changed long-term sound");
         Check(mapped.Effective.preferredAmbience == "temple", "Scene did not set musical setting");
         string usualJson = json.Replace("\"preferenceMode\":\"adjust\",\"sessionOverride\":" + overrideProfile,
             "\"preferenceMode\":\"usual\",\"sessionOverride\":null");
-        var usualConfiguration = new SessionRelayConfigurationMessage("mindsync-session-v1", "message-usual", "session-7", "participant-7", "temple-pond", new EnvironmentState(0.5f, 0.5f, 0.5f, 0.5f, 0.5f), usualJson);
+        var usualConfiguration = RelayAudioConfiguration("message-usual", "participant-7", usualJson);
         Check(AudioSessionPreferenceMapper.TryMap(usualConfiguration, out var usual, out error), error);
         Check(usual.Effective.preferredInstruments[0] == "piano", "Usual mode ignored long-term sound");
-        var wrongParticipant = new SessionRelayConfigurationMessage("mindsync-session-v1", "message-2", "session-7", "participant-8", "temple-pond", new EnvironmentState(0.5f, 0.5f, 0.5f, 0.5f, 0.5f), json);
+        var wrongParticipant = RelayAudioConfiguration("message-2", "participant-8", json);
         Check(!AudioSessionPreferenceMapper.TryMap(wrongParticipant, out _, out _), "Cross participant payload accepted");
-        var missingAudio = new SessionRelayConfigurationMessage("mindsync-session-v1", "message-3", "session-7", "participant-7", "temple-pond", new EnvironmentState(0.5f, 0.5f, 0.5f, 0.5f, 0.5f), "{\"payload\":{\"sessionId\":\"session-7\"}}");
+        var missingAudio = RelayAudioConfiguration("message-3", "participant-7", "{\"payload\":{\"sessionId\":\"session-7\"}}");
         Check(!AudioSessionPreferenceMapper.TryMap(missingAudio, out _, out _), "Missing preferences accepted");
+    }
+
+    private static SessionRelayConfigurationMessage RelayAudioConfiguration(string messageId, string participantId, string rawJson)
+    {
+        var context = new SessionContextSnapshot("mindsync-session-context-v1", "2026-10-10T08:30:00.000Z", 6, -0.2, 0.7, 0.4, false, 510, 2, 3);
+        return new SessionRelayConfigurationMessage("mindsync-session-v3", messageId, "session-7", participantId, "temple-pond",
+            StudyPolicyMode.ContextualBandit, new EnvironmentState(0.5f, 0.5f, 0.5f, 0.5f, 0.5f), context, rawJson);
     }
 
     private static AudioParameters Parameters() => AudioParameters.FromControlVector(new[] { 0.4f, 0.4f, 0.4f, 0.3f, 0.7f, 0.45f, 0.55f });

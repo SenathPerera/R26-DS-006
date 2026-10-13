@@ -14,6 +14,7 @@ describe('session relay validation', () => {
       pairingCode: '012345',
       expiresAt: 1234.5,
       mobileToken: 'secret-runtime-token',
+      studyCondition: 'ContextualBandit',
     })).toBe(true);
   });
 
@@ -24,6 +25,18 @@ describe('session relay validation', () => {
       pairingCode: '1234',
       expiresAt: 1234.5,
       mobileToken: 'token',
+      studyCondition: 'ContextualBandit',
+    })).toBe(false);
+  });
+
+  test('rejects a prepared session without an approved study condition', () => {
+    expect(isPreparedSession({
+      schemaVersion: SESSION_RELAY_SCHEMA_VERSION,
+      sessionId: 'session-1',
+      pairingCode: '012345',
+      expiresAt: 1234.5,
+      mobileToken: 'token',
+      studyCondition: 'ExperimentalPolicy',
     })).toBe(false);
   });
 

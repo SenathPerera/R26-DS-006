@@ -23,7 +23,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Safe Normalized Default")]
-        // TODO(RESEARCH_DECISION): The neutral values below are authoring placeholders only.
+        // Defaults below are authoring placeholders; approved values live in assets.
         [SerializeField, Range(0f, 1f)]
         private float defaultIllumination = 0.5f;
 
@@ -40,7 +40,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private float defaultAmbientMotion = 0.5f;
 
         [Header("Allowed Normalized Ranges")]
-        // TODO(RESEARCH_DECISION): Full ranges are not validated scene-safe ranges.
+        // Full ranges are authoring defaults, not automatically scene-safe.
         [SerializeField]
         private Vector2 illuminationRange = new Vector2(0f, 1f);
 
@@ -57,8 +57,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private Vector2 ambientMotionRange = new Vector2(0f, 1f);
 
         [Header("Action and Transition Limits")]
-        // TODO(RESEARCH_DECISION): Zero keeps a new profile invalid until each
-        // dimension has been deliberately calibrated.
+        // Zero keeps a new profile invalid until each dimension is configured.
         [SerializeField, Range(0f, 1f)]
         private float illuminationActionStep = 0f;
 

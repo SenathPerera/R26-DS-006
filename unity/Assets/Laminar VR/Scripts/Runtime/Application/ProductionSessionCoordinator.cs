@@ -5,8 +5,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Application;
 using LaminarVR.AdaptiveMeditation.Environment;
+using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy;
+using LaminarVR.AdaptiveMeditation.Preferences;
 using LaminarVR.AdaptiveMeditation.Rewards;
 using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using LaminarVR.AdaptiveMeditation.Runtime.Telemetry;
@@ -15,6 +17,7 @@ using LaminarVR.AdaptiveMeditation.Session;
 using LaminarVR.AdaptiveMeditation.Stabilization;
 using LaminarVR.AdaptiveMeditation.Telemetry;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 
 namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 {
@@ -24,6 +27,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
     public sealed class ProductionSessionCoordinator : MonoBehaviour,
         IRecordedTelemetrySource
     {
+        private const string HeadsetLifecyclePauseCommandPrefix =
+            "headset-lifecycle-pause-";
+
         [Header("Composition Root")]
         [SerializeField]
         private ApplicationBootstrap applicationBootstrap = null;
@@ -31,6 +37,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         [Header("Approved Research Configuration")]
         [SerializeField]
         private SessionTimingProfile sessionTimingProfile = null;
+
+        [SerializeField]
+        private PreferenceInitializationProfile preferenceInitializationProfile =
+            null;
 
         [SerializeField]
         private PhysiologyValidationProfile physiologyValidationProfile = null;
@@ -64,9 +74,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             new Queue<PendingTelemetry>();
 
         private CancellationTokenSource lifetimeCancellation;
+        private CancellationTokenSource adaptationCancellation;
         private SessionStateMachine session;
         private PhysiologyStateBuffer physiologyBuffer;
         private PhysiologyBaselineAccumulator baselineAccumulator;
+        private PreferenceInitializationConfiguration
+            preferenceInitializationConfiguration;
         private RewardPipelineConfiguration rewardConfiguration;
         private ProductionCoordinatorConfiguration coordinatorConfiguration;
         private StabilizationStateSelector stabilizationSelector;
@@ -88,10 +101,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private double clockAnchorMonotonicTimeSeconds;
         private double clockAnchorUtcUnixSeconds;
         private bool hasAdvancedClock;
+        private bool headsetLifecycleSuspended;
+        private double headsetLifecycleSuspendedAtMonotonicSeconds;
 
         private string sessionId;
         private string participantPseudonym;
         private EnvironmentState preferredEnvironment;
+        private EnvironmentState initialEnvironment;
+        private SessionContextSnapshot sessionContextSnapshot;
         private bool hasSessionContext;
 
         public event Action<SessionPhaseTransition> PhaseChanged;
@@ -103,7 +120,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public string TelemetryFilePath => telemetrySink?.FilePath;
 
         public int PendingEventCount =>
-            telemetryBufferingSink?.PendingEventCount ?? 0;
+            (telemetryBufferingSink?.PendingEventCount ?? 0)
+            + telemetryQueue.Count
+            + (activeOperation == null ? 0 : 1);
 
         public VrSessionPhase Phase => session == null
             ? VrSessionPhase.Boot
@@ -133,6 +152,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         public bool HasPolicyController => policyController != null;
 
+        public bool IsHeadsetLifecycleSuspended =>
+            headsetLifecycleSuspended;
+
         private void Start()
         {
             if (!initializeWhenSessionContextAvailable || !hasSessionContext)
@@ -152,6 +174,22 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void Update()
         {
+            if (headsetLifecycleSuspended)
+            {
+                if (IsInitialized)
+                {
+                    var suspendedMonotonicTimeSeconds =
+                        Time.realtimeSinceStartupAsDouble;
+                    Advance(
+                        suspendedMonotonicTimeSeconds,
+                        clockAnchorUtcUnixSeconds
+                            + suspendedMonotonicTimeSeconds
+                            - clockAnchorMonotonicTimeSeconds);
+                }
+
+                return;
+            }
+
             if (!IsInitialized)
             {
                 if (initializeWhenSessionContextAvailable && hasSessionContext)
@@ -187,6 +225,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             lifetimeCancellation?.Cancel();
+            adaptationCancellation?.Cancel();
+            adaptationCancellation?.Dispose();
+            adaptationCancellation = null;
             lifetimeCancellation?.Dispose();
             lifetimeCancellation = null;
 
@@ -215,7 +256,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             RewardPipelineProfile rewardProfile,
             StabilizationSelectionProfile stabilizationProfile,
             TelemetryLoggingProfile loggingProfile,
-            ProductionCoordinatorProfile productionProfile)
+            ProductionCoordinatorProfile productionProfile,
+            PreferenceInitializationProfile preferenceProfile = null)
         {
             if (IsInitialized)
             {
@@ -230,12 +272,26 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             stabilizationSelectionProfile = stabilizationProfile;
             telemetryLoggingProfile = loggingProfile;
             coordinatorProfile = productionProfile;
+            preferenceInitializationProfile = preferenceProfile;
         }
 
         public void ConfigureSessionContext(
             string activeSessionId,
             string pseudonymousParticipantId,
             EnvironmentState safePreferredEnvironment)
+        {
+            ConfigureSessionContext(
+                activeSessionId,
+                pseudonymousParticipantId,
+                safePreferredEnvironment,
+                null);
+        }
+
+        public void ConfigureSessionContext(
+            string activeSessionId,
+            string pseudonymousParticipantId,
+            EnvironmentState safePreferredEnvironment,
+            SessionContextSnapshot contextSnapshot)
         {
             if (IsInitialized)
             {
@@ -267,6 +323,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             sessionId = activeSessionId.Trim();
             participantPseudonym = pseudonymousParticipantId.Trim();
             preferredEnvironment = safePreferredEnvironment;
+            sessionContextSnapshot = contextSnapshot;
             hasSessionContext = true;
         }
 
@@ -314,6 +371,22 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 return false;
             }
 
+            var preferenceInitialization = new PreferenceInitializer()
+                .Initialize(
+                    applicationBootstrap.SceneProfile,
+                    new EnvironmentPreference(preferredEnvironment),
+                    preferenceInitializationConfiguration);
+            if (!preferenceInitialization.Accepted)
+            {
+                return Fail(
+                    "Preference initialization was rejected: "
+                    + preferenceInitialization.FailureReason
+                    + ".",
+                    out validationError);
+            }
+
+            initialEnvironment = preferenceInitialization.SafeInitialState;
+
             if (!coordinatorConfiguration.TryValidateCompatibility(
                     timing,
                     physiologyValidation,
@@ -336,7 +409,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     telemetryPath,
                     telemetryConfiguration);
                 telemetryBufferingSink =
-                    new DurableTelemetryBufferingSink(telemetrySink);
+                    new DurableTelemetryBufferingSink(
+                        telemetrySink,
+                        ShouldExposeForRelayTransfer);
                 telemetryRecorder = new TelemetryRecorder(
                     telemetryConfiguration,
                     new TelemetrySessionIdentity(
@@ -344,6 +419,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         participantPseudonym),
                     telemetryBufferingSink);
                 lifetimeCancellation = new CancellationTokenSource();
+                adaptationCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        lifetimeCancellation.Token);
 
                 session = new SessionStateMachine();
                 session.PhaseChanged += HandlePhaseChanged;
@@ -386,20 +464,84 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 true,
                 Array.Empty<TelemetryField>());
             QueueTelemetry(
-                TelemetryEventTypes.SessionConfigReceived,
+                TelemetryEventTypes.ApplicationVersion,
                 true,
-                new[]
-                {
+                CreateApplicationVersionTelemetryFields());
+            QueueTelemetry(
+                TelemetryEventTypes.DeviceInformation,
+                false,
+                CreateDeviceInformationTelemetryFields());
+            QueueSceneReadinessTelemetry();
+            QueuePerformanceTelemetry("session_initialized");
+            var sessionConfigurationFields = new List<TelemetryField>
+            {
                     TelemetryField.String(
                         "coordinator_configuration_id",
                         coordinatorConfiguration.ConfigurationId),
                     TelemetryField.Integer(
                         "coordinator_configuration_version",
                         coordinatorConfiguration.ConfigurationVersion),
+                    TelemetryField.String(
+                        "session_timing_configuration_id",
+                        timing.ConfigurationId),
+                    TelemetryField.Integer(
+                        "session_timing_configuration_version",
+                        timing.ConfigurationVersion),
+                    TelemetryField.String(
+                        "physiology_configuration_id",
+                        physiologyValidation.ConfigurationId),
+                    TelemetryField.Integer(
+                        "physiology_configuration_version",
+                        physiologyValidation.ConfigurationVersion),
+                    TelemetryField.String(
+                        "preference_configuration_id",
+                        preferenceInitializationConfiguration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "preference_configuration_version",
+                        preferenceInitializationConfiguration
+                            .ConfigurationVersion),
+                    TelemetryField.Number(
+                        "preference_weight",
+                        preferenceInitializationConfiguration.PreferenceWeight),
+                    TelemetryField.String(
+                        "reward_configuration_id",
+                        rewardConfiguration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "reward_configuration_version",
+                        rewardConfiguration.ConfigurationVersion),
+                    TelemetryField.String(
+                        "stabilization_configuration_id",
+                        stabilizationSelector.Configuration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "stabilization_configuration_version",
+                        stabilizationSelector.Configuration
+                            .ConfigurationVersion),
+                    TelemetryField.String(
+                        "telemetry_configuration_id",
+                        telemetryConfiguration.ConfigurationId),
+                    TelemetryField.Integer(
+                        "telemetry_configuration_version",
+                        telemetryConfiguration.ConfigurationVersion),
+                    TelemetryField.String(
+                        "telemetry_event_schema_id",
+                        telemetryConfiguration.EventSchemaId),
+                    TelemetryField.String(
+                        "telemetry_event_schema_version",
+                        telemetryConfiguration.EventSchemaVersion),
                     TelemetryField.Number(
                         "expected_physiology_output_interval_seconds",
                         coordinatorConfiguration
                             .ExpectedPhysiologyOutputIntervalSeconds),
+                    TelemetryField.String(
+                        "study_condition",
+                        StudyConditionCodec.ToWireValue(
+                            applicationBootstrap.StudyPolicyMode)),
+                    TelemetryField.String(
+                        "policy_id",
+                        applicationBootstrap.Policy.PolicyId),
+                    TelemetryField.String(
+                        "policy_version",
+                        applicationBootstrap.Policy.PolicyVersion),
                     TelemetryField.Number(
                         "preferred_illumination",
                         preferredEnvironment.Illumination),
@@ -415,10 +557,36 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     TelemetryField.Number(
                         "preferred_ambient_motion",
                         preferredEnvironment.AmbientMotion),
+                    TelemetryField.Number(
+                        "initial_illumination",
+                        initialEnvironment.Illumination),
+                    TelemetryField.Number(
+                        "initial_warmth",
+                        initialEnvironment.Warmth),
+                    TelemetryField.Number(
+                        "initial_atmospheric_softness",
+                        initialEnvironment.AtmosphericSoftness),
+                    TelemetryField.Number(
+                        "initial_color_richness",
+                        initialEnvironment.ColorRichness),
+                    TelemetryField.Number(
+                        "initial_ambient_motion",
+                        initialEnvironment.AmbientMotion),
                     TelemetryField.Boolean(
                         "preference_initialization_transition_started",
                         preferenceInitializationTransitionStarted)
-                });
+            };
+            if (sessionContextSnapshot != null)
+            {
+                sessionConfigurationFields.AddRange(
+                    CreateSessionContextTelemetryFields(
+                        sessionContextSnapshot));
+            }
+
+            QueueTelemetry(
+                TelemetryEventTypes.SessionConfigReceived,
+                true,
+                sessionConfigurationFields.ToArray());
             if (preferenceInitializationTransitionStarted)
             {
                 QueueTelemetry(
@@ -484,6 +652,171 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             networkConnected = connected;
         }
 
+        public bool ReportTelemetryTransferSucceeded(
+            string acknowledgementId,
+            int eventCount,
+            long firstSequenceNumber,
+            long lastSequenceNumber)
+        {
+            if (!IsInitialized)
+            {
+                return false;
+            }
+
+            QueueTelemetry(
+                TelemetryEventTypes.LocalLogUploadSucceeded,
+                true,
+                CreateTelemetryTransferFields(
+                    acknowledgementId,
+                    eventCount,
+                    firstSequenceNumber,
+                    lastSequenceNumber,
+                    null));
+            return true;
+        }
+
+        public bool ReportTelemetryTransferFailed(
+            string diagnosticCode,
+            int eventCount,
+            long firstSequenceNumber,
+            long lastSequenceNumber)
+        {
+            if (!IsInitialized)
+            {
+                return false;
+            }
+
+            QueueTelemetry(
+                TelemetryEventTypes.LocalLogUploadFailed,
+                true,
+                CreateTelemetryTransferFields(
+                    null,
+                    eventCount,
+                    firstSequenceNumber,
+                    lastSequenceNumber,
+                    diagnosticCode));
+            return true;
+        }
+
+        public bool SuspendForHeadsetLifecycle(
+            HeadsetLifecycleInterruptionReason reason,
+            double monotonicTimeSeconds,
+            double utcTimestampUnixSeconds)
+        {
+            ValidateTime(monotonicTimeSeconds, nameof(monotonicTimeSeconds));
+            ValidateTime(
+                utcTimestampUnixSeconds,
+                nameof(utcTimestampUnixSeconds));
+            if (!Enum.IsDefined(
+                    typeof(HeadsetLifecycleInterruptionReason),
+                    reason))
+            {
+                throw new ArgumentOutOfRangeException(nameof(reason));
+            }
+
+            if (headsetLifecycleSuspended)
+            {
+                return false;
+            }
+
+            if (IsInitialized)
+            {
+                ValidateForwardClock(monotonicTimeSeconds);
+            }
+
+            headsetLifecycleSuspended = true;
+            headsetLifecycleSuspendedAtMonotonicSeconds =
+                monotonicTimeSeconds;
+            if (!IsInitialized)
+            {
+                return true;
+            }
+
+            RenewAdaptationCancellation();
+            session.AdvanceTo(monotonicTimeSeconds);
+            hasAdvancedClock = true;
+            lastMonotonicTimeSeconds = monotonicTimeSeconds;
+            var phaseAtLoss = session.Phase;
+
+            if (phaseAtLoss == VrSessionPhase.Adaptive)
+            {
+                var pauseResult = session.ProcessCommand(
+                    HeadsetLifecyclePauseCommandPrefix
+                        + Guid.NewGuid().ToString("N"),
+                    SessionCommandType.Pause,
+                    monotonicTimeSeconds,
+                    false);
+                LastCommandResult = pauseResult;
+                if (pauseResult.Applied)
+                {
+                    pausePhysiologySequenceNumber =
+                        physiologyBuffer.LatestAcceptedSequenceNumber;
+                }
+            }
+
+            QueueTelemetry(
+                TelemetryEventTypes.ApplicationFocusLost,
+                true,
+                new[]
+                {
+                    TelemetryField.String(
+                        "interruption_reason",
+                        reason.ToString()),
+                    TelemetryField.String(
+                        "phase_at_loss",
+                        phaseAtLoss.ToString())
+                });
+            return true;
+        }
+
+        public bool RestoreHeadsetLifecycle(
+            double monotonicTimeSeconds,
+            double utcTimestampUnixSeconds)
+        {
+            ValidateTime(monotonicTimeSeconds, nameof(monotonicTimeSeconds));
+            ValidateTime(
+                utcTimestampUnixSeconds,
+                nameof(utcTimestampUnixSeconds));
+            if (!headsetLifecycleSuspended)
+            {
+                return false;
+            }
+
+            var suspendedDurationSeconds = Math.Max(
+                0d,
+                monotonicTimeSeconds
+                    - headsetLifecycleSuspendedAtMonotonicSeconds);
+            if (!IsInitialized)
+            {
+                headsetLifecycleSuspended = false;
+                return true;
+            }
+
+            ValidateForwardClock(monotonicTimeSeconds);
+            headsetLifecycleSuspended = false;
+            session.ReanchorClockWithoutAdvancing(monotonicTimeSeconds);
+            applicationBootstrap.EnvironmentManager.DelayActiveTransition(
+                suspendedDurationSeconds);
+            hasAdvancedClock = true;
+            lastMonotonicTimeSeconds = monotonicTimeSeconds;
+            QueueTelemetry(
+                TelemetryEventTypes.ApplicationFocusRestored,
+                true,
+                new[]
+                {
+                    TelemetryField.String(
+                        "phase_on_restore",
+                        session.Phase.ToString()),
+                    TelemetryField.Number(
+                        "suspended_duration_seconds",
+                        suspendedDurationSeconds),
+                    TelemetryField.Boolean(
+                        "automatic_resume",
+                        false)
+                });
+            return true;
+        }
+
         public bool TryDequeue(out TelemetryEvent telemetryEvent)
         {
             if (telemetryBufferingSink == null)
@@ -507,18 +840,24 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             ValidateTime(monotonicTimeSeconds, nameof(monotonicTimeSeconds));
             ValidateTime(utcTimestampUnixSeconds, nameof(utcTimestampUnixSeconds));
-            if (hasAdvancedClock
-                && monotonicTimeSeconds < lastMonotonicTimeSeconds)
-            {
-                throw new ArgumentOutOfRangeException(
-                    nameof(monotonicTimeSeconds),
-                    "Monotonic time cannot move backwards.");
-            }
+            ValidateForwardClock(monotonicTimeSeconds);
 
             hasAdvancedClock = true;
             lastMonotonicTimeSeconds = monotonicTimeSeconds;
             ObserveCompletedOperation(monotonicTimeSeconds);
             ObserveNetworkStateChange();
+            if (headsetLifecycleSuspended)
+            {
+                if (activeOperation == null)
+                {
+                    StartNextSuspendedOperation(
+                        monotonicTimeSeconds,
+                        utcTimestampUnixSeconds);
+                }
+
+                return;
+            }
+
             DrainPhysiology(monotonicTimeSeconds);
             DrainCommands(monotonicTimeSeconds);
             session.AdvanceTo(monotonicTimeSeconds);
@@ -528,8 +867,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 && session.Phase != VrSessionPhase.Adaptive
                 && !pendingInvalidation.HasValue)
             {
-                applicationBootstrap.EnvironmentManager.AdvanceTransition(
-                    monotonicTimeSeconds);
+                var progress = applicationBootstrap.EnvironmentManager
+                    .AdvanceTransition(monotonicTimeSeconds);
+                if (progress.Status
+                    == EnvironmentTransitionStatus.Completed)
+                {
+                    QueueNonAdaptiveTransitionCompleted(progress);
+                    QueuePerformanceTelemetry("transition_completed");
+                }
             }
 
             if (activeOperation != null)
@@ -551,6 +896,20 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             timing = null;
             physiologyValidation = null;
             telemetryConfiguration = null;
+
+            if (preferenceInitializationProfile == null)
+            {
+                return Fail(
+                    "Assign an approved PreferenceInitializationProfile.",
+                    out validationError);
+            }
+
+            if (!preferenceInitializationProfile.TryCreateRuntimeConfiguration(
+                    out preferenceInitializationConfiguration,
+                    out var preferenceError))
+            {
+                return Fail(preferenceError, out validationError);
+            }
 
             if (sessionTimingProfile == null)
             {
@@ -686,30 +1045,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 QueueTelemetry(
                     eventType,
                     !result.Accepted,
-                    new[]
-                    {
-                        TelemetryField.String(
-                            "ingestion_result",
-                            result.ResultCode.ToString()),
-                        TelemetryField.String(
-                            "validation_reason",
-                            result.ValidationReasonCode.ToString()),
-                        TelemetryField.Integer(
-                            "accepted_sequence",
-                            result.AcceptedSequenceNumber),
-                        TelemetryField.Number(
-                            "source_timestamp_utc_unix_seconds",
-                            queued.Window.SourceTimestampUtcUnixSeconds),
-                        TelemetryField.Number(
-                            "window_start_utc_unix_seconds",
-                            queued.Window.WindowStartUtcUnixSeconds),
-                        TelemetryField.Number(
-                            "window_end_utc_unix_seconds",
-                            queued.Window.WindowEndUtcUnixSeconds),
-                        TelemetryField.Number(
-                            "signal_quality",
-                            queued.Window.SignalQuality)
-                    });
+                    CreatePhysiologyTelemetryFields(
+                        queued,
+                        result));
 
                 if (!result.Accepted)
                 {
@@ -729,7 +1067,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             double monotonicTimeSeconds)
         {
             var environmentManager = applicationBootstrap.EnvironmentManager;
-            if (environmentManager.CurrentState.Equals(preferredEnvironment))
+            if (environmentManager.CurrentState.Equals(initialEnvironment))
             {
                 return false;
             }
@@ -740,10 +1078,51 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             // policy transitions; it is not a policy decision or reward event.
             environmentManager.BeginTransition(
                 PreferenceInitializationTransitionId(),
-                preferredEnvironment,
+                initialEnvironment,
                 monotonicTimeSeconds,
                 applicationBootstrap.SceneProfile.TransitionDurationSeconds);
             return true;
+        }
+
+        private static TelemetryField[] CreateSessionContextTelemetryFields(
+            SessionContextSnapshot context)
+        {
+            return new[]
+            {
+                TelemetryField.String(
+                    "session_context_schema_version",
+                    context.SchemaVersion),
+                TelemetryField.String(
+                    "session_context_collected_at",
+                    context.CollectedAt),
+                TelemetryField.Number(
+                    "session_context_subjective_stress",
+                    context.SubjectiveStress),
+                TelemetryField.Number(
+                    "session_context_mood_valence",
+                    context.MoodValence),
+                TelemetryField.Number(
+                    "session_context_fatigue",
+                    context.Fatigue),
+                TelemetryField.Number(
+                    "session_context_sleep_quality",
+                    context.SleepQuality),
+                TelemetryField.Boolean(
+                    "session_context_headache_or_eye_strain",
+                    context.HeadacheOrEyeStrainToday),
+                TelemetryField.Integer(
+                    "session_context_time_of_day_minutes",
+                    context.TimeOfDayMinutes),
+                TelemetryField.Integer(
+                    "session_context_session_sequence_number",
+                    context.SessionSequenceNumber),
+                context.DaysSincePreviousSession.HasValue
+                    ? TelemetryField.Integer(
+                        "session_context_days_since_previous_session",
+                        context.DaysSincePreviousSession.Value)
+                    : TelemetryField.Null(
+                        "session_context_days_since_previous_session")
+            };
         }
 
         private string PreferenceInitializationTransitionId()
@@ -844,6 +1223,35 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 stabilizationSelectionRequested = false;
                 activeOperation = SelectStabilizationStateAsync(
                     monotonicTimeSeconds,
+                    utcTimestampUnixSeconds,
+                    session.ActiveSessionElapsedSeconds);
+                return;
+            }
+
+            if (telemetryQueue.Count > 0)
+            {
+                var pendingTelemetry = telemetryQueue.Dequeue();
+                activeOperation = telemetryRecorder.RecordAsync(
+                    pendingTelemetry.EventType,
+                    utcTimestampUnixSeconds,
+                    session.ActiveSessionElapsedSeconds,
+                    pendingTelemetry.Critical,
+                    pendingTelemetry.Fields,
+                    lifetimeCancellation.Token);
+            }
+        }
+
+        private void StartNextSuspendedOperation(
+            double monotonicTimeSeconds,
+            double utcTimestampUnixSeconds)
+        {
+            if (pendingInvalidation.HasValue && policyController != null)
+            {
+                var reason = pendingInvalidation.Value;
+                pendingInvalidation = null;
+                activeOperation = InvalidateAsync(
+                    reason,
+                    monotonicTimeSeconds,
                     utcTimestampUnixSeconds);
                 return;
             }
@@ -875,7 +1283,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 preferredEnvironment,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task CompleteAdaptiveTransitionAsync(
@@ -890,25 +1298,20 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 session.ActiveSessionElapsedSeconds,
                 session.Phase,
                 networkConnected,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task ResolveRewardAsync(
             double monotonicTimeSeconds,
             double utcTimestampUnixSeconds)
         {
-            // TODO(RESEARCH_DECISION): Wire approved participant discomfort
-            // and safety-report inputs. Zero means no report was received; it
-            // is not an inferred comfort assessment.
             LastRewardResult = await policyController.TryResolveRewardAsync(
                 monotonicTimeSeconds,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
                 session.Phase,
                 networkConnected,
-                0d,
-                0d,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task InvalidateAsync(
@@ -921,28 +1324,51 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 monotonicTimeSeconds,
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
-                lifetimeCancellation.Token);
+                adaptationCancellation.Token);
         }
 
         private async Task SelectStabilizationStateAsync(
             double monotonicTimeSeconds,
-            double utcTimestampUnixSeconds)
+            double utcTimestampUnixSeconds,
+            double sessionElapsedSeconds)
         {
             var result = await policyController.SelectStabilizationStateAsync(
                 session.Phase,
                 preferredEnvironment,
+                initialEnvironment,
                 utcTimestampUnixSeconds,
-                session.ActiveSessionElapsedSeconds,
-                lifetimeCancellation.Token);
+                sessionElapsedSeconds,
+                adaptationCancellation.Token);
             if (result.SelectedState
                 != applicationBootstrap.EnvironmentManager.CurrentState)
             {
+                var transitionId = sessionId + "-stabilization";
                 applicationBootstrap.EnvironmentManager.BeginTransition(
-                    sessionId + "-stabilization",
+                    transitionId,
                     result.SelectedState,
                     monotonicTimeSeconds,
                     applicationBootstrap.SceneProfile
                         .TransitionDurationSeconds);
+                await telemetryRecorder.RecordAsync(
+                        TelemetryEventTypes.TransitionStarted,
+                        utcTimestampUnixSeconds,
+                        sessionElapsedSeconds,
+                        false,
+                        new[]
+                        {
+                            TelemetryField.String(
+                                "transition_id",
+                                transitionId),
+                            TelemetryField.String(
+                                "transition_reason",
+                                "stabilization_selection"),
+                            TelemetryField.Number(
+                                "duration_seconds",
+                                applicationBootstrap.SceneProfile
+                                    .TransitionDurationSeconds)
+                        },
+                        adaptationCancellation.Token)
+                    .ConfigureAwait(false);
             }
 
             stabilizationTransitionStarted = true;
@@ -995,6 +1421,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             SessionDecisionOpportunity opportunity)
         {
             decisionQueue.Enqueue(opportunity);
+            QueuePerformanceTelemetry("decision_opportunity");
         }
 
         private void HandlePhaseChanged(SessionPhaseTransition transition)
@@ -1022,12 +1449,18 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             switch (transition.CurrentPhase)
             {
                 case VrSessionPhase.Paused:
+                    decisionQueue.Clear();
                     RequestInvalidation(
                         RewardAttributionInvalidationReason.Pause);
                     QueueTelemetry(
                         TelemetryEventTypes.SessionPaused,
                         true,
-                        Array.Empty<TelemetryField>());
+                        new[]
+                        {
+                            TelemetryField.String(
+                                "reason",
+                                transition.Reason.ToString())
+                        });
                     break;
                 case VrSessionPhase.Adaptive:
                     if (transition.PreviousPhase == VrSessionPhase.Paused)
@@ -1035,7 +1468,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         QueueTelemetry(
                             TelemetryEventTypes.SessionResumed,
                             true,
-                            Array.Empty<TelemetryField>());
+                            new[]
+                            {
+                                TelemetryField.String(
+                                    "reason",
+                                    transition.Reason.ToString())
+                            });
                     }
                     break;
                 case VrSessionPhase.Stabilization:
@@ -1051,7 +1489,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     QueueTelemetry(
                         TelemetryEventTypes.SessionCompleted,
                         true,
-                        Array.Empty<TelemetryField>());
+                        CreateTerminalTelemetryFields(transition));
+                    QueuePerformanceTelemetry("session_completed");
                     break;
                 case VrSessionPhase.Aborted:
                     decisionQueue.Clear();
@@ -1066,7 +1505,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                             ? TelemetryEventTypes.EmergencyStop
                             : TelemetryEventTypes.SessionAborted,
                         true,
-                        Array.Empty<TelemetryField>());
+                        CreateTerminalTelemetryFields(transition));
+                    QueuePerformanceTelemetry("session_aborted");
                     break;
             }
 
@@ -1082,9 +1522,479 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
             else
             {
-                applicationBootstrap?.EnvironmentManager?.CancelTransition(
-                    out _);
+                var environmentManager =
+                    applicationBootstrap?.EnvironmentManager;
+                if (environmentManager != null
+                    && environmentManager.CancelTransition(
+                        out var cancelledTransitionId))
+                {
+                    QueueTelemetry(
+                        TelemetryEventTypes.TransitionCancelled,
+                        true,
+                        new[]
+                        {
+                            TelemetryField.String(
+                                "transition_id",
+                                cancelledTransitionId),
+                            TelemetryField.String(
+                                "reason",
+                                reason.ToString())
+                        });
+                    QueuePerformanceTelemetry("transition_cancelled");
+                }
             }
+        }
+
+        private static TelemetryField[]
+            CreateApplicationVersionTelemetryFields()
+        {
+            return new[]
+            {
+                StringOrNull("application_version", UnityEngine.Application.version),
+                StringOrNull("unity_version", UnityEngine.Application.unityVersion),
+                StringOrNull("build_guid", UnityEngine.Application.buildGUID),
+                StringOrNull("platform", UnityEngine.Application.platform.ToString())
+            };
+        }
+
+        private static TelemetryField[] CreateDeviceInformationTelemetryFields()
+        {
+            return new[]
+            {
+                StringOrNull("device_model", SystemInfo.deviceModel),
+                StringOrNull("device_type", SystemInfo.deviceType.ToString()),
+                StringOrNull("operating_system", SystemInfo.operatingSystem),
+                StringOrNull("processor_type", SystemInfo.processorType),
+                TelemetryField.Integer(
+                    "processor_count",
+                    SystemInfo.processorCount),
+                TelemetryField.Integer(
+                    "system_memory_mb",
+                    SystemInfo.systemMemorySize),
+                StringOrNull(
+                    "graphics_device_name",
+                    SystemInfo.graphicsDeviceName),
+                StringOrNull(
+                    "graphics_device_type",
+                    SystemInfo.graphicsDeviceType.ToString()),
+                TelemetryField.Integer(
+                    "graphics_memory_mb",
+                    SystemInfo.graphicsMemorySize)
+            };
+        }
+
+        private void QueueSceneReadinessTelemetry()
+        {
+            var activeScene = SceneManager.GetActiveScene();
+            var sceneFields = new[]
+            {
+                TelemetryField.String(
+                    "scene_id",
+                    applicationBootstrap.SceneProfile.SceneId),
+                StringOrNull("unity_scene_name", activeScene.name),
+                TelemetryField.Integer(
+                    "unity_scene_build_index",
+                    activeScene.buildIndex),
+                TelemetryField.String(
+                    "load_observation",
+                    "preloaded_at_session_initialization")
+            };
+            QueueTelemetry(
+                TelemetryEventTypes.SceneLoadStarted,
+                false,
+                sceneFields);
+
+            var bindingValidation =
+                applicationBootstrap.LastBindingValidation;
+            QueueTelemetry(
+                TelemetryEventTypes.SceneBindingValidation,
+                bindingValidation == null || !bindingValidation.IsValid,
+                new[]
+                {
+                    TelemetryField.String(
+                        "scene_id",
+                        applicationBootstrap.SceneProfile.SceneId),
+                    TelemetryField.Boolean(
+                        "valid",
+                        bindingValidation != null
+                            && bindingValidation.IsValid),
+                    StringOrNull(
+                        "validation_code",
+                        bindingValidation?.Code.ToString()),
+                    StringOrNull(
+                        "validation_detail",
+                        bindingValidation?.Detail)
+                });
+            QueueTelemetry(
+                TelemetryEventTypes.SceneLoadCompleted,
+                true,
+                sceneFields);
+        }
+
+        private void QueuePerformanceTelemetry(string checkpoint)
+        {
+            if (telemetryRecorder == null)
+            {
+                return;
+            }
+
+            var deltaTimeSeconds = (double)Time.unscaledDeltaTime;
+            var fields = new List<TelemetryField>
+            {
+                TelemetryField.String("checkpoint", checkpoint),
+                TelemetryField.String("phase", Phase.ToString()),
+                FiniteNumberOrNull(
+                    "unscaled_delta_time_seconds",
+                    deltaTimeSeconds),
+                deltaTimeSeconds > 0d && IsFinite(deltaTimeSeconds)
+                    ? TelemetryField.Number(
+                        "estimated_frames_per_second",
+                        1d / deltaTimeSeconds)
+                    : TelemetryField.Null(
+                        "estimated_frames_per_second"),
+                TelemetryField.Integer(
+                    "managed_memory_bytes",
+                    GC.GetTotalMemory(false)),
+                TelemetryField.Integer(
+                    "target_frame_rate",
+                    UnityEngine.Application.targetFrameRate),
+                TelemetryField.Integer(
+                    "quality_vsync_count",
+                    QualitySettings.vSyncCount)
+            };
+            var refreshRateHertz =
+                Screen.currentResolution.refreshRateRatio.value;
+            fields.Add(
+                FiniteNumberOrNull(
+                    "display_refresh_rate_hz",
+                    refreshRateHertz));
+            QueueTelemetry(
+                TelemetryEventTypes.PerformanceSample,
+                false,
+                fields.ToArray());
+        }
+
+        private static TelemetryField[] CreatePhysiologyTelemetryFields(
+            QueuedPhysiology queued,
+            PhysiologyIngestionResult result)
+        {
+            var window = queued.Window;
+            var stress = window.Stress;
+            var fields = new List<TelemetryField>
+            {
+                TelemetryField.String(
+                    "ingestion_result",
+                    result.ResultCode.ToString()),
+                TelemetryField.String(
+                    "validation_reason",
+                    result.ValidationReasonCode.ToString()),
+                TelemetryField.Integer(
+                    "accepted_sequence",
+                    result.AcceptedSequenceNumber),
+                FiniteNumberOrNull(
+                    "received_utc_unix_seconds",
+                    queued.ReceivedUtcUnixSeconds),
+                FiniteNumberOrNull(
+                    "source_timestamp_utc_unix_seconds",
+                    window.SourceTimestampUtcUnixSeconds),
+                FiniteNumberOrNull(
+                    "window_start_utc_unix_seconds",
+                    window.WindowStartUtcUnixSeconds),
+                FiniteNumberOrNull(
+                    "window_end_utc_unix_seconds",
+                    window.WindowEndUtcUnixSeconds),
+                FiniteNumberOrNull(
+                    "window_duration_seconds",
+                    window.WindowDurationSeconds),
+                FiniteNumberOrNull("heart_rate_bpm", window.HeartRateBpm),
+                OptionalFiniteNumberOrNull("rmssd_ms", window.RmssdMs),
+                OptionalFiniteNumberOrNull("sdnn_ms", window.SdnnMs),
+                FiniteNumberOrNull("signal_quality", window.SignalQuality)
+            };
+
+            if (stress == null)
+            {
+                fields.Add(TelemetryField.Null("stress_mode"));
+                fields.Add(TelemetryField.Null("stress_point_level"));
+                fields.Add(TelemetryField.Null("stress_band_low_level"));
+                fields.Add(TelemetryField.Null("stress_band_high_level"));
+                fields.Add(TelemetryField.Null("stress_label"));
+                fields.Add(TelemetryField.Null("stress_confidence"));
+                fields.Add(TelemetryField.Null("stress_adjacent"));
+                fields.Add(TelemetryField.Null("stress_probability_relaxed"));
+                fields.Add(TelemetryField.Null("stress_probability_mild"));
+                fields.Add(TelemetryField.Null("stress_probability_moderate"));
+                fields.Add(TelemetryField.Null("stress_probability_high"));
+                fields.Add(TelemetryField.Null("continuous_stress_score"));
+                return fields.ToArray();
+            }
+
+            fields.Add(
+                TelemetryField.String(
+                    "stress_mode",
+                    stress.Mode.ToString()));
+            fields.Add(
+                OptionalIntegerOrNull(
+                    "stress_point_level",
+                    stress.PointLevel));
+            fields.Add(
+                OptionalIntegerOrNull(
+                    "stress_band_low_level",
+                    stress.BandLowLevel));
+            fields.Add(
+                OptionalIntegerOrNull(
+                    "stress_band_high_level",
+                    stress.BandHighLevel));
+            fields.Add(StringOrNull("stress_label", stress.Label));
+            fields.Add(
+                FiniteNumberOrNull(
+                    "stress_confidence",
+                    stress.Confidence));
+            fields.Add(
+                stress.Adjacent.HasValue
+                    ? TelemetryField.Boolean(
+                        "stress_adjacent",
+                        stress.Adjacent.Value)
+                    : TelemetryField.Null("stress_adjacent"));
+            fields.Add(
+                FiniteNumberOrNull(
+                    "stress_probability_relaxed",
+                    stress.Probabilities.Level0Probability));
+            fields.Add(
+                FiniteNumberOrNull(
+                    "stress_probability_mild",
+                    stress.Probabilities.Level1Probability));
+            fields.Add(
+                FiniteNumberOrNull(
+                    "stress_probability_moderate",
+                    stress.Probabilities.Level2Probability));
+            fields.Add(
+                FiniteNumberOrNull(
+                    "stress_probability_high",
+                    stress.Probabilities.Level3Probability));
+            fields.Add(
+                FiniteNumberOrNull(
+                    "continuous_stress_score",
+                    stress.ContinuousScore));
+            return fields.ToArray();
+        }
+
+        private void QueueNonAdaptiveTransitionCompleted(
+            EnvironmentTransitionProgress progress)
+        {
+            var fields = new List<TelemetryField>
+            {
+                TelemetryField.String(
+                    "transition_id",
+                    progress.TransitionId),
+                TelemetryField.String(
+                    "transition_reason",
+                    ResolveNonAdaptiveTransitionReason(
+                        progress.TransitionId)),
+                TelemetryField.Number(
+                    "completed_monotonic_seconds",
+                    progress.CompletedMonotonicTimeSeconds.Value)
+            };
+            AddEnvironmentTelemetryFields(
+                fields,
+                "state_after",
+                progress.State);
+            QueueTelemetry(
+                TelemetryEventTypes.TransitionCompleted,
+                false,
+                fields.ToArray());
+        }
+
+        private string ResolveNonAdaptiveTransitionReason(
+            string transitionId)
+        {
+            if (string.Equals(
+                    transitionId,
+                    PreferenceInitializationTransitionId(),
+                    StringComparison.Ordinal))
+            {
+                return "participant_preference_initialization";
+            }
+
+            if (string.Equals(
+                    transitionId,
+                    sessionId + "-stabilization",
+                    StringComparison.Ordinal))
+            {
+                return "stabilization_selection";
+            }
+
+            return "non_adaptive_transition";
+        }
+
+        private TelemetryField[] CreateTerminalTelemetryFields(
+            SessionPhaseTransition transition)
+        {
+            var fields = new List<TelemetryField>
+            {
+                TelemetryField.String(
+                    "terminal_phase",
+                    transition.CurrentPhase.ToString()),
+                TelemetryField.String(
+                    "reason",
+                    transition.Reason.ToString()),
+                TelemetryField.String(
+                    "policy_id",
+                    applicationBootstrap.Policy.PolicyId),
+                TelemetryField.String(
+                    "policy_version",
+                    applicationBootstrap.Policy.PolicyVersion),
+                TelemetryField.Integer(
+                    "accepted_physiology_window_count",
+                    physiologyBuffer.LatestAcceptedSequenceNumber)
+            };
+            if (policyController != null)
+            {
+                var state = applicationBootstrap.Policy.CaptureState();
+                fields.Add(
+                    TelemetryField.Integer(
+                        "policy_decision_count",
+                        state.DecisionCount));
+                fields.Add(
+                    TelemetryField.Integer(
+                        "policy_observed_outcome_count",
+                        state.ObservedOutcomeCount));
+                fields.Add(
+                    TelemetryField.Integer(
+                        "model_update_count",
+                        state.ModelUpdateCount));
+                fields.Add(
+                    TelemetryField.Number(
+                        "total_environment_variation",
+                        policyController.TotalVariation));
+            }
+            else
+            {
+                fields.Add(TelemetryField.Integer("policy_decision_count", 0));
+                fields.Add(
+                    TelemetryField.Integer(
+                        "policy_observed_outcome_count",
+                        0));
+                fields.Add(TelemetryField.Integer("model_update_count", 0));
+                fields.Add(
+                    TelemetryField.Number(
+                        "total_environment_variation",
+                        0d));
+            }
+
+            AddEnvironmentTelemetryFields(
+                fields,
+                "final_state",
+                applicationBootstrap.EnvironmentManager.CurrentState);
+            return fields.ToArray();
+        }
+
+        private static TelemetryField[] CreateTelemetryTransferFields(
+            string acknowledgementId,
+            int eventCount,
+            long firstSequenceNumber,
+            long lastSequenceNumber,
+            string diagnosticCode)
+        {
+            return new[]
+            {
+                TelemetryField.String(
+                    "transfer_kind",
+                    "relay_telemetry_batch"),
+                StringOrNull("acknowledgement_id", acknowledgementId),
+                TelemetryField.Integer(
+                    "event_count",
+                    Math.Max(0, eventCount)),
+                TelemetryField.Integer(
+                    "first_sequence_number",
+                    Math.Max(0L, firstSequenceNumber)),
+                TelemetryField.Integer(
+                    "last_sequence_number",
+                    Math.Max(0L, lastSequenceNumber)),
+                StringOrNull("diagnostic_code", diagnosticCode)
+            };
+        }
+
+        private static void AddEnvironmentTelemetryFields(
+            List<TelemetryField> fields,
+            string prefix,
+            EnvironmentState state)
+        {
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_illumination",
+                    state.Illumination));
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_warmth",
+                    state.Warmth));
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_atmospheric_softness",
+                    state.AtmosphericSoftness));
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_color_richness",
+                    state.ColorRichness));
+            fields.Add(
+                TelemetryField.Number(
+                    prefix + "_ambient_motion",
+                    state.AmbientMotion));
+        }
+
+        private static TelemetryField FiniteNumberOrNull(
+            string name,
+            double value)
+        {
+            return IsFinite(value)
+                ? TelemetryField.Number(name, value)
+                : TelemetryField.Null(name);
+        }
+
+        private static TelemetryField OptionalFiniteNumberOrNull(
+            string name,
+            double? value)
+        {
+            return value.HasValue && IsFinite(value.Value)
+                ? TelemetryField.Number(name, value.Value)
+                : TelemetryField.Null(name);
+        }
+
+        private static TelemetryField OptionalIntegerOrNull(
+            string name,
+            int? value)
+        {
+            return value.HasValue
+                ? TelemetryField.Integer(name, value.Value)
+                : TelemetryField.Null(name);
+        }
+
+        private static TelemetryField StringOrNull(
+            string name,
+            string value)
+        {
+            return string.IsNullOrWhiteSpace(value)
+                ? TelemetryField.Null(name)
+                : TelemetryField.String(name, value.Trim());
+        }
+
+        private static bool IsFinite(double value)
+        {
+            return !double.IsNaN(value) && !double.IsInfinity(value);
+        }
+
+        private static bool ShouldExposeForRelayTransfer(
+            TelemetryEvent telemetryEvent)
+        {
+            return telemetryEvent != null
+                && !string.Equals(
+                    telemetryEvent.EventType,
+                    TelemetryEventTypes.LocalLogUploadSucceeded,
+                    StringComparison.Ordinal)
+                && !string.Equals(
+                    telemetryEvent.EventType,
+                    TelemetryEventTypes.LocalLogUploadFailed,
+                    StringComparison.Ordinal);
         }
 
         private void QueueTelemetry(
@@ -1105,6 +2015,26 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             return false;
         }
 
+        private void ValidateForwardClock(double monotonicTimeSeconds)
+        {
+            if (hasAdvancedClock
+                && monotonicTimeSeconds < lastMonotonicTimeSeconds)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(monotonicTimeSeconds),
+                    "Monotonic time cannot move backwards.");
+            }
+        }
+
+        private void RenewAdaptationCancellation()
+        {
+            adaptationCancellation?.Cancel();
+            adaptationCancellation?.Dispose();
+            adaptationCancellation =
+                CancellationTokenSource.CreateLinkedTokenSource(
+                    lifetimeCancellation.Token);
+        }
+
         private void CleanUpFailedInitialization()
         {
             if (session != null)
@@ -1116,6 +2046,9 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             lifetimeCancellation?.Cancel();
+            adaptationCancellation?.Cancel();
+            adaptationCancellation?.Dispose();
+            adaptationCancellation = null;
             lifetimeCancellation?.Dispose();
             lifetimeCancellation = null;
             telemetrySink?.Dispose();

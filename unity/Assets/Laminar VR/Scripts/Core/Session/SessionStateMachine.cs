@@ -251,6 +251,22 @@ namespace LaminarVR.AdaptiveMeditation.Session
             }
         }
 
+        public void ReanchorClockWithoutAdvancing(double monotonicTimeSeconds)
+        {
+            ValidateMonotonicTime(monotonicTimeSeconds);
+            if (hasObservedClock
+                && monotonicTimeSeconds < lastMonotonicTimeSeconds)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(monotonicTimeSeconds),
+                    monotonicTimeSeconds,
+                    "Monotonic time cannot move backwards.");
+            }
+
+            hasObservedClock = true;
+            lastMonotonicTimeSeconds = monotonicTimeSeconds;
+        }
+
         private SessionCommandResult ProcessStart(
             string commandId,
             double monotonicTimeSeconds)

@@ -7,7 +7,7 @@ import {colors} from '../../theme/theme';
 import {AudioPreferenceFields} from '../../components/AudioPreferenceFields';
 import {audioPreferencesFromOnboarding} from '../../services/preferences/audioPreferences';
 
-const steps = ['Profile', 'Practice', 'Goals', 'Sound', 'Garden', 'Comfort', 'Consent'];
+const steps = ['Profile', 'Practice', 'Goals', 'Sound', 'Garden', 'Consent'];
 const goals = ['Stress reduction', 'Better focus', 'Relaxation', 'Sleep preparation', 'Emotional balance'];
 
 export function OnboardingScreen({navigation}: any) {
@@ -33,7 +33,6 @@ export function OnboardingScreen({navigation}: any) {
       setSaving(false);
     }
   };
-  const canContinue = step !== 5 || profile.lightSensitivity !== null;
   return (
     <Screen>
       <Header title="Personalize your space" subtitle={`Step ${step + 1} of ${steps.length} · ${steps[step]}`} />
@@ -53,23 +52,10 @@ export function OnboardingScreen({navigation}: any) {
           <PreferenceSlider label="Ambient motion" value={profile.preferredAmbientMotion} leftLabel="Very Still" rightLabel="Gently Active" onChange={preferredAmbientMotion => update({preferredAmbientMotion})} />
         </Card>
       ) : null}
-      {step === 5 ? (
-        <Card>
-          <Text style={uiStyles.value}>Comfort and sensitivity</Text>
-          <Text style={uiStyles.body}>These answers help the VR safety layer keep light and environmental motion comfortable.</Text>
-          <Text style={uiStyles.label}>Sensitivity to bright environments</Text>
-          <View style={uiStyles.wrap}>
-            {([['none', 'None'], ['mild', 'Mild'], ['high', 'High']] as const).map(([value, label]) => (
-              <ChoiceChip key={value} label={label} selected={profile.lightSensitivity === value} onPress={() => update({lightSensitivity: value})} />
-            ))}
-          </View>
-          <PreferenceSlider label="Motion sensitivity" value={profile.motionSensitivity} leftLabel="Low Sensitivity" rightLabel="High Sensitivity" onChange={motionSensitivity => update({motionSensitivity})} />
-        </Card>
-      ) : null}
-      {step === 6 ? <Card><Text style={uiStyles.value}>Consent and privacy</Text><Text style={uiStyles.body}>Physiological readings are used to support the active session and research workflow. You stay in control of session exit and optional research participation.</Text><ChoiceChip label="I acknowledge the privacy notice" selected={profile.consentAccepted} onPress={() => update({consentAccepted: !profile.consentAccepted})} /><ChoiceChip label="I consent to research participation" selected={profile.researchConsent} onPress={() => update({researchConsent: !profile.researchConsent})} /></Card> : null}
+      {step === 5 ? <Card><Text style={uiStyles.value}>Consent and privacy</Text><Text style={uiStyles.body}>Physiological readings are used to support the active session and research workflow. You stay in control of session exit and optional research participation.</Text><ChoiceChip label="I acknowledge the privacy notice" selected={profile.consentAccepted} onPress={() => update({consentAccepted: !profile.consentAccepted})} /><ChoiceChip label="I consent to research participation" selected={profile.researchConsent} onPress={() => update({researchConsent: !profile.researchConsent})} /></Card> : null}
       <View style={uiStyles.row}>
         {step > 0 ? <View style={{flex: 1}}><SecondaryButton label="Back" onPress={() => setStep(value => value - 1)} /></View> : null}
-        <View style={{flex: 1}}><PrimaryButton label={step === steps.length - 1 ? (saving ? 'Saving...' : 'Complete') : 'Continue'} disabled={saving || !canContinue || step === steps.length - 1 && !profile.consentAccepted} onPress={step === steps.length - 1 ? finish : () => setStep(value => value + 1)} /></View>
+        <View style={{flex: 1}}><PrimaryButton label={step === steps.length - 1 ? (saving ? 'Saving...' : 'Complete') : 'Continue'} disabled={saving || step === steps.length - 1 && !profile.consentAccepted} onPress={step === steps.length - 1 ? finish : () => setStep(value => value + 1)} /></View>
       </View>
       {saveError ? <Text style={[uiStyles.label, {color: colors.rose, textAlign: 'center'}]}>{saveError}</Text> : null}
     </Screen>

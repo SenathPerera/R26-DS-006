@@ -30,6 +30,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private string forwardedSessionId;
         private string forwardedParticipantPseudonym;
         private EnvironmentState forwardedPreferredEnvironment;
+        private SessionContextSnapshot forwardedSessionContext;
 
         public int PendingMessageCount => inboundMessages.Count;
 
@@ -59,13 +60,20 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public void ReceiveSessionContext(
             string sessionId,
             string participantPseudonym,
-            EnvironmentState safePreferredEnvironment)
+            EnvironmentState safePreferredEnvironment,
+            SessionContextSnapshot sessionContext)
         {
+            if (sessionContext == null)
+            {
+                throw new ArgumentNullException(nameof(sessionContext));
+            }
+
             inboundMessages.Enqueue(
                 InboundMessage.ForSessionContext(
                     sessionId,
                     participantPseudonym,
-                    safePreferredEnvironment));
+                    safePreferredEnvironment,
+                    sessionContext));
         }
 
         public void ReceivePhysiology(PhysiologyWindow window)
@@ -171,7 +179,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                         message.ParticipantPseudonym,
                         StringComparison.Ordinal)
                     && forwardedPreferredEnvironment
-                        == message.SafePreferredEnvironment)
+                        == message.SafePreferredEnvironment
+                    && Equals(
+                        forwardedSessionContext,
+                        message.SessionContext))
                 {
                     return;
                 }
@@ -184,12 +195,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             productionCoordinator.ConfigureSessionContext(
                 message.SessionId,
                 message.ParticipantPseudonym,
-                message.SafePreferredEnvironment);
+                message.SafePreferredEnvironment,
+                message.SessionContext);
             hasForwardedSessionContext = true;
             forwardedSessionId = message.SessionId?.Trim();
             forwardedParticipantPseudonym =
                 message.ParticipantPseudonym?.Trim();
             forwardedPreferredEnvironment = message.SafePreferredEnvironment;
+            forwardedSessionContext = message.SessionContext;
         }
 
         private enum InboundMessageKind
@@ -207,6 +220,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 string sessionId,
                 string participantPseudonym,
                 EnvironmentState safePreferredEnvironment,
+                SessionContextSnapshot sessionContext,
                 PhysiologyWindow physiology,
                 string commandId,
                 SessionCommandType commandType,
@@ -216,6 +230,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 SessionId = sessionId;
                 ParticipantPseudonym = participantPseudonym;
                 SafePreferredEnvironment = safePreferredEnvironment;
+                SessionContext = sessionContext;
                 Physiology = physiology;
                 CommandId = commandId;
                 CommandType = commandType;
@@ -230,6 +245,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             public EnvironmentState SafePreferredEnvironment { get; }
 
+            public SessionContextSnapshot SessionContext { get; }
+
             public PhysiologyWindow Physiology { get; }
 
             public string CommandId { get; }
@@ -241,13 +258,15 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             public static InboundMessage ForSessionContext(
                 string sessionId,
                 string participantPseudonym,
-                EnvironmentState safePreferredEnvironment)
+                EnvironmentState safePreferredEnvironment,
+                SessionContextSnapshot sessionContext)
             {
                 return new InboundMessage(
                     InboundMessageKind.SessionContext,
                     sessionId,
                     participantPseudonym,
                     safePreferredEnvironment,
+                    sessionContext,
                     null,
                     null,
                     default,
@@ -262,6 +281,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     null,
                     null,
                     default,
+                    null,
                     physiology,
                     null,
                     default,
@@ -278,6 +298,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     null,
                     default,
                     null,
+                    null,
                     commandId,
                     commandType,
                     default);
@@ -291,6 +312,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     null,
                     null,
                     default,
+                    null,
                     null,
                     null,
                     default,

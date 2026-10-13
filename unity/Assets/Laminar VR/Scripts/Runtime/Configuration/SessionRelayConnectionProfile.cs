@@ -51,6 +51,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private int maximumTelemetryEventsPerBatch = 0;
 
         [Tooltip(
+            "Maximum time for WebSocket connection and pairing. The current "
+            + "relay uses the same 20-second handshake limit.")]
+        [SerializeField, Min(0.1f)]
+        private float connectionTimeoutSeconds = 20f;
+
+        [Tooltip(
             "Development-only opt-in for a non-TLS ws:// relay. Leave disabled "
             + "for deployed Quest builds.")]
         [SerializeField]
@@ -122,7 +128,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
                     questClientId,
                     appVersion,
                     maximumMessageBytes,
-                    maximumTelemetryEventsPerBatch);
+                    maximumTelemetryEventsPerBatch,
+                    connectionTimeoutSeconds);
                 validationError = string.Empty;
                 return true;
             }

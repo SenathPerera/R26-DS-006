@@ -21,7 +21,6 @@ describe('Supabase database mappers', () => {
       preferred_illumination: 0.35, preferred_warmth: 0.65,
       preferred_atmospheric_softness: 0.2, preferred_color_richness: 0.75,
       preferred_ambient_motion: 0.4,
-      light_sensitivity: 'mild', motion_sensitivity: 0.6,
       research_consent: false, privacy_notice_version: 'mindsync-privacy-v1',
       consented_at: '2026-09-01T00:00:00Z', updated_at: '2026-09-01T00:00:00Z',
     }, profile.name);
@@ -30,7 +29,6 @@ describe('Supabase database mappers', () => {
     expect(onboarding).toMatchObject({
       name: 'Ari', preferredDuration: 20, researchConsent: false,
       preferredIllumination: 0.35,
-      lightSensitivity: 'mild', motionSensitivity: 0.6,
     });
   });
 

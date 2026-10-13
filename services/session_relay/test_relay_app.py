@@ -33,6 +33,7 @@ class SessionRelayAppTests(unittest.TestCase):
                 "requestId": "request-1",
                 "participantPseudonym": "participant-7",
                 "sceneId": "temple-pond",
+                "studyCondition": "ContextualBandit",
                 "preferredEnvironment": {
                     "illumination": 0.319,
                     "warmth": 0.5,
@@ -40,10 +41,12 @@ class SessionRelayAppTests(unittest.TestCase):
                     "colorRichness": 0.5,
                     "ambientMotion": 0.75,
                 },
+                "sessionContext": self._session_context(),
             },
         )
         self.assertEqual(200, prepared.status_code)
         session = prepared.json()
+        self.assertEqual("ContextualBandit", session["studyCondition"])
         session_id = session["sessionId"]
 
         mobile_path = (
@@ -69,6 +72,14 @@ class SessionRelayAppTests(unittest.TestCase):
                 configuration = quest.receive_json()
                 self.assertTrue(pairing["payload"]["accepted"])
                 self.assertEqual("session_configuration", configuration["messageType"])
+                self.assertEqual(
+                    "ContextualBandit",
+                    configuration["payload"]["studyCondition"],
+                )
+                self.assertEqual(
+                    self._session_context(),
+                    configuration["payload"]["sessionContext"],
+                )
 
                 # A command sent before readiness must arrive before start. This
                 # guards against starting immediately after configuration.
@@ -134,6 +145,13 @@ class SessionRelayAppTests(unittest.TestCase):
                 )
                 self.assertEqual(telemetry, forwarded)
 
+                quest.send_json(telemetry)
+                duplicate_acknowledgement = quest.receive_json()
+                self.assertEqual(
+                    "telemetry-message",
+                    duplicate_acknowledgement["payload"]["acknowledgedMessageId"],
+                )
+
                 completed = self._envelope(
                     "quest_state",
                     {
@@ -190,11 +208,13 @@ class SessionRelayAppTests(unittest.TestCase):
         request = {
             "requestId": "audio-request-1", "participantPseudonym": "participant-7",
             "sceneId": "temple-pond",
+            "studyCondition": "ContextualBandit",
             "preferredEnvironment": {
                 "illumination": 0.3, "warmth": 0.5,
                 "atmosphericSoftness": 0.5, "colorRichness": 0.5,
                 "ambientMotion": 0.5,
             },
+            "sessionContext": self._session_context(),
             "audioPreferences": {
                 "schemaVersion": "mindsync-audio-preferences-v1",
                 "longTerm": long_term,
@@ -207,6 +227,11 @@ class SessionRelayAppTests(unittest.TestCase):
         self.assertEqual(prepared.json(), self.client.post("/sessions", json=request).json())
         changed = {**request, "participantPseudonym": "participant-8"}
         self.assertEqual(409, self.client.post("/sessions", json=changed).status_code)
+        changed_audio = {**request, "audioPreferences": {
+            **request["audioPreferences"], "preferenceMode": "usual",
+            "sessionOverride": None,
+        }}
+        self.assertEqual(409, self.client.post("/sessions", json=changed_audio).status_code)
         session = prepared.json()
         with self.client.websocket_connect("/realtime?role=quest") as quest:
             quest.send_json(self._envelope("pairing_request", {
@@ -216,22 +241,68 @@ class SessionRelayAppTests(unittest.TestCase):
             self.assertTrue(quest.receive_json()["payload"]["accepted"])
             configuration = quest.receive_json()
             self.assertEqual(session["sessionId"], configuration["payload"]["sessionId"])
+            self.assertEqual(request["studyCondition"], configuration["payload"]["studyCondition"])
+            self.assertEqual(request["sessionContext"], configuration["payload"]["sessionContext"])
             self.assertEqual(request["audioPreferences"], configuration["payload"]["audioPreferences"])
 
     def test_rejects_incomplete_audio_adjustment(self) -> None:
         request = {
             "requestId": "bad-audio-request", "participantPseudonym": "participant-7",
             "sceneId": "temple-pond",
+            "studyCondition": "StaticPersonalized",
             "preferredEnvironment": {
                 "illumination": 0.5, "warmth": 0.5,
                 "atmosphericSoftness": 0.5, "colorRichness": 0.5,
                 "ambientMotion": 0.5,
             },
+            "sessionContext": self._session_context(),
             "audioPreferences": {
                 "schemaVersion": "mindsync-audio-preferences-v1",
                 "longTerm": self._audio_profile(),
                 "preferenceMode": "adjust", "sessionOverride": None,
             },
+        }
+        self.assertEqual(422, self.client.post("/sessions", json=request).status_code)
+
+    def test_create_session_rejects_unknown_study_condition(self) -> None:
+        response = self.client.post(
+            "/sessions",
+            json={
+                "requestId": "request-invalid-condition",
+                "participantPseudonym": "participant-7",
+                "sceneId": "temple-pond",
+                "studyCondition": "ExperimentalPolicy",
+                "preferredEnvironment": {
+                    "illumination": 0.5,
+                    "warmth": 0.5,
+                    "atmosphericSoftness": 0.5,
+                    "colorRichness": 0.5,
+                    "ambientMotion": 0.5,
+                },
+                "sessionContext": self._session_context(),
+            },
+        )
+
+        self.assertEqual(422, response.status_code)
+
+    def test_create_session_rejects_missing_or_invalid_session_context(self) -> None:
+        request = {
+            "requestId": "request-invalid-context",
+            "participantPseudonym": "participant-7",
+            "sceneId": "temple-pond",
+            "studyCondition": "StaticPersonalized",
+            "preferredEnvironment": {
+                "illumination": 0.5,
+                "warmth": 0.5,
+                "atmosphericSoftness": 0.5,
+                "colorRichness": 0.5,
+                "ambientMotion": 0.5,
+            },
+        }
+        self.assertEqual(422, self.client.post("/sessions", json=request).status_code)
+        request["sessionContext"] = {
+            **self._session_context(),
+            "subjectiveStress": 11,
         }
         self.assertEqual(422, self.client.post("/sessions", json=request).status_code)
 
@@ -244,6 +315,21 @@ class SessionRelayAppTests(unittest.TestCase):
             "noveltyTolerance": 0.2, "avoidDissonance": True,
             "rhythmPreference": "minimal", "natureSoundPreference": "medium",
             "reverbPreference": "spacious", "volumePreference": "low",
+        }
+
+    @staticmethod
+    def _session_context() -> dict:
+        return {
+            "schemaVersion": "mindsync-session-context-v1",
+            "collectedAt": "2026-10-10T08:30:00.000Z",
+            "subjectiveStress": 6,
+            "moodValence": -0.2,
+            "fatigue": 0.7,
+            "sleepQuality": 0.4,
+            "headacheOrEyeStrainToday": False,
+            "timeOfDayMinutes": 510,
+            "sessionSequenceNumber": 2,
+            "daysSincePreviousSession": 3,
         }
 
     @staticmethod

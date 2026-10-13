@@ -2,9 +2,8 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This approval permits runtime
-use for the time-constrained MVP; it does not establish that the selection
-weights are scientifically optimal.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. It does not
+establish that the selection weights are scientifically optimal.
 
 ## Context
 

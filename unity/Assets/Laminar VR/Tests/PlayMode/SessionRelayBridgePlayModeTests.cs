@@ -69,6 +69,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(
                 setup.Transport.PublishedQuestStates[0].Phase,
                 Is.EqualTo(VrSessionPhase.Boot));
+            Assert.That(
+                setup.Bootstrap.HasExplicitStudyPolicySelection,
+                Is.True);
+            Assert.That(
+                setup.Bootstrap.StudyPolicyMode,
+                Is.EqualTo(StudyPolicyMode.StaticPersonalized));
         }
 
         [UnityTest]
@@ -97,6 +103,37 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             Assert.That(
                 setup.Bridge.LastInboundRejection,
                 Is.EqualTo("session-configuration-required"));
+        }
+
+        [UnityTest]
+        public IEnumerator Bridge_RejectsStudyConditionChangeAfterSelection()
+        {
+            var setup = CreateSetup();
+            var connectTask = setup.Bridge.ConnectAsync(
+                CreateConnectionInfo(),
+                CancellationToken.None);
+            yield return AwaitTask(connectTask);
+
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration(
+                    "production-test-scene",
+                    StudyPolicyMode.StaticPersonalized));
+            setup.Bridge.ProcessPendingMessages();
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration(
+                    "production-test-scene",
+                    StudyPolicyMode.RuleBasedAdaptive));
+            setup.Bridge.ProcessPendingMessages();
+
+            Assert.That(
+                setup.Bridge.RejectedInboundMessageCount,
+                Is.EqualTo(1));
+            StringAssert.StartsWith(
+                "study-condition-invalid:",
+                setup.Bridge.LastInboundRejection);
+            Assert.That(
+                setup.Bootstrap.StudyPolicyMode,
+                Is.EqualTo(StudyPolicyMode.StaticPersonalized));
         }
 
         [UnityTest]
@@ -190,6 +227,58 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         }
 
         [UnityTest]
+        public IEnumerator ConnectionLoss_ReconnectsAndRetriesRetainedTelemetry()
+        {
+            var setup = CreateSetup();
+            var connectTask = setup.Bridge.ConnectAsync(
+                CreateConnectionInfo(),
+                CancellationToken.None);
+            yield return AwaitTask(connectTask);
+
+            setup.TelemetrySource.Enqueue(CreateTelemetryEvent(1));
+            setup.Transport.EmitConfiguration(
+                CreateConfiguration("production-test-scene"));
+            setup.Bridge.ProcessPendingMessages();
+            setup.Bridge.ProcessPendingMessages();
+            Assert.That(setup.Transport.TelemetryPublishAttemptCount, Is.EqualTo(1));
+
+            setup.Transport.EmitConnectionLost();
+            setup.Bridge.ProcessPendingMessages();
+            setup.Bridge.ProcessPendingMessages();
+            setup.Bridge.ProcessPendingMessages();
+
+            Assert.That(setup.Transport.ConnectAttemptCount, Is.EqualTo(2));
+            Assert.That(setup.Transport.TelemetryPublishAttemptCount, Is.EqualTo(2));
+            Assert.That(setup.Bridge.PendingTelemetryEventCount, Is.EqualTo(1));
+            Assert.That(setup.Bridge.LastConnectionError, Is.Empty);
+        }
+
+        [UnityTest]
+        public IEnumerator ReconnectSchedule_StopsAfterConfiguredAttempts()
+        {
+            var setup = CreateSetup();
+            var connectTask = setup.Bridge.ConnectAsync(
+                CreateConnectionInfo(),
+                CancellationToken.None);
+            yield return AwaitTask(connectTask);
+
+            setup.Transport.RemainingConnectFailures = 2;
+            setup.Transport.EmitConnectionLost();
+            for (var index = 0; index < 6; index++)
+            {
+                setup.Bridge.ProcessPendingMessages();
+            }
+
+            Assert.That(setup.Transport.ConnectAttemptCount, Is.EqualTo(3));
+            Assert.That(
+                setup.Transport.ConnectionState,
+                Is.EqualTo(SessionTransportConnectionState.Disconnected));
+            Assert.That(
+                setup.Bridge.LastConnectionError,
+                Is.EqualTo("relay-reconnect-exhausted"));
+        }
+
+        [UnityTest]
         public IEnumerator TerminalState_WaitsForAllTelemetryAcknowledgements()
         {
             var setup = CreateSetup();
@@ -246,10 +335,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             var root = Track(new GameObject("SessionRelayBridgeHarness"));
             var adapter = root.AddComponent<RecordingAdapter>();
             var bootstrap = root.AddComponent<ApplicationBootstrap>();
-            bootstrap.Configure(
+            bootstrap.ConfigureForSessionSelection(
                 CreateSceneProfile(),
-                adapter,
-                StudyPolicyMode.StaticPersonalized);
+                adapter);
 
             var coordinator = root.AddComponent<ProductionSessionCoordinator>();
             coordinator.enabled = false;
@@ -266,11 +354,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 coordinator,
                 boundary,
                 new FakeTransportFactory(transport),
-                telemetrySource);
+                telemetrySource,
+                CreateReconnectProfile());
             bridge.enabled = true;
 
             return new Setup(
                 bridge,
+                bootstrap,
                 boundary,
                 transport,
                 telemetrySource);
@@ -281,6 +371,14 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             var profile = ScriptableObject.CreateInstance<
                 SceneParameterProfile>();
             JsonUtility.FromJsonOverwrite(SceneProfileJson, profile);
+            return Track(profile);
+        }
+
+        private ReconnectBackoffProfile CreateReconnectProfile()
+        {
+            var profile = ScriptableObject.CreateInstance<
+                ReconnectBackoffProfile>();
+            JsonUtility.FromJsonOverwrite(ReconnectProfileJson, profile);
             return Track(profile);
         }
 
@@ -343,7 +441,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
         }
 
         private static SessionRelayConfigurationMessage CreateConfiguration(
-            string sceneId)
+            string sceneId,
+            StudyPolicyMode policyMode = StudyPolicyMode.StaticPersonalized)
         {
             return new SessionRelayConfigurationMessage(
                 SchemaVersion,
@@ -351,24 +450,45 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 "session-42",
                 "P017",
                 sceneId,
-                new EnvironmentState(0.3f, 0.6f, 0.2f, 0.7f, 0.4f));
+                policyMode,
+                new EnvironmentState(0.3f, 0.6f, 0.2f, 0.7f, 0.4f),
+                CreateSessionContext());
+        }
+
+        private static SessionContextSnapshot CreateSessionContext()
+        {
+            return new SessionContextSnapshot(
+                SessionContextSnapshot.SupportedSchemaVersion,
+                "2026-10-10T08:30:00.000Z",
+                6d,
+                -0.2d,
+                0.7d,
+                0.4d,
+                false,
+                510,
+                2,
+                3);
         }
 
         private sealed class Setup
         {
             public Setup(
                 SessionRelayBridge bridge,
+                ApplicationBootstrap bootstrap,
                 VisualSessionBoundary boundary,
                 FakeSessionRelayTransport transport,
                 FakeRecordedTelemetrySource telemetrySource)
             {
                 Bridge = bridge;
+                Bootstrap = bootstrap;
                 Boundary = boundary;
                 Transport = transport;
                 TelemetrySource = telemetrySource;
             }
 
             public SessionRelayBridge Bridge { get; }
+
+            public ApplicationBootstrap Bootstrap { get; }
 
             public VisualSessionBoundary Boundary { get; }
 
@@ -473,12 +593,28 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
 
             public int TelemetryPublishAttemptCount { get; private set; }
 
+            public int ConnectAttemptCount { get; private set; }
+
+            public int RemainingConnectFailures { get; set; }
+
             public Task ConnectAsync(CancellationToken cancellationToken)
             {
                 cancellationToken.ThrowIfCancellationRequested();
+                ConnectAttemptCount++;
                 PublishTransition(
                     SessionTransportConnectionState.Connecting,
                     SessionTransportStatusReason.ConnectRequested);
+                if (RemainingConnectFailures > 0)
+                {
+                    RemainingConnectFailures--;
+                    PublishTransition(
+                        SessionTransportConnectionState.Disconnected,
+                        SessionTransportStatusReason.ConnectionFailed);
+                    return Task.FromException(
+                        new InvalidOperationException(
+                            "Simulated connection failure."));
+                }
+
                 PublishTransition(
                     SessionTransportConnectionState.Connected,
                     SessionTransportStatusReason.ConnectSucceeded);
@@ -551,6 +687,13 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 TelemetryBatchAcknowledged?.Invoke(messageId);
             }
 
+            public void EmitConnectionLost()
+            {
+                PublishTransition(
+                    SessionTransportConnectionState.Disconnected,
+                    SessionTransportStatusReason.ConnectionLost);
+            }
+
             private void PublishTransition(
                 SessionTransportConnectionState targetState,
                 SessionTransportStatusReason reason)
@@ -601,6 +744,16 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
             ""ambientMotionActionStep"": 0.1,
             ""transitionDurationSeconds"": 0.05,
             ""minimumSecondsBetweenActions"": 0.0
+        }";
+
+        private const string ReconnectProfileJson = @"{
+            ""configurationId"": ""relay-reconnect-test-v1"",
+            ""configurationVersion"": 1,
+            ""researchConfigurationApproved"": true,
+            ""maximumAttempts"": 2,
+            ""initialDelaySeconds"": 0.0,
+            ""maximumDelaySeconds"": 0.0,
+            ""delayMultiplier"": 1.0
         }";
     }
 }

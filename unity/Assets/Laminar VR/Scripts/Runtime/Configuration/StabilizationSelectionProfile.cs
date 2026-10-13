@@ -20,8 +20,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Best Recent State")]
-        // TODO(RESEARCH_DECISION): Freeze these values before pilot use. The
-        // blueprint's example range is guidance, not an approved default.
+        // Approved selection values live only in versioned profiles.
         [SerializeField, Min(0)]
         private int recentOutcomeCount = 0;
 

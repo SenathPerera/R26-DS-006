@@ -23,8 +23,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Event Schema")]
-        // TODO(RESEARCH_DECISION): Approve the telemetry schema identity and
-        // version before using logs as pilot or study data.
+        // Approved schema identities live only in versioned profiles.
         [SerializeField]
         private string eventSchemaId = string.Empty;
 
@@ -32,8 +31,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private string eventSchemaVersion = string.Empty;
 
         [Header("Local JSON Lines")]
-        // TODO(RESEARCH_DECISION): Approve flush cadence together with storage,
-        // retention, recovery, and export requirements.
+        // Approved flush cadence must remain aligned with the data protocol.
         [SerializeField, Min(0)]
         private int flushEveryEventCount = 0;
 

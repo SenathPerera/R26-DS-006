@@ -23,7 +23,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Phase Timing (seconds)")]
-        // TODO(RESEARCH_DECISION): Zero keeps new timing profiles invalid until calibrated.
+        // Zero keeps new timing profiles invalid until explicitly configured.
         [SerializeField, Min(0f)]
         private float acclimatizationDurationSeconds = 0f;
 
@@ -34,7 +34,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private float stabilizationDurationSeconds = 0f;
 
         [Header("Decision Schedule (seconds)")]
-        // TODO(RESEARCH_DECISION): Coordinate this with transition and physiology windows.
+        // Approved schedules must remain compatible with transition and physiology timing.
         [SerializeField, Min(0f)]
         private float decisionIntervalSeconds = 0f;
 

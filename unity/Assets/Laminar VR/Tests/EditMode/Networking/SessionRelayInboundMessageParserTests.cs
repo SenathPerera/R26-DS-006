@@ -1,4 +1,5 @@
 using LaminarVR.AdaptiveMeditation.Networking;
+using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Runtime.Networking;
 using LaminarVR.AdaptiveMeditation.Session;
 using NUnit.Framework;
@@ -8,6 +9,14 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
     public sealed class SessionRelayInboundMessageParserTests
     {
         private const string SchemaVersion = "mindsync-relay-test-v1";
+        private const string SessionContextJson =
+            "{\"schemaVersion\":\"mindsync-session-context-v1\","
+            + "\"collectedAt\":\"2026-10-10T08:30:00.000Z\","
+            + "\"subjectiveStress\":6,\"moodValence\":-0.2,"
+            + "\"fatigue\":0.7,\"sleepQuality\":0.4,"
+            + "\"headacheOrEyeStrainToday\":false,"
+            + "\"timeOfDayMinutes\":510,\"sessionSequenceNumber\":2,"
+            + "\"daysSincePreviousSession\":3}";
 
         private readonly SessionRelayInboundMessageParser parser =
             new SessionRelayInboundMessageParser(SchemaVersion);
@@ -22,9 +31,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\"," 
                 + "\"participantPseudonym\":\"P017\"," 
                 + "\"sceneId\":\"temple-pond\"," 
+                + "\"studyCondition\":\"ContextualBandit\","
                 + "\"preferredEnvironment\":{\"illumination\":0.3," 
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2," 
-                + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4},"
+                + "\"sessionContext\":" + SessionContextJson + "}}";
 
             var parsed = parser.TryParse(Json, out var message, out var reason);
 
@@ -40,11 +51,23 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
             Assert.That(message.Configuration.ParticipantPseudonym, Is.EqualTo("P017"));
             Assert.That(message.Configuration.SceneId, Is.EqualTo("temple-pond"));
             Assert.That(
+                message.Configuration.StudyPolicyMode,
+                Is.EqualTo(StudyPolicyMode.ContextualBandit));
+            Assert.That(
+                message.Configuration.StudyCondition,
+                Is.EqualTo(StudyConditionCodec.ContextualBandit));
+            Assert.That(
                 message.Configuration.PreferredEnvironment.Illumination,
                 Is.EqualTo(0.3f));
             Assert.That(
                 message.Configuration.PreferredEnvironment.AmbientMotion,
                 Is.EqualTo(0.4f));
+            Assert.That(
+                message.Configuration.SessionContext.SubjectiveStress,
+                Is.EqualTo(6d));
+            Assert.That(
+                message.Configuration.SessionContext.DaysSincePreviousSession,
+                Is.EqualTo(3));
         }
 
         [TestCase("start", SessionCommandType.Start)]
@@ -134,9 +157,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\"," 
                 + "\"participantPseudonym\":\"P017\"," 
                 + "\"sceneId\":\"temple-pond\"," 
+                + "\"studyCondition\":\"StaticPersonalized\","
                 + "\"preferredEnvironment\":{\"illumination\":0.3," 
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2," 
-                + "\"colorRichness\":0.7}}}";
+                + "\"colorRichness\":0.7},"
+                + "\"sessionContext\":" + SessionContextJson + "}}";
 
             var parsed = parser.TryParse(Json, out var message, out var reason);
 
@@ -158,9 +183,11 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 + "\"payload\":{\"sessionId\":\"session-42\"," 
                 + "\"participantPseudonym\":\"P017\"," 
                 + "\"sceneId\":\"temple-pond\"," 
+                + "\"studyCondition\":\"StaticPersonalized\","
                 + "\"preferredEnvironment\":{\"illumination\":1.1," 
                 + "\"warmth\":0.6,\"atmosphericSoftness\":0.2," 
-                + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4},"
+                + "\"sessionContext\":" + SessionContextJson + "}}";
 
             var parsed = parser.TryParse(Json, out var message, out var reason);
 
@@ -192,6 +219,33 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
         }
 
         [Test]
+        public void TryParse_RejectsUnsupportedStudyCondition()
+        {
+            const string Json =
+                "{\"schemaVersion\":\"mindsync-relay-test-v1\","
+                + "\"messageId\":\"config-message-1\","
+                + "\"messageType\":\"session_configuration\","
+                + "\"payload\":{\"sessionId\":\"session-42\","
+                + "\"participantPseudonym\":\"P017\","
+                + "\"sceneId\":\"temple-pond\","
+                + "\"studyCondition\":\"ExperimentalPolicy\","
+                + "\"preferredEnvironment\":{\"illumination\":0.3,"
+                + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4},"
+                + "\"sessionContext\":" + SessionContextJson + "}}";
+
+            var parsed = parser.TryParse(Json, out var message, out var reason);
+
+            Assert.That(parsed, Is.False);
+            Assert.That(message, Is.Null);
+            Assert.That(
+                reason,
+                Is.EqualTo(
+                    SessionRelayMessageParseReasonCode
+                        .StudyConditionUnsupported));
+        }
+
+        [Test]
         public void TryParse_RejectsBlankStableMessageId()
         {
             var json = CreateCommandJson(SchemaVersion, string.Empty, "start");
@@ -204,6 +258,89 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
                 reason,
                 Is.EqualTo(
                     SessionRelayMessageParseReasonCode.RequiredFieldMissing));
+        }
+
+        [Test]
+        public void TryParse_RejectsMissingSessionContext()
+        {
+            const string Json =
+                "{\"schemaVersion\":\"mindsync-relay-test-v1\","
+                + "\"messageId\":\"config-message-1\","
+                + "\"messageType\":\"session_configuration\","
+                + "\"payload\":{\"sessionId\":\"session-42\","
+                + "\"participantPseudonym\":\"P017\","
+                + "\"sceneId\":\"temple-pond\","
+                + "\"studyCondition\":\"StaticPersonalized\","
+                + "\"preferredEnvironment\":{\"illumination\":0.3,"
+                + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4}}}";
+
+            var parsed = parser.TryParse(Json, out var message, out var reason);
+
+            Assert.That(parsed, Is.False);
+            Assert.That(message, Is.Null);
+            Assert.That(
+                reason,
+                Is.EqualTo(
+                    SessionRelayMessageParseReasonCode.RequiredFieldMissing));
+        }
+
+        [Test]
+        public void TryParse_RejectsOutOfRangeSessionContext()
+        {
+            var json =
+                "{\"schemaVersion\":\"mindsync-relay-test-v1\","
+                + "\"messageId\":\"config-message-1\","
+                + "\"messageType\":\"session_configuration\","
+                + "\"payload\":{\"sessionId\":\"session-42\","
+                + "\"participantPseudonym\":\"P017\","
+                + "\"sceneId\":\"temple-pond\","
+                + "\"studyCondition\":\"StaticPersonalized\","
+                + "\"preferredEnvironment\":{\"illumination\":0.3,"
+                + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4},"
+                + "\"sessionContext\":"
+                + SessionContextJson.Replace(
+                    "\"subjectiveStress\":6",
+                    "\"subjectiveStress\":11")
+                + "}}";
+
+            var parsed = parser.TryParse(json, out var message, out var reason);
+
+            Assert.That(parsed, Is.False);
+            Assert.That(message, Is.Null);
+            Assert.That(
+                reason,
+                Is.EqualTo(
+                    SessionRelayMessageParseReasonCode.SessionContextInvalid));
+        }
+
+        [Test]
+        public void TryParse_PreservesMissingPreviousSessionAsNull()
+        {
+            var json =
+                "{\"schemaVersion\":\"mindsync-relay-test-v1\","
+                + "\"messageId\":\"config-message-null-history\","
+                + "\"messageType\":\"session_configuration\","
+                + "\"payload\":{\"sessionId\":\"session-42\","
+                + "\"participantPseudonym\":\"P017\","
+                + "\"sceneId\":\"temple-pond\","
+                + "\"studyCondition\":\"StaticPersonalized\","
+                + "\"preferredEnvironment\":{\"illumination\":0.3,"
+                + "\"warmth\":0.6,\"atmosphericSoftness\":0.2,"
+                + "\"colorRichness\":0.7,\"ambientMotion\":0.4},"
+                + "\"sessionContext\":"
+                + SessionContextJson.Replace(
+                    "\"daysSincePreviousSession\":3",
+                    "\"daysSincePreviousSession\":null")
+                + "}}";
+
+            var parsed = parser.TryParse(json, out var message, out var reason);
+
+            Assert.That(parsed, Is.True, reason.ToString());
+            Assert.That(
+                message.Configuration.SessionContext.DaysSincePreviousSession,
+                Is.Null);
         }
 
         private static string CreateCommandJson(

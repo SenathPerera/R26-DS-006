@@ -2,10 +2,10 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This approval permits the
-calibrated Japanese Temple Pond Garden profiles to initialize at runtime for
-the time-constrained visual MVP. It does not claim that the values are
-scientifically optimal or participant-validated.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. It permits
+the calibrated Japanese Temple Pond Garden profiles to initialize at runtime
+but does not claim that the values are scientifically optimal or
+participant-validated.
 
 ## Context
 

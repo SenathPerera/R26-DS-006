@@ -11,7 +11,8 @@ namespace LaminarVR.AdaptiveMeditation.Networking
             string questClientId,
             string appVersion,
             int maximumMessageBytes,
-            int maximumTelemetryEventsPerBatch)
+            int maximumTelemetryEventsPerBatch,
+            double connectionTimeoutSeconds = 20d)
         {
             Endpoint = ValidateEndpoint(endpoint);
             SchemaVersion = RequireText(
@@ -37,6 +38,17 @@ namespace LaminarVR.AdaptiveMeditation.Networking
 
             MaximumTelemetryEventsPerBatch =
                 maximumTelemetryEventsPerBatch;
+            if (double.IsNaN(connectionTimeoutSeconds)
+                || double.IsInfinity(connectionTimeoutSeconds)
+                || connectionTimeoutSeconds <= 0d
+                || connectionTimeoutSeconds
+                    > TimeSpan.MaxValue.TotalSeconds)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(connectionTimeoutSeconds));
+            }
+
+            ConnectionTimeoutSeconds = connectionTimeoutSeconds;
         }
 
         public Uri Endpoint { get; }
@@ -53,6 +65,8 @@ namespace LaminarVR.AdaptiveMeditation.Networking
         public int MaximumMessageBytes { get; }
 
         public int MaximumTelemetryEventsPerBatch { get; }
+
+        public double ConnectionTimeoutSeconds { get; }
 
         private static Uri ValidateEndpoint(Uri endpoint)
         {

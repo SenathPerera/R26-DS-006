@@ -6,6 +6,7 @@ export type VrStatus = 'not-paired' | 'pairing' | 'ready' | 'waiting' | 'active'
 export type SessionStatus = 'ready' | 'active' | 'paused' | 'ending' | 'complete';
 export type SessionRelayConnectionState = 'idle' | 'connecting' | 'connected' | 'error';
 export type VisualLogDeliveryStatus = 'idle' | 'downloading' | 'pending' | 'acknowledged' | 'error';
+export type StudyCondition = 'StaticPersonalized' | 'RuleBasedAdaptive' | 'ContextualBandit';
 export type QuestionType = 'single' | 'multiple' | 'likert' | 'text' | 'numeric' | 'slider' | 'voice';
 
 export interface UserProfile {
@@ -33,13 +34,10 @@ export interface OnboardingProfile {
   preferredAtmosphericSoftness: number;
   preferredColorRichness: number;
   preferredAmbientMotion: number;
-  lightSensitivity: LightSensitivity | null;
-  motionSensitivity: number;
   consentAccepted: boolean;
   researchConsent: boolean;
 }
 
-export type LightSensitivity = 'none' | 'mild' | 'high';
 export type SessionPreferenceMode = 'usual' | 'adjust';
 
 export interface AudioControlPreferences {
@@ -176,12 +174,26 @@ export interface SessionContext {
   sessionAudioPreference?: AudioControlPreferences | null;
 }
 
+export interface QuestSessionContext {
+  schemaVersion: 'mindsync-session-context-v1';
+  collectedAt: string;
+  subjectiveStress: number;
+  moodValence: number;
+  fatigue: number;
+  sleepQuality: number;
+  headacheOrEyeStrainToday: boolean;
+  timeOfDayMinutes: number;
+  sessionSequenceNumber: number;
+  daysSincePreviousSession: number | null;
+}
+
 export interface PreparedVrSession {
   schemaVersion: string;
   sessionId: string;
   pairingCode: string;
   expiresAt: number;
   mobileToken: string;
+  studyCondition: StudyCondition;
 }
 
 export interface RelayEnvelope {
