@@ -45,6 +45,32 @@ class PreferredEnvironment(BaseModel):
     ambient_motion: float = Field(alias="ambientMotion", ge=0, le=1)
 
 
+class AudioControlPreferences(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    preferred_instruments: list[Literal["piano", "flute", "pad", "strings", "bells", "drone"]] = Field(alias="preferredInstruments", min_length=1, max_length=6)
+    mood: Literal["calm", "focused", "sleepy", "energized"]
+    tempo_preference: Literal["slow", "medium", "fast"] = Field(alias="tempoPreference")
+    audio_intensity: float = Field(alias="audioIntensity", ge=0, le=1)
+    ambient_music_balance: Literal["mostly_ambience", "balanced", "mostly_music"] = Field(alias="ambientMusicBalance")
+    brightness_preference: Literal["soft_dark", "neutral", "bright_clear"] = Field(alias="brightnessPreference")
+    novelty_tolerance: float = Field(alias="noveltyTolerance", ge=0, le=1)
+    avoid_dissonance: bool = Field(alias="avoidDissonance")
+    rhythm_preference: Literal["minimal", "gentle_pulse", "more_motion"] = Field(alias="rhythmPreference")
+    nature_sound_preference: Literal["none", "low", "medium", "high"] = Field(alias="natureSoundPreference")
+    reverb_preference: Literal["dry", "balanced", "spacious"] = Field(alias="reverbPreference")
+    volume_preference: Literal["low", "medium", "high"] = Field(alias="volumePreference")
+
+
+class AudioPreferenceBundle(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+
+    schema_version: Literal["mindsync-audio-preferences-v1"] = Field(alias="schemaVersion")
+    long_term: AudioControlPreferences = Field(alias="longTerm")
+    preference_mode: Literal["usual", "adjust"] = Field(alias="preferenceMode")
+    session_override: AudioControlPreferences | None = Field(alias="sessionOverride")
+
+
 class StudyCondition(str, Enum):
     STATIC_PERSONALIZED = "StaticPersonalized"
     RULE_BASED_ADAPTIVE = "RuleBasedAdaptive"
@@ -95,6 +121,7 @@ class CreateSessionRequest(BaseModel):
     scene_id: Literal["temple-pond"] = Field(alias="sceneId")
     study_condition: StudyCondition = Field(alias="studyCondition")
     preferred_environment: PreferredEnvironment = Field(alias="preferredEnvironment")
+    audio_preferences: AudioPreferenceBundle | None = Field(default=None, alias="audioPreferences")
     session_context: SessionContext = Field(alias="sessionContext")
 
 
@@ -176,6 +203,13 @@ async def health() -> dict[str, str]:
 @app.post("/sessions", response_model=CreateSessionResponse)
 async def create_session(request: CreateSessionRequest) -> CreateSessionResponse:
     environment = request.preferred_environment.model_dump(by_alias=True)
+    audio_preferences = request.audio_preferences
+    if audio_preferences is not None:
+        if (audio_preferences.preference_mode == "adjust") != (audio_preferences.session_override is not None):
+            raise HTTPException(status_code=422, detail="audio-preference-mode-mismatch")
+        for profile in (audio_preferences.long_term, audio_preferences.session_override):
+            if profile is not None and len(set(profile.preferred_instruments)) != len(profile.preferred_instruments):
+                raise HTTPException(status_code=422, detail="duplicate-audio-instruments")
     session_context = request.session_context.model_dump(by_alias=True)
     try:
         session = store.create(
@@ -185,6 +219,7 @@ async def create_session(request: CreateSessionRequest) -> CreateSessionResponse
             request.study_condition.value,
             environment,
             session_context,
+            audio_preferences.model_dump(by_alias=True) if audio_preferences else None,
         )
     except ActiveSessionExistsError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
@@ -412,16 +447,19 @@ async def _send_start_after_initialization(
 
 
 def _configuration(session: PreparedSession) -> dict:
+    payload = {
+        "sessionId": session.session_id,
+        "participantPseudonym": session.participant_pseudonym,
+        "sceneId": session.scene_id,
+        "studyCondition": session.study_condition,
+        "preferredEnvironment": session.preferred_environment,
+        "sessionContext": session.session_context,
+    }
+    if session.audio_preferences is not None:
+        payload["audioPreferences"] = session.audio_preferences
     return _envelope(
         "session_configuration",
-        {
-            "sessionId": session.session_id,
-            "participantPseudonym": session.participant_pseudonym,
-            "sceneId": session.scene_id,
-            "studyCondition": session.study_condition,
-            "preferredEnvironment": session.preferred_environment,
-            "sessionContext": session.session_context,
-        },
+        payload,
     )
 
 

@@ -18,6 +18,9 @@ namespace AdaptiveAudioVR.Core
         public double windowEnd;
         public long sequenceId;
         public bool hasPhysiologyWindow;
+        public bool hasHeartRate;
+        public bool hasRmssd;
+        public bool hasSdnn;
 
         public SignalPacket(float stress, float confidence, float timestamp)
         {
@@ -33,6 +36,9 @@ namespace AdaptiveAudioVR.Core
             windowEnd = 0d;
             sequenceId = 0L;
             hasPhysiologyWindow = false;
+            hasHeartRate = false;
+            hasRmssd = false;
+            hasSdnn = false;
         }
 
         public SignalPacket(
@@ -60,6 +66,9 @@ namespace AdaptiveAudioVR.Core
             this.windowEnd = windowEnd;
             this.sequenceId = sequenceId;
             hasPhysiologyWindow = windowEnd > windowStart && sourceTimestamp > 0d;
+            hasHeartRate = heartRate > 0f;
+            hasRmssd = rmssd > 0f;
+            hasSdnn = sdnn > 0f;
         }
 
         public bool IsRecent(float timeoutSeconds)

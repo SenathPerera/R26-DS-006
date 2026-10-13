@@ -1,11 +1,13 @@
 import type {
   MeditationSession,
+  AudioControlPreferences,
   OnboardingProfile,
   PreferredEnvironment,
   QuestSessionContext,
   SessionContext,
   SessionPreferenceMode,
 } from '../../types/domain';
+import {isAudioControlPreferences, normalizeAudioPreferences} from './audioPreferences';
 
 export const SESSION_CONTEXT_SCHEMA_VERSION =
   'mindsync-session-context-v1' as const;
@@ -26,6 +28,8 @@ export type SessionContextDraft = {
   headacheOrEyeStrainToday: boolean;
   preferenceMode: SessionPreferenceMode;
   temporaryPreference: PreferredEnvironment | null;
+  audioPreferenceMode?: SessionPreferenceMode;
+  temporaryAudioPreference?: AudioControlPreferences | null;
 };
 
 export function preferredEnvironmentFromOnboarding(
@@ -81,6 +85,9 @@ export function createSessionContext(
   previousSessions: MeditationSession[],
   now = new Date(),
 ): SessionContext {
+  if (draft.audioPreferenceMode === 'adjust' && !isAudioControlPreferences(draft.temporaryAudioPreference)) {
+    throw new Error('session-audio-preferences-required');
+  }
   const previousVrSessions = previousSessions.filter(
     session => !session.id.startsWith('voice-'),
   );
@@ -106,6 +113,9 @@ export function createSessionContext(
     timeOfDayMinutes: now.getHours() * 60 + now.getMinutes(),
     sessionSequenceNumber: previousVrSessions.length + 1,
     daysSincePreviousSession: daysSincePrevious(previousVrSessions, now),
+    audioPreferenceMode: draft.audioPreferenceMode ?? 'usual',
+    sessionAudioPreference: draft.audioPreferenceMode === 'adjust'
+      ? normalizeAudioPreferences(draft.temporaryAudioPreference!) : null,
   };
 }
 
@@ -145,6 +155,9 @@ export function isSessionContext(value: unknown): value is SessionContext {
     : value.preferenceMode === 'adjust'
       && temporaryValues.every(isNormalized);
   return value.schemaVersion === SESSION_CONTEXT_SCHEMA_VERSION
+    && (value.audioPreferenceMode === undefined
+      || (value.audioPreferenceMode === 'usual' && value.sessionAudioPreference === null)
+      || (value.audioPreferenceMode === 'adjust' && isAudioControlPreferences(value.sessionAudioPreference)))
     && typeof value.collectedAt === 'string'
     && typeof value.subjectiveStress === 'number'
     && value.subjectiveStress >= 0 && value.subjectiveStress <= 10

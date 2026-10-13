@@ -30,7 +30,7 @@ namespace AdaptiveAudioVR.Logging
             CloseWriter();
         }
 
-        public void StartSession()
+        public void StartSession(string relaySessionId = null)
         {
             if (sessionStarted)
             {
@@ -41,7 +41,11 @@ namespace AdaptiveAudioVR.Logging
             {
                 string logDirectory = Path.Combine(Application.persistentDataPath, "Logs");
                 Directory.CreateDirectory(logDirectory);
-                string fileName = $"adaptive_audio_session_{DateTime.Now:yyyyMMdd_HHmmss}.csv";
+                string safeSessionId = string.IsNullOrWhiteSpace(relaySessionId)
+                    ? DateTime.Now.ToString("yyyyMMdd_HHmmss_fffffff")
+                    : System.Text.RegularExpressions.Regex.Replace(
+                        relaySessionId, "[^A-Za-z0-9_-]", "_");
+                string fileName = $"adaptive_audio_session_{safeSessionId}.csv";
                 CurrentLogPath = Path.Combine(logDirectory, fileName);
                 writer = new StreamWriter(CurrentLogPath, false, Encoding.UTF8);
                 writer.WriteLine("unityTime,sourceTimestamp,windowStart,windowEnd,stress,confidence,signalQuality,heartRate,rmssd,sdnn,intensity,density,brightness,tempo,fade,ambientMix,musicMix,controllerMode,safetyMode,fallbackMode,strategyName,policyStatus,actionName,reward,bpm,guidance,temperature,lyriaPlaybackSource,lyriaGenerationReason,lyriaGenerationOutcome,lyriaCacheState,lyriaClipPath");
@@ -54,6 +58,13 @@ namespace AdaptiveAudioVR.Logging
                 Debug.LogError($"[SessionLogger] Failed to start session log: {ex.Message}", this);
                 sessionStarted = false;
             }
+        }
+
+        public void EndSession()
+        {
+            CloseWriter();
+            sessionStarted = false;
+            lastLogTime = float.MinValue;
         }
 
         public void LogFrame(

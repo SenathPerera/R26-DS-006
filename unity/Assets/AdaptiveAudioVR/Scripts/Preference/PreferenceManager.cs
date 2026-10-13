@@ -16,6 +16,7 @@ namespace AdaptiveAudioVR.Preference
 
         public UserPreferences CurrentPreferences { get; private set; }
         public bool IsUsingFallback { get; private set; }
+        public bool HasParticipantPreferences { get; private set; }
 
         public event Action<UserPreferences> PreferencesLoaded;
 
@@ -29,6 +30,7 @@ namespace AdaptiveAudioVR.Preference
 
         public UserPreferences LoadPreferences()
         {
+            if (HasParticipantPreferences) return CurrentPreferences;
             string path = ResolveConfigPath();
             IsUsingFallback = false;
 
@@ -79,6 +81,16 @@ namespace AdaptiveAudioVR.Preference
             }
 
             return CurrentPreferences;
+        }
+
+        public void SetParticipantPreferences(UserPreferences preferences)
+        {
+            if (preferences == null || string.IsNullOrWhiteSpace(preferences.userId))
+                throw new ArgumentException("A participant audio profile is required.", nameof(preferences));
+            CurrentPreferences = preferences;
+            IsUsingFallback = false;
+            HasParticipantPreferences = true;
+            PreferencesLoaded?.Invoke(CurrentPreferences);
         }
 
         private void UseFallback()

@@ -4,6 +4,9 @@ import {Bluetooth, Database, Headset, HelpCircle, LogOut, RotateCcw, Shield, Use
 import {Card, Header, SecondaryButton, Screen, SectionHeader, uiStyles} from '../../components/ui';
 import {useMindSyncStore} from '../../store/useMindSyncStore';
 import {colors} from '../../theme/theme';
+import {AudioPreferenceFields} from '../../components/AudioPreferenceFields';
+import {audioPreferencesFromOnboarding} from '../../services/preferences/audioPreferences';
+import type {AudioControlPreferences} from '../../types/domain';
 
 export function SettingsScreen({navigation}: any) {
   const [reminders, setReminders] = useState(true);
@@ -16,11 +19,35 @@ export function SettingsScreen({navigation}: any) {
   const dataSyncError = useMindSyncStore(state => state.dataSyncError);
   const lastSyncedAt = useMindSyncStore(state => state.lastSyncedAt);
   const syncNow = useMindSyncStore(state => state.syncNow);
+  const onboarding = useMindSyncStore(state => state.onboarding);
+  const saveUsualAudioPreferences = useMindSyncStore(state => state.saveUsualAudioPreferences);
+  const [editingSound, setEditingSound] = useState(false);
+  const [usualSound, setUsualSound] = useState<AudioControlPreferences>(() => audioPreferencesFromOnboarding(onboarding));
+  const [soundSaving, setSoundSaving] = useState(false);
+  const [soundMessage, setSoundMessage] = useState<string | null>(null);
   const row = (label: string, detail: string, Icon: any) => <View style={uiStyles.row}><Icon color={colors.teal} size={22} /><View style={{flex: 1}}><Text style={uiStyles.value}>{label}</Text><Text style={uiStyles.label}>{detail}</Text></View></View>;
   return (
     <Screen>
       <Header title="Settings" subtitle="Account, devices, privacy, and study support." />
       <Card>{row(user?.name ?? 'Participant', user?.email ?? 'Not signed in', UserRound)}</Card>
+      <SectionHeader title="Usual sound preferences" />
+      <Card>
+        <Text style={uiStyles.body}>Your saved sound choices shape each new meditation clip and your personal audio controller. The selected VR scene provides the musical setting.</Text>
+        <SecondaryButton label={editingSound ? 'Cancel editing' : 'Edit usual sound'} onPress={() => {
+          setUsualSound(audioPreferencesFromOnboarding(onboarding));
+          setSoundMessage(null);
+          setEditingSound(!editingSound);
+        }} />
+      </Card>
+      {editingSound ? <AudioPreferenceFields value={usualSound} onChange={setUsualSound} /> : null}
+      {editingSound ? <SecondaryButton label={soundSaving ? 'Saving...' : 'Save usual sound'} disabled={soundSaving} onPress={() => {
+        setSoundSaving(true);
+        saveUsualAudioPreferences(usualSound)
+          .then(() => { setEditingSound(false); setSoundMessage('Usual sound preferences saved.'); })
+          .catch(error => setSoundMessage(error instanceof Error ? error.message : 'Could not save sound preferences'))
+          .finally(() => setSoundSaving(false));
+      }} /> : null}
+      {soundMessage ? <Text style={uiStyles.label}>{soundMessage}</Text> : null}
       <SectionHeader title="Devices" />
       <Card><SecondaryButton label="Manage wearable" icon={Bluetooth} onPress={() => navigation.navigate('Wearable')} /><SecondaryButton label="Manage VR" icon={Headset} onPress={() => navigation.navigate('VR')} /></Card>
       <SectionHeader title="Notifications" />

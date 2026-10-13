@@ -52,8 +52,8 @@ namespace AdaptiveAudioVR.Editor
         {
             VerifySevenDimensionalActionMapping();
             VerifyImportedObservationContract();
-            VerifyDirectPpoPolicyArtifact();
-            VerifyImportedPolicyArtifact();
+            VerifyOnlineBandit();
+            VerifyOnlineRuntime();
             VerifySafetyGating();
             VerifyDelayedRewardDirection();
             VerifyReplayCapacity();
@@ -83,6 +83,50 @@ namespace AdaptiveAudioVR.Editor
             Ensure(Approximately(result.tempo, 0.37f), "Tempo action was not applied.");
             Ensure(Approximately(result.fade, 0.44f), "Fade action was not applied.");
             Ensure(Approximately(result.musicMix + result.ambientMix, 1f), "Music and ambient mix were not normalized.");
+        }
+
+        private static void VerifyOnlineBandit()
+        {
+            AudioLinUcbModel model = new AudioLinUcbModel(2, 3, 0.25d, 1d);
+            Ensure(model.Select(new[] { 1d, 0d }, new[] { 2, 0, 1 }).Arm == 0,
+                "Equal-score actions must prefer NoChange.");
+            model.Observe(1, new[] { 1d, 0d }, 1d);
+            AudioBanditSelection selected = model.Select(new[] { 1d, 0d }, new[] { 1 });
+            Ensure(Math.Abs(selected.Mean - 0.5d) < 1e-8, "Online LinUCB ridge update is incorrect.");
+            Ensure(model.UpdateCount == 1, "Online outcome was not counted exactly once.");
+            AudioBanditSnapshot corrupt = model.Capture();
+            corrupt.arms[0].covariance[0] = -1d;
+            Ensure(!model.TryRestore(corrupt, out _), "Corrupt model snapshot was accepted.");
+        }
+
+        private static void VerifyOnlineRuntime()
+        {
+            GameObject host = new GameObject("AudioOnlineVerification");
+            try
+            {
+                AudioRLAgent agent = host.AddComponent<AudioRLAgent>();
+                typeof(AudioRLAgent).GetField("persistPersonalizedModel", BindingFlags.Instance | BindingFlags.NonPublic)
+                    ?.SetValue(agent, false);
+                agent.Initialize(new AudioProfile
+                {
+                    userId = "online-verification", baseIntensity = 0.3f, baseDensity = 0.3f,
+                    baseBrightness = 0.3f, baseTempo = 0.2f, baseFade = 0.7f,
+                    baseMusicMix = 0.45f, baseAmbientMix = 0.55f
+                }, PersonalizationStrategy.CreateNeutral());
+                double epoch = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000d;
+                SignalPacket Packet(double end, long sequence) => new SignalPacket(0.6f, 0.9f, 0.95f,
+                    78, 35, 40, epoch + end, epoch + end - 60, epoch + end, sequence, Time.time);
+                agent.EvaluateAt(Packet(60, 1), 1, true, 60, epoch + 60);
+                agent.EvaluateAt(Packet(120, 2), 1, true, 120, epoch + 120);
+                agent.EvaluateAt(Packet(120, 2), 1, true, 121, epoch + 121);
+                agent.EvaluateAt(Packet(180, 3), 1, true, 180, epoch + 180);
+                Ensure(agent.OnlineUpdateCount == 0, "Transition-contaminated window trained the audio model.");
+                agent.EvaluateAt(Packet(240, 4), 1, true, 240, epoch + 240);
+                Ensure(agent.OnlineUpdateCount == 1, "Valid delayed outcome did not update the audio model.");
+                agent.EvaluateAt(Packet(240, 4), 1, true, 241, epoch + 241);
+                Ensure(agent.OnlineUpdateCount == 1, "Duplicate outcome updated audio model twice.");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(host); }
         }
 
         private static void VerifyImportedObservationContract()

@@ -407,8 +407,9 @@ namespace AdaptiveAudioVR.UI
             safetyValueLabel = CreateText(panel, "Safety: Normal", BodyFontSize, FontStyle.Bold, TextAnchor.MiddleLeft);
 
             RectTransform policyModeRow = CreateButtonRow(panel);
-            CreateButton(policyModeRow, "Rule Only", () => bootstrap?.SetRuleOnlyMode());
-            CreateButton(policyModeRow, "PPO Residual", () => bootstrap?.SetPpoResidualMode());
+            CreateButton(policyModeRow, "Static Personalized", () => bootstrap?.SetStaticPersonalizedMode());
+            CreateButton(policyModeRow, "Rule Based", () => bootstrap?.SetRuleOnlyMode());
+            CreateButton(policyModeRow, "Online Personalized", () => bootstrap?.SetPersonalizedBanditMode());
 
             CreateText(panel, "Cause of change", BodyFontSize, FontStyle.Bold, TextAnchor.MiddleLeft);
             causeValueLabel = CreateText(panel, "Waiting for runtime data.", BodyFontSize, FontStyle.Normal, TextAnchor.UpperLeft);
@@ -818,12 +819,12 @@ namespace AdaptiveAudioVR.UI
             if (rewardValueLabel != null)
             {
                 AudioRLRewardBreakdown reward = bootstrap.CurrentRewardBreakdown;
-                rewardValueLabel.text = $"Reward: {bootstrap.CurrentReward:F2} | Stress {reward.stressImprovement:+0.00;-0.00;0.00} | Preference {reward.preferenceMatch:F2}";
+                rewardValueLabel.text = $"Last Valid Reward: {bootstrap.CurrentReward:F2} | Stress {reward.stressImprovement:+0.00;-0.00;0.00} | Preference {reward.preferenceMatch:F2}";
             }
 
             if (safetyValueLabel != null)
             {
-                safetyValueLabel.text = $"Safety: {bootstrap.CurrentSafetyMode} | Replay {bootstrap.CurrentReplayBufferCount}";
+                safetyValueLabel.text = $"Safety: {bootstrap.CurrentSafetyMode} | Outcomes {bootstrap.CurrentReplayBufferCount} | Online updates {bootstrap.CurrentOnlineUpdateCount}";
             }
 
             if (causeValueLabel != null)
@@ -831,10 +832,10 @@ namespace AdaptiveAudioVR.UI
                 causeValueLabel.text =
                     $"Cause chain:\n" +
                     $"{bootstrap.CurrentRLStateSummary}.\n" +
-                    $"Rule action [{bootstrap.CurrentRuleAction}] + residual [{bootstrap.CurrentResidualAction}].\n" +
+                    $"Selected controller: {bootstrap.CurrentRLMode}. Proposed [{bootstrap.CurrentProposedAction}].\n" +
                     $"Final safe action [{bootstrap.CurrentFinalSafeAction}] -> '{bootstrap.CurrentActionName}'.\n" +
                     $"Targets: I {parameters.intensity:F2}, D {parameters.density:F2}, B {parameters.brightness:F2}, Tempo {parameters.tempo:F2}, Fade {parameters.fade:F2}, Ambient {parameters.ambientMix:F2}, Music {parameters.musicMix:F2}.\n" +
-                    $"Safety: {bootstrap.CurrentSafetyReason}";
+                    $"Safety: {bootstrap.CurrentSafetyReason}\nLearning: {bootstrap.CurrentLearningStatus}";
             }
 
             if (lyriaClipGenerationService != null)

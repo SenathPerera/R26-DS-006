@@ -40,14 +40,14 @@ namespace AdaptiveAudioVR.RL.Agent
             var ordered = new List<AudioRLTransition>(transitions.Count);
             if (transitions.Count < capacity || nextWriteIndex == 0)
             {
-                ordered.AddRange(transitions);
+                foreach (AudioRLTransition transition in transitions) ordered.Add(transition.Snapshot());
                 return ordered;
             }
 
             for (int i = 0; i < transitions.Count; i++)
             {
                 int index = (nextWriteIndex + i) % transitions.Count;
-                ordered.Add(transitions[index]);
+                ordered.Add(transitions[index].Snapshot());
             }
 
             return ordered;

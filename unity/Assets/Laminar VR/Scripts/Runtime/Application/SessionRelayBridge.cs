@@ -82,6 +82,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         public string LastInboundRejection { get; private set; } = string.Empty;
 
+        public SessionRelayConfigurationMessage CurrentConfiguration { get; private set; }
+
+        public event Action<SessionRelayConfigurationMessage> SessionConfigurationAccepted;
+
         public SessionTransportConnectionState ConnectionState =>
             GetActiveTransport()?.ConnectionState
             ?? SessionTransportConnectionState.Disconnected;
@@ -276,6 +280,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     DetachTransport(transport);
                     ResetReconnectState();
                     acceptedSessionId = null;
+                    CurrentConfiguration = null;
                     terminalQuestStateDeferred = false;
                     ClearPendingQuestStates();
                 }
@@ -410,6 +415,16 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 return;
             }
 
+            if (CurrentConfiguration != null
+                && !string.Equals(
+                    CurrentConfiguration.ParticipantPseudonym,
+                    configuration.ParticipantPseudonym,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("participant-context-conflict");
+                return;
+            }
+
             if (!string.Equals(
                     configuration.SceneId,
                     applicationBootstrap.ConfiguredSceneId,
@@ -441,6 +456,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 configuration.ParticipantPseudonym,
                 configuration.PreferredEnvironment,
                 configuration.SessionContext);
+            CurrentConfiguration = configuration;
+            SessionConfigurationAccepted?.Invoke(configuration);
         }
 
         private void ProcessCommand(SessionRelayCommandMessage command)
@@ -890,6 +907,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
             DetachTransport(transport);
             acceptedSessionId = null;
+            CurrentConfiguration = null;
             terminalQuestStateDeferred = false;
             ClearPendingQuestStates();
             ResetReconnectState(false);

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 import secrets
 import threading
@@ -19,6 +20,7 @@ class PreparedSession:
     pairing_code: str
     expires_at_unix_seconds: float
     mobile_token: str
+    audio_preferences: dict | None = None
     quest_client_id: str | None = None
     ended: bool = False
     completion_phase: str | None = None
@@ -56,6 +58,7 @@ class SessionStore:
         study_condition: str,
         preferred_environment: dict[str, float],
         session_context: dict[str, object],
+        audio_preferences: dict | None = None,
     ) -> PreparedSession:
         request_id = self._required(request_id, "request_id")
         participant_pseudonym = self._required(
@@ -70,7 +73,13 @@ class SessionStore:
         with self._lock:
             existing_id = self._session_ids_by_request.get(request_id)
             if existing_id:
-                return self._sessions_by_id[existing_id]
+                existing = self._sessions_by_id[existing_id]
+                if (existing.participant_pseudonym != participant_pseudonym
+                    or existing.scene_id != scene_id
+                    or existing.preferred_environment != preferred_environment
+                    or existing.audio_preferences != audio_preferences):
+                    raise ActiveSessionExistsError("request-id-payload-conflict")
+                return existing
 
             now = self._clock()
             self._expire_unpaired(now)
@@ -87,6 +96,7 @@ class SessionStore:
                 study_condition=study_condition,
                 preferred_environment=dict(preferred_environment),
                 session_context=dict(session_context),
+                audio_preferences=deepcopy(audio_preferences),
                 pairing_code=code,
                 expires_at_unix_seconds=now + self._code_lifetime_seconds,
                 mobile_token=self._token_factory(),

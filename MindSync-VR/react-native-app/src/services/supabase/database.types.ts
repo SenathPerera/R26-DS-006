@@ -42,6 +42,7 @@ export type Database = {
           goals: string[];
           meditation_style: string;
           audio_preferences: string[];
+          audio_control_preferences?: Json | null;
           environment_preferences: string[];
           sensitivities: string[];
           preferred_illumination: number | null;
@@ -63,6 +64,7 @@ export type Database = {
           goals?: string[];
           meditation_style?: string;
           audio_preferences?: string[];
+          audio_control_preferences?: Json | null;
           environment_preferences?: string[];
           sensitivities?: string[];
           preferred_illumination?: number | null;
@@ -114,6 +116,7 @@ export type Database = {
           validation_complete: boolean;
           session_context: Json | null;
           effective_environment_preference: Json | null;
+          effective_audio_preference?: Json | null;
           status: string;
           created_at: string;
           updated_at: string;
@@ -132,6 +135,7 @@ export type Database = {
           validation_complete?: boolean;
           session_context?: Json | null;
           effective_environment_preference?: Json | null;
+          effective_audio_preference?: Json | null;
           status?: string;
           created_at?: string;
           updated_at?: string;

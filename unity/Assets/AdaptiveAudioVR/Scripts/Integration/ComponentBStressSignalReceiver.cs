@@ -151,7 +151,7 @@ namespace AdaptiveAudioVR.Integration
             }
 
             var window = payload.Window;
-            return new SignalPacket(
+            SignalPacket signal = new SignalPacket(
                 payload.NormalizedContinuousStress,
                 payload.Confidence,
                 (float)window.SignalQuality,
@@ -163,6 +163,9 @@ namespace AdaptiveAudioVR.Integration
                 window.WindowEndUtcUnixSeconds,
                 packetSequenceId,
                 receivedAtUnityTime);
+            signal.hasRmssd = window.RmssdMs.HasValue;
+            signal.hasSdnn = window.SdnnMs.HasValue;
+            return signal;
         }
 
         private static bool IsFinite(double value)

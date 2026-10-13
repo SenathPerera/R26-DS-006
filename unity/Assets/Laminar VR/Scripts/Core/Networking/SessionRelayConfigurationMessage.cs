@@ -15,7 +15,8 @@ namespace LaminarVR.AdaptiveMeditation.Networking
             string sceneId,
             StudyPolicyMode studyPolicyMode,
             EnvironmentState preferredEnvironment,
-            SessionContextSnapshot sessionContext)
+            SessionContextSnapshot sessionContext,
+            string rawJson = null)
         {
             SchemaVersion = RequireIdentifier(
                 schemaVersion,
@@ -41,6 +42,7 @@ namespace LaminarVR.AdaptiveMeditation.Networking
             }
 
             PreferredEnvironment = preferredEnvironment;
+            RawJson = rawJson;
             SessionContext = sessionContext
                 ?? throw new ArgumentNullException(nameof(sessionContext));
         }
@@ -62,6 +64,7 @@ namespace LaminarVR.AdaptiveMeditation.Networking
 
         public EnvironmentState PreferredEnvironment { get; }
 
+        public string RawJson { get; }
         public SessionContextSnapshot SessionContext { get; }
 
         private static string RequireIdentifier(
