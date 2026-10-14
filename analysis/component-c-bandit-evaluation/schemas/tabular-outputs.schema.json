@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "protocol_id": "component-c-simulation-evaluation-v1.2",
+  "format": "RFC 4180 compatible CSV with UTF-8 encoding and invariant-culture numbers",
+  "tables": {
+    "session_summary": {
+      "primary_key": ["experiment_id", "archetype", "scenario", "policy", "seed"],
+      "required_fields": [
+        "schema_version", "protocol_id", "experiment_id", "archetype",
+        "scenario", "policy", "seed", "eligible_decision_count",
+        "mean_pseudo_regret", "scene_limit_violation_count",
+        "multi_dimension_violation_count", "invalid_model_update_count",
+        "all_applied_states_safe"
+      ]
+    },
+    "aggregate": {
+      "primary_key": ["experiment_id", "archetype", "scenario", "policy"],
+      "required_fields": [
+        "schema_version", "protocol_id", "attempted_sessions",
+        "metric_available_sessions", "mean", "standard_deviation", "median",
+        "first_quartile", "third_quartile", "interquartile_range"
+      ]
+    },
+    "inference": {
+      "primary_key": ["hypothesis"],
+      "required_fields": [
+        "schema_version", "protocol_id", "hypothesis", "pair_count",
+        "mean_difference", "median_difference", "ci95_lower", "ci95_upper",
+        "probability_left_lower", "permutation_resamples",
+        "extreme_resamples", "two_sided_p_value", "complete"
+      ]
+    },
+    "convergence": {
+      "primary_key": ["contrast", "cumulative_replications"],
+      "required_fields": [
+        "schema_version", "protocol_id", "contrast",
+        "cumulative_replications", "mean_difference", "median_difference",
+        "ci95_lower", "ci95_upper", "probability_left_lower", "complete"
+      ]
+    }
+  }
+}

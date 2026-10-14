@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "component-c-run-manifest-v1.schema.json",
+  "title": "Component C simulation run manifest",
+  "type": "object",
+  "required": [
+    "schema_version", "protocol_id", "protocol_sha256", "run_id", "study",
+    "experiment_matrix", "status", "git_commit", "git_dirty",
+    "unity_version", "application_version", "feature_schema",
+    "telemetry_schema", "profile_bundle_id", "scene_id", "prng",
+    "random_stream_registry", "started_utc", "completed_utc",
+    "session_count", "transition_line_count", "output_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "protocol_id": {"const": "component-c-simulation-evaluation-v1.2"},
+    "protocol_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+    "study": {"enum": ["StudyAPrimaryPolicyComparison", "StudyBRobustness"]},
+    "status": {"enum": ["completed", "cancelled", "failed"]},
+    "failure_reason": {"type": ["string", "null"]},
+    "git_dirty": {"type": "boolean"},
+    "session_count": {"type": "integer", "minimum": 0},
+    "transition_line_count": {"type": "integer", "minimum": 0},
+    "confirmatory_inference_complete": {"type": "boolean"},
+    "output_sha256": {
+      "type": "object",
+      "minProperties": 5,
+      "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+    }
+  },
+  "additionalProperties": true
+}

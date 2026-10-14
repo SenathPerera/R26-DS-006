@@ -1,0 +1,38 @@
+{
+  "protocol_id": "component-c-simulation-evaluation-v1.2",
+  "study_a": {
+    "experiment_id": "study-a",
+    "archetypes": ["A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"],
+    "scenario": "R0",
+    "policies": ["StaticPersonalized", "RuleBasedAdaptive", "ContextualBandit", "RandomSafe"],
+    "first_seed": 100000,
+    "replications": 200,
+    "expected_sessions": 7200
+  },
+  "study_b": {
+    "experiment_id": "study-b",
+    "archetypes": ["A1", "A5"],
+    "scenarios": ["R0", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8", "R9", "R10", "R11", "R12"],
+    "policies": ["StaticPersonalized", "RuleBasedAdaptive", "ContextualBandit", "RandomSafe"],
+    "first_seed": 200000,
+    "replications": 100,
+    "expected_sessions": 10400
+  },
+  "bootstrap": {
+    "resamples": 10000,
+    "seed": 910001,
+    "pcg32_stream_hex": "4253545250414952",
+    "interval": "percentile_type_7"
+  },
+  "paired_permutation": {
+    "method": "monte_carlo_paired_sign_flip",
+    "statistic": "absolute_paired_mean_difference",
+    "resamples": 100000,
+    "seed": 920001,
+    "pcg32_stream_hex": "50524D5041495232",
+    "p_value": "(extreme_resamples + 1) / (resamples + 1)",
+    "zero_differences": "retained"
+  },
+  "alpha": 0.05,
+  "secondary_multiplicity": "holm_within_outcome_family"
+}

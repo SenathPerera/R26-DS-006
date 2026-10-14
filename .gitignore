@@ -90,3 +90,10 @@ Thumbs.db
 #/docs/plans/ADAPTIVE_VR_14_STEP_IMPLEMENTATION_PLAN.md
 /.codex_tmp/
 *.md
+!/docs/research/COMPONENT_C_SIMULATION_EVALUATION_PROTOCOL.md
+!/analysis/component-c-bandit-evaluation/README.md
+
+# Component C generated transition logs can be regenerated from the frozen
+# protocol and are intentionally kept out of source control.
+/analysis/component-c-bandit-evaluation/results/transitions/*.jsonl
+!/analysis/component-c-bandit-evaluation/results/transitions/.gitkeep
