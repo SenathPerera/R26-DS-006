@@ -91,7 +91,9 @@ Thumbs.db
 /.codex_tmp/
 *.md
 !/docs/research/COMPONENT_C_SIMULATION_EVALUATION_PROTOCOL.md
+!/docs/research/COMPONENT_C_QUEST2_TECHNICAL_VALIDATION_PROTOCOL.md
 !/analysis/component-c-bandit-evaluation/README.md
+/docs/research/iccmm-2026-camera-ready/
 
 # Component C generated transition logs can be regenerated from the frozen
 # protocol and are intentionally kept out of source control.
