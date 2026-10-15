@@ -8,7 +8,9 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
     public enum EvaluationStudyId
     {
         StudyAPrimaryPolicyComparison = 1,
-        StudyBRobustness = 2
+        StudyBRobustness = 2,
+        StudyCLinUcbSensitivity = 3,
+        StudyDDeterministicInvariants = 4
     }
 
     public readonly struct EvaluationRunProgress
@@ -72,8 +74,11 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
         public const int StudyAReplicationCount = 200;
         public const int StudyBFirstSeed = 200000;
         public const int StudyBReplicationCount = 100;
+        public const int StudyCFirstSeed = 300000;
+        public const int StudyCReplicationCount = 100;
         public const int StudyASessionCount = 7200;
         public const int StudyBSessionCount = 10400;
+        public const int StudyCSessionCount = 4800;
         public const double BaseUtcUnixSeconds = 1700000000d;
 
         private static readonly EvaluationPolicyCondition[] Policies =
@@ -88,6 +93,14 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
         {
             SyntheticArchetypeId.A1PreferenceAlignedBalanced,
             SyntheticArchetypeId.A5MotionAverseThreshold
+        };
+
+        private static readonly SyntheticArchetypeId[] StudyCArchetypes =
+        {
+            SyntheticArchetypeId.A1PreferenceAlignedBalanced,
+            SyntheticArchetypeId.A5MotionAverseThreshold,
+            SyntheticArchetypeId.A6PreferencePhysiologyConflict,
+            SyntheticArchetypeId.A8NonStationaryResponder
         };
 
         public async Task<EvaluationStudyResult> RunStudyAAsync(
@@ -262,6 +275,92 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
 
             return new EvaluationStudyResult(
                 EvaluationStudyId.StudyBRobustness,
+                summaries.ToArray());
+        }
+
+        public async Task<EvaluationStudyResult> RunStudyCAsync(
+            EvaluationRuntimeBundle bundle,
+            IProgress<EvaluationRunProgress> progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            return await RunStudyCInternalAsync(
+                bundle,
+                null,
+                progress,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        public async Task<EvaluationStudyResult> RunStudyCToSinkAsync(
+            EvaluationRuntimeBundle bundle,
+            IEvaluationSessionSink sink,
+            IProgress<EvaluationRunProgress> progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (sink == null)
+            {
+                throw new ArgumentNullException(nameof(sink));
+            }
+
+            return await RunStudyCInternalAsync(
+                bundle,
+                sink,
+                progress,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<EvaluationStudyResult> RunStudyCInternalAsync(
+            EvaluationRuntimeBundle bundle,
+            IEvaluationSessionSink sink,
+            IProgress<EvaluationRunProgress> progress,
+            CancellationToken cancellationToken)
+        {
+            RequireBundle(bundle);
+            var summaries = new List<EvaluationSessionSummary>(
+                StudyCSessionCount);
+            var completed = 0;
+            for (var cellIndex = 0;
+                cellIndex < LinUcbSensitivityCatalog.Count;
+                cellIndex++)
+            {
+                var sensitivityCell = LinUcbSensitivityCatalog.GetAt(cellIndex);
+                var cellBundle = bundle.CreateLinUcbSensitivityVariant(
+                    sensitivityCell);
+                for (var archetypeIndex = 0;
+                    archetypeIndex < StudyCArchetypes.Length;
+                    archetypeIndex++)
+                {
+                    for (var seedOffset = 0;
+                        seedOffset < StudyCReplicationCount;
+                        seedOffset++)
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        var cell = await RunCellDetailedAsync(
+                            cellBundle,
+                            sensitivityCell.ExperimentId,
+                            StudyCArchetypes[archetypeIndex],
+                            SyntheticFaultScenarioId.R0Nominal,
+                            EvaluationPolicyCondition.ContextualBandit,
+                            StudyCFirstSeed + seedOffset,
+                            cancellationToken).ConfigureAwait(false);
+                        summaries.Add(cell.Summary);
+                        if (sink != null)
+                        {
+                            await sink.OnSessionCompletedAsync(
+                                cell,
+                                cancellationToken).ConfigureAwait(false);
+                        }
+
+                        completed++;
+                        progress?.Report(new EvaluationRunProgress(
+                            EvaluationStudyId.StudyCLinUcbSensitivity,
+                            completed,
+                            StudyCSessionCount));
+                    }
+                }
+            }
+
+            return new EvaluationStudyResult(
+                EvaluationStudyId.StudyCLinUcbSensitivity,
                 summaries.ToArray());
         }
 

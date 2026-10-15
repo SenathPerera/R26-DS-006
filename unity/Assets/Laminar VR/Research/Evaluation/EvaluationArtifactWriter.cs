@@ -968,6 +968,14 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 builder,
                 "experiment_matrix",
                 BuildExperimentMatrixJson(studyResult.Sessions));
+            if (studyResult.Study
+                == EvaluationStudyId.StudyCLinUcbSensitivity)
+            {
+                AddRaw(
+                    builder,
+                    "linucb_sensitivity_grid",
+                    BuildSensitivityGridJson());
+            }
             AddString(builder, "status", status);
             AddNullableString(builder, "failure_reason", failureReason);
             AddString(builder, "git_commit", provenance.GitCommit);
@@ -1020,6 +1028,41 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
 
             AddRaw(builder, "output_sha256", EndObject(checksumJson));
             return EndObject(builder) + System.Environment.NewLine;
+        }
+
+        private static string BuildSensitivityGridJson()
+        {
+            var builder = new StringBuilder("{");
+            AddString(builder, "production_cell", "a0p25-r1p00");
+            var cells = new StringBuilder("[");
+            for (var index = 0;
+                index < LinUcbSensitivityCatalog.Count;
+                index++)
+            {
+                if (index > 0)
+                {
+                    cells.Append(',');
+                }
+
+                var cell = LinUcbSensitivityCatalog.GetAt(index);
+                var item = new StringBuilder("{");
+                AddString(item, "code", cell.Code);
+                AddString(item, "experiment_id", cell.ExperimentId);
+                AddString(item, "configuration_id", cell.ConfigurationId);
+                AddNumber(
+                    item,
+                    "exploration_coefficient",
+                    cell.ExplorationCoefficient);
+                AddNumber(
+                    item,
+                    "ridge_regularization",
+                    cell.RidgeRegularization);
+                AddBoolean(item, "production_cell", cell.IsProductionCell);
+                cells.Append(EndObject(item));
+            }
+
+            AddRaw(builder, "cells", cells.Append(']').ToString());
+            return EndObject(builder);
         }
 
         private static string BuildExperimentMatrixJson(

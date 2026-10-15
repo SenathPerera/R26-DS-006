@@ -18,6 +18,24 @@
     "replications": 100,
     "expected_sessions": 10400
   },
+  "study_c": {
+    "experiment_id_prefix": "study-c-",
+    "exploration_coefficients": [0.0, 0.1, 0.25, 0.5],
+    "ridge_regularizations": [0.1, 1.0, 10.0],
+    "production_cell": {"exploration_coefficient": 0.25, "ridge_regularization": 1.0},
+    "archetypes": ["A1", "A5", "A6", "A8"],
+    "scenario": "R0",
+    "policies": ["ContextualBandit"],
+    "first_seed": 300000,
+    "replications": 100,
+    "expected_sessions": 4800,
+    "purpose": "predeclared_sensitivity_not_retuning"
+  },
+  "study_d": {
+    "design": "deterministic_enumerated_invariant_suite",
+    "monte_carlo_replications": 0,
+    "records_exact_inputs_and_outcomes": true
+  },
   "bootstrap": {
     "resamples": 10000,
     "seed": 910001,

@@ -20,6 +20,10 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation.Tests
             Assert.That(
                 bundle.LinUcb.FeatureCount,
                 Is.EqualTo(bundle.FeatureVectorBuilder.FeatureCount));
+            Assert.That(bundle.LinUcb.ExplorationCoefficient,
+                Is.EqualTo(0.25d));
+            Assert.That(bundle.LinUcb.RidgeRegularization,
+                Is.EqualTo(1d));
         }
     }
 }

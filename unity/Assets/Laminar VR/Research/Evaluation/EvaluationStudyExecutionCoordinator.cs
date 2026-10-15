@@ -46,6 +46,13 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                                 progress,
                                 cancellationToken).ConfigureAwait(false);
                             break;
+                        case EvaluationStudyId.StudyCLinUcbSensitivity:
+                            result = await runner.RunStudyCToSinkAsync(
+                                bundle,
+                                writer,
+                                progress,
+                                cancellationToken).ConfigureAwait(false);
+                            break;
                         default:
                             throw new ArgumentOutOfRangeException(nameof(study));
                     }

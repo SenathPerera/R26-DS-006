@@ -16,12 +16,15 @@ Directory roles:
 
 - `configs/`: frozen machine-readable study and statistical settings.
 - `scripts/`: dependency-free artifact validation and later plotting scripts.
-- `schemas/`: manifest, transition-event, and tabular output schemas.
+- `schemas/`: manifests, transition-event, invariant-case, and tabular output
+  schemas.
 - `manifests/`: completed run manifests.
 - `results/session-summaries/`: one row per simulated session.
 - `results/aggregate-tables/`: descriptive and inferential results.
 - `results/transitions/`: large reproducible JSONL logs; ignored by Git by
   default.
+- `results/invariant-cases/`: exact inputs and outcomes from the deterministic
+  Study D safety and attribution catalog.
 - `results/figures/`: figures generated from session summaries.
 
 Validate a completed run from the repository root:
@@ -42,6 +45,8 @@ After activating the pinned Unity 6 Editor license, open the project and use:
 
 - `Tools > Adaptive Meditation > Research > Full Evaluation > Run Study A`
 - `Tools > Adaptive Meditation > Research > Full Evaluation > Run Study B`
+- `Tools > Adaptive Meditation > Research > Full Evaluation > Run Study C`
+- `Tools > Adaptive Meditation > Research > Full Evaluation > Run Study D`
 
 The commands load and verify the frozen production profiles before starting.
 Execution occurs away from the Editor main thread and exposes a cancellable
@@ -49,9 +54,12 @@ progress bar. Completed, cancelled, and failed runs receive distinct manifest
 statuses; partial outputs are retained for audit and must not be included in
 policy-performance inference.
 
-Run Study A and Study B separately. Validate each completed manifest before
-analysis. A dirty Git worktree is recorded transparently, but a clean committed
-research state is strongly preferred for final paper results.
+Run each study separately and validate each completed manifest before analysis.
+Study C is a predeclared sensitivity analysis and must not be used to rename a
+better-performing cell as the production policy. Study D records 206
+deterministic cases and is valid only when every case passes. A dirty Git
+worktree is recorded transparently, but a clean committed research state is
+strongly preferred for final paper results.
 
 Generate deterministic SVG figures from a validated Study A result:
 

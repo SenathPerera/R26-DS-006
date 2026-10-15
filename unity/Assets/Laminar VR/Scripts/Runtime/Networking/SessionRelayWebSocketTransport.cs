@@ -561,13 +561,13 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
                 == SessionRelayInboundMessageKind.SessionConfiguration
                 ? inbound.Configuration.SessionId
                 : inbound.Command.SessionId;
-            if (!string.Equals(
-                    sessionId,
+            if (!SessionRelayInboundSessionValidator.TryValidate(
                     ActiveSessionId,
-                    StringComparison.Ordinal))
+                    sessionId,
+                    out var sessionRejectionReason))
             {
                 InboundMessageRejected?.Invoke(
-                    SessionRelayInboundRejectionReason.SessionMismatch,
+                    sessionRejectionReason,
                     "session-mismatch");
                 return;
             }

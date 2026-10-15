@@ -16,7 +16,7 @@
     "protocol_id": {"const": "component-c-simulation-evaluation-v1.2"},
     "protocol_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "run_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
-    "study": {"enum": ["StudyAPrimaryPolicyComparison", "StudyBRobustness"]},
+    "study": {"enum": ["StudyAPrimaryPolicyComparison", "StudyBRobustness", "StudyCLinUcbSensitivity"]},
     "status": {"enum": ["completed", "cancelled", "failed"]},
     "failure_reason": {"type": ["string", "null"]},
     "git_dirty": {"type": "boolean"},

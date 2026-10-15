@@ -37,6 +37,21 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 EvaluationExperimentRunner.StudyBSessionCount);
         }
 
+        [MenuItem(MenuRoot + "Run Study C (4,800 sessions)")]
+        private static void RunStudyC()
+        {
+            StartStudy(
+                EvaluationStudyId.StudyCLinUcbSensitivity,
+                "study-c",
+                EvaluationExperimentRunner.StudyCSessionCount);
+        }
+
+        [MenuItem(MenuRoot + "Run Study D (206 invariant cases)")]
+        private static void RunStudyD()
+        {
+            StartInvariantStudy();
+        }
+
         [MenuItem(MenuRoot + "Cancel Active Run")]
         private static void CancelActiveRun()
         {
@@ -132,6 +147,122 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 Debug.LogError(
                     "Component C evaluation failed. A partial failed "
                     + "manifest was retained for audit: "
+                    + runId);
+                Debug.LogException(exception);
+            }
+            finally
+            {
+                EditorApplication.update -= UpdateProgressBar;
+                EditorUtility.ClearProgressBar();
+                cancellation.Dispose();
+                activeCancellation = null;
+                activeProgress = null;
+                activeRunId = null;
+            }
+        }
+
+        private static async void StartInvariantStudy()
+        {
+            if (activeCancellation != null)
+            {
+                Debug.LogError(
+                    "A Component C evaluation run is already active: "
+                    + activeRunId);
+                return;
+            }
+
+            if (!EditorUtility.DisplayDialog(
+                    "Run Component C deterministic invariant suite?",
+                    "This will execute "
+                        + DeterministicInvariantSuiteRunner.ExpectedCaseCount
+                        + " recorded safety, physiology, attribution, session, "
+                        + "and transport cases and write checksummed artifacts "
+                        + "under analysis/component-c-bandit-evaluation.",
+                    "Run study-d",
+                    "Cancel"))
+            {
+                return;
+            }
+
+            if (!FrozenEvaluationProfileLoader.TryLoad(
+                    out var bundle,
+                    out var validationError))
+            {
+                Debug.LogError(
+                    "Cannot start the invariant suite: " + validationError);
+                return;
+            }
+
+            var repositoryRoot = GetRepositoryRoot();
+            var evaluationRoot = Path.Combine(
+                repositoryRoot,
+                "analysis",
+                "component-c-bandit-evaluation");
+            var runId = DateTimeOffset.UtcNow.ToString(
+                    "yyyyMMdd'T'HHmmss'Z'")
+                + "-study-d";
+            var provenance = CreateProvenance(repositoryRoot);
+            var cancellation = new CancellationTokenSource();
+            var progress = new AtomicEvaluationProgress(
+                EvaluationStudyId.StudyDDeterministicInvariants,
+                DeterministicInvariantSuiteRunner.ExpectedCaseCount);
+            activeCancellation = cancellation;
+            activeProgress = progress;
+            activeRunId = runId;
+            EditorApplication.update += UpdateProgressBar;
+
+            try
+            {
+                var result = await Task.Run(
+                    () => new DeterministicInvariantSuiteRunner().Run(
+                        bundle,
+                        progress,
+                        cancellation.Token),
+                    cancellation.Token);
+                cancellation.Token.ThrowIfCancellationRequested();
+                var receipt = new DeterministicInvariantArtifactWriter().Write(
+                    evaluationRoot,
+                    runId,
+                    bundle,
+                    provenance,
+                    result,
+                    DateTimeOffset.UtcNow);
+                if (result.AllPassed)
+                {
+                    Debug.Log(
+                        "Component C invariant suite completed: "
+                        + runId
+                        + ". Passed="
+                        + receipt.PassedCaseCount
+                        + "/"
+                        + receipt.CaseCount
+                        + ", manifest="
+                        + receipt.ManifestPath
+                        + ". Run the repository artifact validator before "
+                        + "using these outputs in the paper.");
+                }
+                else
+                {
+                    Debug.LogError(
+                        "Component C invariant suite completed with failures: "
+                        + receipt.PassedCaseCount
+                        + "/"
+                        + receipt.CaseCount
+                        + " cases passed. Inspect "
+                        + receipt.CasesPath);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Debug.LogWarning(
+                    "Component C invariant suite was cancelled before "
+                    + "artifacts were finalized: "
+                    + runId);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    "Component C invariant suite failed before completion: "
                     + runId);
                 Debug.LogException(exception);
             }

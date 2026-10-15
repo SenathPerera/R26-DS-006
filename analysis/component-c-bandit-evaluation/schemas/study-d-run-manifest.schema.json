@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "component-c-study-d-run-manifest-v1.schema.json",
+  "title": "Component C deterministic invariant-suite manifest",
+  "type": "object",
+  "required": [
+    "schema_version", "artifact_type", "protocol_id", "protocol_sha256",
+    "run_id", "study", "status", "git_commit", "git_dirty",
+    "unity_version", "application_version", "profile_bundle_id", "scene_id",
+    "linucb_configuration", "physiology_configuration",
+    "reward_configuration", "coordinator_configuration", "started_utc",
+    "completed_utc", "case_count", "passed_case_count", "failed_case_count",
+    "all_cases_passed", "operating_system", "runtime_version", "output_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "artifact_type": {"const": "deterministic-invariant-suite"},
+    "protocol_id": {"const": "component-c-simulation-evaluation-v1.2"},
+    "protocol_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "run_id": {"type": "string", "pattern": "^[A-Za-z0-9._-]+$"},
+    "study": {"const": "StudyDDeterministicInvariants"},
+    "status": {"const": "completed"},
+    "git_dirty": {"type": "boolean"},
+    "case_count": {"const": 206},
+    "passed_case_count": {"type": "integer", "minimum": 0, "maximum": 206},
+    "failed_case_count": {"type": "integer", "minimum": 0, "maximum": 206},
+    "all_cases_passed": {"type": "boolean"},
+    "output_sha256": {
+      "type": "object",
+      "minProperties": 1,
+      "maxProperties": 1,
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+      }
+    }
+  },
+  "additionalProperties": true
+}

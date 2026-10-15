@@ -97,3 +97,5 @@ Thumbs.db
 # protocol and are intentionally kept out of source control.
 /analysis/component-c-bandit-evaluation/results/transitions/*.jsonl
 !/analysis/component-c-bandit-evaluation/results/transitions/.gitkeep
+/analysis/component-c-bandit-evaluation/results/invariant-cases/*.jsonl
+!/analysis/component-c-bandit-evaluation/results/invariant-cases/.gitkeep

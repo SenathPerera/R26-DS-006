@@ -33,6 +33,35 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             StabilizationSelectionConfiguration stabilization,
             TelemetryLoggingConfiguration telemetry,
             IFeatureVectorBuilder featureVectorBuilder)
+            : this(
+                scene,
+                timing,
+                physiology,
+                reward,
+                coordinator,
+                preference,
+                ruleBased,
+                linUcb,
+                stabilization,
+                telemetry,
+                featureVectorBuilder,
+                false)
+        {
+        }
+
+        private EvaluationRuntimeBundle(
+            SceneEnvironmentProfile scene,
+            SessionTimingConfiguration timing,
+            PhysiologyValidationConfiguration physiology,
+            RewardPipelineConfiguration reward,
+            ProductionCoordinatorConfiguration coordinator,
+            PreferenceInitializationConfiguration preference,
+            RuleBasedPolicyConfiguration ruleBased,
+            LinUcbModelConfiguration linUcb,
+            StabilizationSelectionConfiguration stabilization,
+            TelemetryLoggingConfiguration telemetry,
+            IFeatureVectorBuilder featureVectorBuilder,
+            bool isSensitivityVariant)
         {
             Scene = scene ?? throw new ArgumentNullException(nameof(scene));
             Timing = timing ?? throw new ArgumentNullException(nameof(timing));
@@ -54,7 +83,7 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 ?? throw new ArgumentNullException(
                     nameof(featureVectorBuilder));
 
-            ValidateFrozenIdentity();
+            ValidateFrozenIdentity(isSensitivityVariant);
             if (!Coordinator.TryValidateCompatibility(
                     Timing,
                     Physiology,
@@ -139,7 +168,28 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             return result.SafeInitialState;
         }
 
-        private void ValidateFrozenIdentity()
+        public EvaluationRuntimeBundle CreateLinUcbSensitivityVariant(
+            LinUcbSensitivityCell cell)
+        {
+            RequireProductionLinUcb();
+            var sensitivityConfiguration = LinUcbSensitivityCatalog
+                .CreateConfiguration(cell, LinUcb);
+            return new EvaluationRuntimeBundle(
+                Scene,
+                Timing,
+                Physiology,
+                Reward,
+                Coordinator,
+                Preference,
+                RuleBased,
+                sensitivityConfiguration,
+                Stabilization,
+                Telemetry,
+                FeatureVectorBuilder,
+                true);
+        }
+
+        private void ValidateFrozenIdentity(bool isSensitivityVariant)
         {
             RequireIdentity(Scene.SceneId, "temple-pond", "scene");
             RequireIdentity(
@@ -166,10 +216,38 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 RuleBased.ConfigurationId,
                 "adaptive-vr-rule-based-pilot-v1",
                 "rule-based policy");
-            RequireIdentity(
-                LinUcb.ConfigurationId,
-                "adaptive-vr-linucb-pilot-v1",
-                "LinUCB policy");
+            if (isSensitivityVariant)
+            {
+                var recognized = false;
+                for (var index = 0;
+                    index < LinUcbSensitivityCatalog.Count;
+                    index++)
+                {
+                    var cell = LinUcbSensitivityCatalog.GetAt(index);
+                    if (string.Equals(
+                            LinUcb.ConfigurationId,
+                            cell.ConfigurationId,
+                            StringComparison.Ordinal)
+                        && LinUcb.ExplorationCoefficient
+                            == cell.ExplorationCoefficient
+                        && LinUcb.RidgeRegularization
+                            == cell.RidgeRegularization)
+                    {
+                        recognized = true;
+                        break;
+                    }
+                }
+
+                if (!recognized)
+                {
+                    throw new ArgumentException(
+                        "The LinUCB configuration is not a frozen Study C cell.");
+                }
+            }
+            else
+            {
+                RequireProductionLinUcb();
+            }
             RequireIdentity(
                 Stabilization.ConfigurationId,
                 "adaptive-vr-stabilization-pilot-v1",
@@ -186,6 +264,25 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 LinUcb.FeatureSchemaVersion,
                 PolicyFeatureVectorBuilder.ProductionSchemaVersion,
                 "policy feature schema");
+        }
+
+        private void RequireProductionLinUcb()
+        {
+            RequireIdentity(
+                LinUcb.ConfigurationId,
+                "adaptive-vr-linucb-pilot-v1",
+                "LinUCB policy");
+            if (LinUcb.ExplorationCoefficient
+                    != LinUcbSensitivityCatalog
+                        .ProductionExplorationCoefficient
+                || LinUcb.RidgeRegularization
+                    != LinUcbSensitivityCatalog
+                        .ProductionRidgeRegularization)
+            {
+                throw new ArgumentException(
+                    "The production LinUCB hyperparameters do not match the "
+                    + "frozen Study C production cell.");
+            }
         }
 
         private static void RequireIdentity(
