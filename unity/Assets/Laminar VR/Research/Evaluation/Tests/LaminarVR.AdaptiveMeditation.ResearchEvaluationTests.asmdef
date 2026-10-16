@@ -1,0 +1,25 @@
+{
+    "name": "LaminarVR.AdaptiveMeditation.ResearchEvaluationTests",
+    "rootNamespace": "LaminarVR.AdaptiveMeditation.ResearchEvaluation.Tests",
+    "references": [
+        "LaminarVR.AdaptiveMeditation.Core",
+        "LaminarVR.AdaptiveMeditation.Runtime",
+        "LaminarVR.AdaptiveMeditation.ResearchEvaluation"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false,
+    "optionalUnityReferences": [
+        "TestAssemblies"
+    ]
+}

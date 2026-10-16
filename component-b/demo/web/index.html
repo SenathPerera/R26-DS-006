@@ -115,8 +115,9 @@
 const CLASSES = ['relaxed', 'mild', 'moderate', 'high'];
 const COLOUR  = {relaxed:'#34d399', mild:'#fbbf24', moderate:'#fb923c', high:'#f87171'};
 
-// ?port=8000 points the same page at the hardware server.
-const port = new URLSearchParams(location.search).get('port') || '8001';
+// The regular Component B server runs on 8000. The standalone synthetic
+// demo can still be selected explicitly with ?port=8001.
+const port = new URLSearchParams(location.search).get('port') || '8000';
 const host = location.hostname || 'localhost';
 const url  = `ws://${host}:${port}/stream`;
 

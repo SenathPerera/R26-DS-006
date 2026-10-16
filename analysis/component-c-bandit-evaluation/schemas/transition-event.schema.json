@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "component-c-transition-event-v1.schema.json",
+  "title": "Component C transition event",
+  "type": "object",
+  "required": [
+    "schema_version", "protocol_id", "event_type", "experiment_id",
+    "archetype", "scenario", "policy", "seed", "event_time_seconds"
+  ],
+  "properties": {
+    "schema_version": {"const": "1.0.0"},
+    "protocol_id": {"const": "component-c-simulation-evaluation-v1.2"},
+    "event_type": {"enum": ["physiology", "decision", "reward"]},
+    "experiment_id": {"type": "string", "minLength": 1},
+    "archetype": {"type": "string", "minLength": 1},
+    "scenario": {"type": "string", "minLength": 1},
+    "policy": {"type": "string", "minLength": 1},
+    "seed": {"type": "integer"},
+    "event_time_seconds": {"type": "number"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"event_type": {"const": "physiology"}}},
+      "then": {"required": ["emission_sequence", "dropped", "window"]}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "decision"}}},
+      "then": {"required": ["opportunity_sequence", "result_code", "safe_oracle"]}
+    },
+    {
+      "if": {"properties": {"event_type": {"const": "reward"}}},
+      "then": {"required": ["result_code", "attribution_code", "calculation_code"]}
+    }
+  ],
+  "additionalProperties": true
+}
