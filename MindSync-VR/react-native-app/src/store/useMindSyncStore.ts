@@ -374,6 +374,22 @@ export const useMindSyncStore = create<MindSyncStore>()(
         const state = get();
         const bindMobileRelay = (prepared: NonNullable<SessionRelayState['preparedSession']>) => {
           realtimeService.connectMobile(prepared, {
+            getDiagnostics: () => {
+              const current = get();
+              return {
+                wearableConnected: current.wearableState === 'connected',
+                telemetryAgeSeconds: current.ble.telemetry
+                  ? Math.max(0, (Date.now() - current.ble.telemetry.receivedAt) / 1000) : -1,
+                componentBState: current.componentB.connectionState,
+                framesSent: current.componentB.framesSent,
+                framesAccepted: current.componentB.framesAcknowledged,
+                rawSamplesBuffered: current.componentB.frameSamplesBuffered,
+                cloudSyncState: current.dataSyncStatus,
+                voiceStage: current.voice.stage,
+                voiceBusy: current.voice.busy,
+                voiceError: current.voice.error !== null,
+              };
+            },
             onConnectionState: (connectionState, error) => set(current => ({
               relay: {...current.relay, connectionState, lastError: error ?? null},
               vrStatus: connectionState === 'error' ? 'disconnected' : current.vrStatus,

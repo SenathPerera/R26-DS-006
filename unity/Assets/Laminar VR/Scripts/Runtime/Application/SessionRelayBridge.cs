@@ -84,6 +84,16 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         public SessionRelayConfigurationMessage CurrentConfiguration { get; private set; }
 
+        public Task PublishDiagnosticsAsync(SessionRuntimeDiagnostics values, CancellationToken cancellationToken)
+        {
+            var transport = GetActiveTransport();
+            if (transport?.ConnectionState != SessionTransportConnectionState.Connected
+                || CurrentConfiguration == null
+                || !(transport is ISessionRelayDiagnosticsPublisher publisher))
+                return Task.CompletedTask;
+            return publisher.PublishDiagnosticsAsync(CurrentConfiguration.SessionId, values, cancellationToken);
+        }
+
         public event Action<SessionRelayConfigurationMessage> SessionConfigurationAccepted;
 
         public SessionTransportConnectionState ConnectionState =>

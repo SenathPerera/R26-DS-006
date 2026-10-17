@@ -13,6 +13,8 @@ import uuid
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+from services.project_monitor.instrumentation import ServiceMetrics, install_monitoring
+from services.project_monitor.relay_diagnostics import RelayDiagnostics
 
 from .session_store import (
     ActiveSessionExistsError,
@@ -193,6 +195,9 @@ class SessionChannels:
 store = SessionStore(code_lifetime_seconds=CODE_LIFETIME_SECONDS)
 channels = SessionChannels()
 app = FastAPI(title="MindSync Session Relay", version="1.0.0")
+monitor_metrics = ServiceMetrics("relay")
+diagnostics = RelayDiagnostics()
+install_monitoring(app, monitor_metrics, lambda: diagnostics.snapshot(channels))
 
 
 @app.get("/health")
@@ -223,6 +228,8 @@ async def create_session(request: CreateSessionRequest) -> CreateSessionResponse
         )
     except ActiveSessionExistsError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+    diagnostics.touch(session.session_id, preferencesConfigured=session.audio_preferences is not None,
+                      studyCondition=session.study_condition)
     return CreateSessionResponse(
         schemaVersion=SCHEMA_VERSION,
         sessionId=session.session_id,
@@ -298,6 +305,7 @@ async def acknowledge_visual_log(
     except VisualLogAcknowledgementError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
+    diagnostics.touch(session_id, logAcknowledgedAt=time.time())
     return {
         "schemaVersion": SCHEMA_VERSION,
         "sessionId": session_id,
@@ -332,6 +340,8 @@ async def _mobile_connection(websocket: WebSocket) -> None:
     try:
         while True:
             message = await websocket.receive_json()
+            if diagnostics.accept(message, session_id, "mobile"):
+                continue
             if not _valid_mobile_command(message, session_id):
                 await websocket.send_json(_error("mobile-message-invalid"))
                 continue
@@ -374,9 +384,12 @@ async def _quest_connection(websocket: WebSocket) -> None:
             )
         )
         await websocket.send_json(_configuration(session))
+        diagnostics.touch(session.session_id, configurationSentAt=time.time())
 
         while True:
             message = await websocket.receive_json()
+            if diagnostics.accept(message, session.session_id, "quest"):
+                continue
             if not _valid_quest_message(message, session.session_id):
                 await websocket.send_json(_error("quest-message-invalid"))
                 continue
@@ -401,6 +414,15 @@ async def _quest_connection(websocket: WebSocket) -> None:
                     message["messageId"],
                 )
                 raise
+            row = diagnostics.touch(session.session_id, lastMessageAt=time.time())
+            if message["messageType"] == "quest_state":
+                phase = message["payload"].get("phase")
+                if phase in {"boot", "awaiting_config", "loading_scene", "ready", "acclimatization",
+                             "adaptive", "paused", "stabilization", "completed", "aborted"}:
+                    row["phase"] = phase
+            else:
+                row["telemetryBatches"] += 1
+                row["lastTelemetryAt"] = time.time()
             terminal_phase = (
                 message["payload"].get("phase")
                 if message["messageType"] == "quest_state"
@@ -444,6 +466,7 @@ async def _send_start_after_initialization(
 ) -> None:
     await asyncio.sleep(INITIALIZATION_DELAY_SECONDS)
     await websocket.send_json(_command(session_id, "start"))
+    diagnostics.touch(session_id, startSentAt=time.time())
 
 
 def _configuration(session: PreparedSession) -> dict:
