@@ -699,7 +699,9 @@ wearableBleService.configure({
     selectedWearable: wearableState === 'connected' && state.selectedWearable
       ? {...state.selectedWearable, name: WEARABLE_DEVICE_NAME, verified: true, firmware: 'ESP32-S3 Mini'}
       : state.selectedWearable,
-    ble: {...state.ble, isStreaming: wearableState === 'connected' && state.ble.telemetry !== null},
+    ble: wearableState === 'connected'
+      ? {...state.ble, isStreaming: state.ble.telemetry !== null}
+      : {...state.ble, telemetry: null, isStreaming: false},
   })),
   onDevices: wearableDevices => useMindSyncStore.setState({wearableDevices}),
   onTelemetry: (telemetry: WearableTelemetry) => {
