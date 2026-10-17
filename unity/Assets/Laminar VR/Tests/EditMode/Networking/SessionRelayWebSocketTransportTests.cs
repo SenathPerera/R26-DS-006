@@ -15,6 +15,20 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Networking
         private const string SchemaVersion = "mindsync-relay-test-v1";
 
         [Test]
+        public void SessionValidator_RejectsMismatchedSessionWithoutDispatch()
+        {
+            var accepted = SessionRelayInboundSessionValidator.TryValidate(
+                "session-42",
+                "session-other",
+                out var rejectionReason);
+
+            Assert.That(accepted, Is.False);
+            Assert.That(
+                rejectionReason,
+                Is.EqualTo(SessionRelayInboundRejectionReason.SessionMismatch));
+        }
+
+        [Test]
         public async Task ConnectAsync_PairsBeforeReportingConnected()
         {
             var connection = new FakeConnection();

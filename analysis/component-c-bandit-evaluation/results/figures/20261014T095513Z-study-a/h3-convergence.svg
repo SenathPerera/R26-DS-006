@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img">
+<title>H3 convergence</title>
+<style>
+text{font-family:Arial,sans-serif;fill:#202124}
+.axis{stroke:#202124;stroke-width:1.2}
+.grid{stroke:#d9dce1;stroke-width:1}
+.tick{font-size:12px}
+.label{font-size:14px;font-weight:600}
+.title{font-size:18px;font-weight:700}
+</style>
+<text class="title" x="450.0" y="27" text-anchor="middle">H3 cumulative-replication convergence</text>
+<line class="axis" x1="85" y1="445" x2="865" y2="445"/>
+<line class="axis" x1="85" y1="445" x2="85" y2="45"/>
+<line class="grid" x1="85.00" y1="445" x2="85.00" y2="45"/>
+<text class="tick" x="85.00" y="466" text-anchor="middle">25</text>
+<line class="grid" x1="196.43" y1="445" x2="196.43" y2="45"/>
+<text class="tick" x="196.43" y="466" text-anchor="middle">50</text>
+<line class="grid" x1="307.86" y1="445" x2="307.86" y2="45"/>
+<text class="tick" x="307.86" y="466" text-anchor="middle">75</text>
+<line class="grid" x1="419.29" y1="445" x2="419.29" y2="45"/>
+<text class="tick" x="419.29" y="466" text-anchor="middle">100</text>
+<line class="grid" x1="530.71" y1="445" x2="530.71" y2="45"/>
+<text class="tick" x="530.71" y="466" text-anchor="middle">125</text>
+<line class="grid" x1="642.14" y1="445" x2="642.14" y2="45"/>
+<text class="tick" x="642.14" y="466" text-anchor="middle">150</text>
+<line class="grid" x1="753.57" y1="445" x2="753.57" y2="45"/>
+<text class="tick" x="753.57" y="466" text-anchor="middle">175</text>
+<line class="grid" x1="865.00" y1="445" x2="865.00" y2="45"/>
+<text class="tick" x="865.00" y="466" text-anchor="middle">200</text>
+<line class="grid" x1="85" y1="445.00" x2="865" y2="445.00"/>
+<text class="tick" x="73" y="449.00" text-anchor="end">-0.00975</text>
+<line class="grid" x1="85" y1="365.00" x2="865" y2="365.00"/>
+<text class="tick" x="73" y="369.00" text-anchor="end">0.0185</text>
+<line class="grid" x1="85" y1="285.00" x2="865" y2="285.00"/>
+<text class="tick" x="73" y="289.00" text-anchor="end">0.0468</text>
+<line class="grid" x1="85" y1="205.00" x2="865" y2="205.00"/>
+<text class="tick" x="73" y="209.00" text-anchor="end">0.0751</text>
+<line class="grid" x1="85" y1="125.00" x2="865" y2="125.00"/>
+<text class="tick" x="73" y="129.00" text-anchor="end">0.103</text>
+<line class="grid" x1="85" y1="45.00" x2="865" y2="45.00"/>
+<text class="tick" x="73" y="49.00" text-anchor="end">0.132</text>
+<text class="label" x="475.0" y="500" text-anchor="middle">Cumulative paired replications</text>
+<text class="label" transform="translate(22 245.0) rotate(-90)" text-anchor="middle">LinUCB − Random Safe mean pseudo-regret</text>
+<line x1="85" y1="417.41" x2="865" y2="417.41" stroke="#111" stroke-dasharray="6 4"/>
+<line x1="85.00" y1="315.10" x2="85.00" y2="72.59" stroke="#777" stroke-width="2"/>
+<line x1="80.00" y1="315.10" x2="90.00" y2="315.10" stroke="#777"/>
+<line x1="80.00" y1="72.59" x2="90.00" y2="72.59" stroke="#777"/>
+<line x1="196.43" y1="327.23" x2="196.43" y2="158.52" stroke="#777" stroke-width="2"/>
+<line x1="191.43" y1="327.23" x2="201.43" y2="327.23" stroke="#777"/>
+<line x1="191.43" y1="158.52" x2="201.43" y2="158.52" stroke="#777"/>
+<line x1="419.29" y1="316.16" x2="419.29" y2="195.32" stroke="#777" stroke-width="2"/>
+<line x1="414.29" y1="316.16" x2="424.29" y2="316.16" stroke="#777"/>
+<line x1="414.29" y1="195.32" x2="424.29" y2="195.32" stroke="#777"/>
+<line x1="865.00" y1="324.62" x2="865.00" y2="235.42" stroke="#777" stroke-width="2"/>
+<line x1="860.00" y1="324.62" x2="870.00" y2="324.62" stroke="#777"/>
+<line x1="860.00" y1="235.42" x2="870.00" y2="235.42" stroke="#777"/>
+<polyline fill="none" stroke="#54A24B" stroke-width="2.5" points="85.00,194.67 196.43,243.10 419.29,256.78 865.00,280.04"/>
+<circle cx="85.00" cy="194.67" r="5" fill="#54A24B"/>
+<circle cx="196.43" cy="243.10" r="5" fill="#54A24B"/>
+<circle cx="419.29" cy="256.78" r="5" fill="#54A24B"/>
+<circle cx="865.00" cy="280.04" r="5" fill="#54A24B"/>
+</svg>

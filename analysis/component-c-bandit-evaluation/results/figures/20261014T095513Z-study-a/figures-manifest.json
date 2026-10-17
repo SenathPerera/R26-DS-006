@@ -1,0 +1,14 @@
+{
+  "figures_sha256": {
+    "confirmatory-effects.svg": "cb03cc3fcd431bf36ca6b3aa54f85a7fd350a099091acab042eb0a75cba64366",
+    "h3-convergence.svg": "5510a32e079bd7946833080bea8d318466d041f0c80292dbed335c9c619d0112",
+    "study-a-mean-regret-ecdf.svg": "fe8f8270f0286ec6572c37918c9083991506eef79b9253a6e5070ffa6ec8bd1e"
+  },
+  "protocol_id": "component-c-simulation-evaluation-v1.2",
+  "schema_version": "1.0.0",
+  "sources_sha256": {
+    "analysis\\component-c-bandit-evaluation\\results\\aggregate-tables\\20261014T095513Z-study-a-convergence.csv": "3c386eec55b7fb58c397dd946da91e6bc21a83ddd9205b6b715a4e218d231a19",
+    "analysis\\component-c-bandit-evaluation\\results\\aggregate-tables\\20261014T095513Z-study-a-inference.csv": "0fafcd64b26cb8afc25b4cf14c24fedfbbd85c2eabf992b10dccc27c7e80fa0e",
+    "analysis\\component-c-bandit-evaluation\\results\\session-summaries\\20261014T095513Z-study-a.csv": "c9fdb6bb577b5b45ae77e2e66e254554583b8ba68e71e6f7e470b970fee58aea"
+  }
+}
