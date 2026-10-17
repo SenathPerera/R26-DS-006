@@ -7,7 +7,7 @@ import {environment, resolvePersistedComponentBEndpoint} from '../config/environ
 import {componentDService} from '../services/api/componentDService';
 import {WEARABLE_DEVICE_NAME, wearableBleService} from '../services/ble/wearableBleService';
 import {componentBPipelineService} from '../services/componentB/componentBPipelineService';
-import {realtimeService} from '../services/realtime/realtimeService';
+import {realtimeService, statusFromQuestPhase} from '../services/realtime/realtimeService';
 import type {VisualLogSnapshot} from '../services/realtime/realtimeService';
 import {unityBridge} from '../services/unity/unityBridge';
 import {sessionRecordOutbox} from '../services/session/sessionRecordOutbox';
@@ -399,11 +399,19 @@ export const useMindSyncStore = create<MindSyncStore>()(
                 const phase = typeof message.payload.phase === 'string' ? message.payload.phase : null;
                 const terminal = phase === 'completed' || phase === 'aborted';
                 set(current => ({
-                  relay: {...current.relay, questPhase: phase},
+                  relay: {...current.relay, questPhase: phase, lastError: null},
                   vrStatus: phase === 'adaptive' ? 'active' : 'ready',
-                  sessionStatus: terminal ? 'complete' : current.sessionStatus,
+                  sessionStatus: statusFromQuestPhase(phase, current.sessionStatus),
                 }));
                 if (terminal) get().refreshVisualLog().catch(() => undefined);
+                return;
+              }
+              if (message.messageType === 'relay_error') {
+                const code = typeof message.payload.code === 'string' ? message.payload.code : 'relay-error';
+                set(current => ({
+                  relay: {...current.relay, lastError: code},
+                  vrStatus: code === 'quest-not-connected' ? 'disconnected' : current.vrStatus,
+                }));
                 return;
               }
               if (message.messageType === 'visual_telemetry_batch') {

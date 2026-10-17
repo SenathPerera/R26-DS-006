@@ -13,6 +13,21 @@ export type {RelayEnvelope, VisualLogSnapshot} from '../../types/domain';
 
 export const SESSION_RELAY_SCHEMA_VERSION = 'mindsync-session-v3';
 
+export type LiveSessionStatus = 'ready' | 'active' | 'paused' | 'complete';
+
+export function statusFromQuestPhase(phase: string | null, current: LiveSessionStatus): LiveSessionStatus {
+  if (phase === 'completed' || phase === 'aborted') return 'complete';
+  if (phase === 'paused') return 'paused';
+  if (phase === 'adaptive' || phase === 'acclimatization') return 'active';
+  return current;
+}
+
+export function sessionControlFromQuestPhase(phase: string | null): 'pause' | 'resume' | null {
+  if (phase === 'paused') return 'resume';
+  if (phase === 'adaptive') return 'pause';
+  return null;
+}
+
 export type CreatePreparedSessionInput = {
   requestId: string;
   participantPseudonym: string;

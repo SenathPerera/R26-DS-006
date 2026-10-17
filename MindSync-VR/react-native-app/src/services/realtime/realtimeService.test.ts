@@ -4,9 +4,27 @@ import {
   isVisualLogAcknowledgement,
   isVisualLogSnapshot,
   SESSION_RELAY_SCHEMA_VERSION,
+  sessionControlFromQuestPhase,
+  statusFromQuestPhase,
 } from './realtimeService';
 
 describe('session relay validation', () => {
+  test('Quest pause stays visible until Quest confirms a resume', () => {
+    expect(statusFromQuestPhase('paused', 'active')).toBe('paused');
+    expect(statusFromQuestPhase('paused', 'paused')).toBe('paused');
+    expect(statusFromQuestPhase('adaptive', 'paused')).toBe('active');
+    expect(statusFromQuestPhase('completed', 'paused')).toBe('complete');
+  });
+
+  test('voice VR stage offers only commands valid for the Quest phase', () => {
+    expect(sessionControlFromQuestPhase('ready')).toBeNull();
+    expect(sessionControlFromQuestPhase('acclimatization')).toBeNull();
+    expect(sessionControlFromQuestPhase('adaptive')).toBe('pause');
+    expect(sessionControlFromQuestPhase('paused')).toBe('resume');
+    expect(sessionControlFromQuestPhase('completed')).toBeNull();
+    expect(sessionControlFromQuestPhase('aborted')).toBeNull();
+  });
+
   test('accepts a complete prepared session', () => {
     expect(isPreparedSession({
       schemaVersion: SESSION_RELAY_SCHEMA_VERSION,

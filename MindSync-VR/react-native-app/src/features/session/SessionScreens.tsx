@@ -35,7 +35,12 @@ export function LiveSessionScreen({navigation}: any) {
   const wearable = useMindSyncStore(state => state.wearableState);
   const telemetry = useMindSyncStore(state => state.ble.telemetry);
   const vr = useMindSyncStore(state => state.vrStatus);
-  useEffect(() => { setStatus('active'); }, [setStatus]);
+  const questPhase = useMindSyncStore(state => state.relay.questPhase);
+  const relayError = useMindSyncStore(state => state.relay.lastError);
+  useEffect(() => {
+    if ((status === 'ready' || status === 'active') && questPhase === 'paused') setStatus('paused');
+    else if (status === 'ready') setStatus('active');
+  }, [questPhase, status, setStatus]);
   useEffect(() => {
     if (status !== 'active') return;
     const timer = setInterval(() => setElapsed(value => value + 1), 1000);
@@ -45,7 +50,7 @@ export function LiveSessionScreen({navigation}: any) {
     {text: 'Continue session', style: 'cancel'},
     {text: 'End session', style: 'destructive', onPress: () => { setStatus('complete'); sendVrCommand('stop'); navigation.replace('SessionComplete'); }},
   ]);
-  const pause = () => { const next = status === 'paused' ? 'active' : 'paused'; setStatus(next); sendVrCommand(next === 'paused' ? 'pause' : 'resume'); };
+  const pause = () => sendVrCommand(status === 'paused' ? 'resume' : 'pause');
   const emergency = () => { setStatus('complete'); sendVrCommand('emergency_stop'); navigation.replace('SessionComplete'); };
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, '0');
   const seconds = String(elapsed % 60).padStart(2, '0');
@@ -55,7 +60,8 @@ export function LiveSessionScreen({navigation}: any) {
       <View style={{alignItems: 'center', gap: 16}}><BreathingVisual size={220} /><StatusPill label={status === 'paused' ? 'Paused gently' : 'Environment adapting'} tone={status === 'paused' ? 'warning' : 'good'} /></View>
       <Card>
         <View style={uiStyles.row}><Metric label="stress band" value={telemetry ? 'Live' : 'Awaiting'} accent={telemetry ? colors.teal : colors.muted} /><Metric label="confidence" value={telemetry ? 'Sensor live' : '--'} /><Metric label="audio" value="Adaptive" accent={colors.violet} /></View>
-        <View style={uiStyles.rowBetween}><StatusPill label={wearable === 'connected' ? 'Wearable' : 'No wearable'} tone={wearable === 'connected' ? 'good' : 'warning'} /><StatusPill label={vr === 'ready' ? 'VR linked' : 'VR waiting'} tone={vr === 'ready' ? 'good' : 'warning'} /></View>
+        <View style={uiStyles.rowBetween}><StatusPill label={wearable === 'connected' ? 'Wearable' : 'No wearable'} tone={wearable === 'connected' ? 'good' : 'warning'} /><StatusPill label={vr === 'ready' || vr === 'active' ? 'VR linked' : 'VR waiting'} tone={vr === 'ready' || vr === 'active' ? 'good' : 'warning'} /></View>
+        {relayError === 'quest-not-connected' ? <Text style={uiStyles.body}>Quest connection lost. Keep the Quest app open, then retry Resume.</Text> : null}
       </Card>
       <View style={uiStyles.row}>
         <View style={{flex: 1}}><SecondaryButton label={status === 'paused' ? 'Resume' : 'Pause'} icon={status === 'paused' ? CirclePlay : CirclePause} onPress={pause} /></View>
