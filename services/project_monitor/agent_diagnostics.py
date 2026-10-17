@@ -48,10 +48,18 @@ def validate_snapshot(value):
                 "action": token, "status": token, "total": lambda n: number(n, -100, 100),
             }),
         })
-    return fields(value, {
+    validators = {
         "schemaVersion": lambda s: s == SCHEMA, "capturedAt": timestamp, "phase": token,
         "visual": lambda v: agent(v, 5), "audio": lambda v: agent(v, 7),
-    })
+    }
+    if isinstance(value, dict) and "coordination" in value:
+        validators["coordination"] = lambda v: fields(v, {
+            "owner": lambda s: s in ("None", "Visual", "Audio", "Content"),
+            "stage": lambda s: s in ("Waiting", "Suspended", "Transitioning", "Measuring", "Completing"),
+            "reason": token, "eligiblePostStartUtc": timestamp, "remainingSeconds": timestamp,
+            "completedTurns": count, "cancelledTurns": count,
+        })
+    return fields(value, validators)
 
 
 class AgentHistory:

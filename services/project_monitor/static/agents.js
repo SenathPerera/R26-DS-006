@@ -135,6 +135,13 @@
     }
     if (!hasData) return;
     const samples = visibleSamples(), latest = data.samples.at(-1);
+    const coordination = latest.coordination;
+    $("agent-coordination").replaceChildren(
+      stat("MEASUREMENT OWNER", coordination?.owner || "Not reported", coordination?.stage || "Awaiting updated Unity"),
+      stat("COORDINATION", coordination?.reason || "No coordination report", coordination
+        ? "Post window starts after " + time(coordination.eligiblePostStartUtc) : ""),
+      stat("COMPLETED / CANCELLED", coordination ? coordination.completedTurns + " / " + coordination.cancelledTurns : "--",
+        coordination ? "Turn deadline in " + coordination.remainingSeconds.toFixed(0) + "s" : ""));
     for (const agent of ["visual", "audio"]) {
       const report = latest[agent], panel = panels[agent], input = report.input, decision = report.decision, reward = report.reward;
       const age = input.ageSeconds + Math.max(0, data.observedAt - latest.receivedAt);

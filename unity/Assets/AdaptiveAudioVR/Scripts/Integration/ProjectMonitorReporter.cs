@@ -111,8 +111,22 @@ namespace AdaptiveAudioVR.Integration
             {
                 capturedAt = now,
                 phase = coordinator != null ? coordinator.Phase.ToString() : "unknown",
+                coordination = CaptureCoordination(),
                 visual = CaptureVisual(now),
                 audio = CaptureAudio(now)
+            };
+        }
+
+        private AgentMonitorCoordination CaptureCoordination()
+        {
+            var status = coordinator?.SharedAdaptation?.Status;
+            if (status == null) return new AgentMonitorCoordination();
+            return new AgentMonitorCoordination
+            {
+                owner = status.Owner.ToString(), stage = status.Stage, reason = status.Reason,
+                eligiblePostStartUtc = status.EligiblePostStartUtc,
+                remainingSeconds = System.Math.Max(0, status.DeadlineMonotonic - Time.realtimeSinceStartupAsDouble),
+                completedTurns = status.CompletedTurns, cancelledTurns = status.CancelledTurns
             };
         }
 

@@ -46,6 +46,19 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         public string phase;
         public AgentMonitorState visual;
         public AgentMonitorState audio;
+        public AgentMonitorCoordination coordination;
+    }
+
+    [Serializable]
+    public sealed class AgentMonitorCoordination
+    {
+        public string owner = "None";
+        public string stage = "Waiting";
+        public string reason = "Waiting for coordinated runtime";
+        public double eligiblePostStartUtc;
+        public double remainingSeconds;
+        public long completedTurns;
+        public long cancelledTurns;
     }
 
     [Serializable]
