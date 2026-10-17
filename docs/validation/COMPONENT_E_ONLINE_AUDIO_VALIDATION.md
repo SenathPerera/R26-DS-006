@@ -54,3 +54,28 @@ No new human efficacy results or clinically validated safety findings are claime
 The previously prepared Component E thesis DOCX has not been rewritten in this
 code change and still requires the architecture corrections listed in
 `docs/architecture/COMPONENT_E_AUDIO_RL_AGENT.md`.
+
+## Shared Coordination Verification: 2026-10-18
+
+The integrated audio and visual policies now share one reservation through
+transition, settling and delayed reward. Content swaps and realtime steering
+use the same coordinator. Cancelled or superseded reservations cannot update a
+model or release a newer turn. Coordinated audio models use a separate versioned
+configuration key from the previous independent schedule.
+
+| Check | Result |
+| --- | --- |
+| Standalone core/audio tests, including reservation and actual visual-policy integration | 38 passed |
+| Existing visual PolicyController integration cases under NUnit/.NET 8 | 11 passed |
+| Python monitoring, wire contract, generation metrics and evaluation checks | 32 passed |
+| JavaScript monitoring logic | 4 passed |
+| Playwright desktop/mobile, coordination status, canvas pixels and session switching | Passed |
+| C# 9 syntax parsing across audio and shared runtime sources | 109 files, no syntax errors |
+
+The standalone audio tests use explicit Unity test doubles. The NUnit visual
+tests run actual shared core source outside Unity. Syntax parsing is not Unity
+API compilation. The Unity Editor is not installed on this verification host;
+an integrated player build and real headset, Component B and Lyria tests remain
+required. In particular, verify deferred realtime start/resume and steering
+acknowledgements, clip crossfades, emergency mute, reconnect, and enough clean
+learning turns for both agents over a complete session.

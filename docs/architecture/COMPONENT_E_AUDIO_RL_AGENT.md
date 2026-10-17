@@ -6,6 +6,49 @@ The separate original `ComponentE_AdaptiveAudioVR` checkout is not changed.
 
 ## Relationship To Component C
 
+The integrated runtime now reserves one shared adaptation turn across C, E and
+audio content changes. A turn covers the action, transition, settling interval,
+and a complete reliable post-action physiology window. The other agent holds its
+current output and does not learn a reward during that turn. C and E retain their
+own policies, action spaces, safety checks and reward functions.
+
+The coordinator is enabled when the integrated audio bootstrap attaches to the
+production session. Visual-only runtimes retain their existing scheduling.
+New visual scheduling events replace older queued opportunities; a held event
+uses the current monotonic time when admitted. Audio retries a denied reservation
+without reusing a completed decision context or requiring another publication.
+Both agents require a clean pre-window after the latest transition or interruption.
+An accepted post-window can serve as the next agent's pre-window but cannot be
+credited as two separate rewards. Model updates commit under the reservation lock.
+Coordinated audio snapshots include `shared-adaptation-v1` in their configuration
+key, so weights learned under the previous independent schedule are not reused.
+
+After a turn, the peer receives a five-second admission preference. A missing or
+ineligible peer does not block the remaining agent indefinitely. Each turn also
+has a bounded deadline. Pause, disconnection, emergency mute, unexpected content
+or scene changes, and stale reservations prevent pending model updates. Resuming
+requires a new window collected after recovery and settling.
+
+Generated clips may be prepared while an agent measures an outcome; applying
+them is deferred into the existing standby queue. Crossfades reserve a content
+turn until playback finishes changing. Realtime steering also reserves a content
+turn until the server acknowledges the change and the already buffered audio
+has drained. A content change requires five seconds of settling before collecting
+a clean pre-window. Further content changes wait for a completed agent turn or
+a 240-second recovery deadline, preventing repeated generation from starving
+learning. These timing values remain provisional and need headset validation.
+
+The live-agent monitor reports the reservation owner, stage, eligibility time,
+deadline, completed turns and cancelled turns. These observations do not control
+the policies. Standalone verification can run on .NET 8 using:
+
+```sh
+dotnet run --project tests/audio_online/AudioOnlineTests.csproj -- /tmp/mindsync-audio-tests
+```
+
+This exercises the shared core and audio logic with explicit Unity test doubles;
+the Unity Editor and headset playback checks remain separate requirements.
+
 Both components follow the same learning process:
 
 1. Initialize an output from participant preferences.
