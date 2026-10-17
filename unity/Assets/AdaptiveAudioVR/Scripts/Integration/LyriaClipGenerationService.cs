@@ -234,7 +234,14 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
+            long reservation = 0;
+            if (bootstrap != null && !bootstrap.TryBeginContentChange("Restore meditation clip", out reservation))
+            {
+                LastStatusMessage = "Clip restoration deferred while an agent measures its outcome.";
+                return;
+            }
             audioMixerController.CrossfadeToMeditationClip(originalMeditationClip, meditationCrossfadeSeconds);
+            bootstrap?.CompleteContentChange(reservation);
             UsingGeneratedMeditationClip = false;
             LastGenerationOutcome = "Restored raw meditation clip.";
             LastStatusMessage = "Restored original meditation clip.";
@@ -776,6 +783,13 @@ namespace AdaptiveAudioVR.Integration
             float generationDuration,
             string promptUsedOverride)
         {
+            long reservation = 0;
+            if (bootstrap != null && !bootstrap.TryBeginContentChange("Generated meditation clip", out reservation))
+            {
+                StageStandbyClip(newClip, clipPath, context, usedCache, generationDuration, promptUsedOverride);
+                LastStatusMessage = "Generated clip queued until the coordinated measurement finishes.";
+                return;
+            }
             AudioClip previousClip = audioMixerController.CurrentMeditationClip;
             bool sessionIsWaitingForInitialClip = requireGeneratedClipBeforeSession
                                                   && bootstrap != null
@@ -801,6 +815,7 @@ namespace AdaptiveAudioVR.Integration
             }
 
             UsingGeneratedMeditationClip = true;
+            bootstrap?.CompleteContentChange(reservation);
             LastRequestUsedCache = usedCache;
             LastGeneratedPrompt = string.IsNullOrWhiteSpace(promptUsedOverride) ? context.prompt : promptUsedOverride;
             LastGeneratedClipPath = clipPath;
@@ -890,6 +905,9 @@ namespace AdaptiveAudioVR.Integration
                 return false;
             }
 
+            long reservation = 0;
+            if (bootstrap != null && !bootstrap.TryBeginContentChange("Standby meditation clip", out reservation)) return false;
+
             AudioClip clipToApply = standbyClip;
             string clipPath = standbyClipPath;
             string promptUsed = standbyPromptUsed;
@@ -923,6 +941,7 @@ namespace AdaptiveAudioVR.Integration
             }
 
             UsingGeneratedMeditationClip = true;
+            bootstrap?.CompleteContentChange(reservation);
             LastRequestUsedCache = usedCache;
             LastGeneratedPrompt = promptUsed;
             LastGeneratedClipPath = clipPath;

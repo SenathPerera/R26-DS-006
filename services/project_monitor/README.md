@@ -70,6 +70,9 @@ or firmware update is needed for this view.
 - Both show the input stress, confidence, quality and source; current applied
   controls; target controls; change since the previous report; and the last
   decision's proposed versus safety-filtered deltas.
+- The coordination strip shows the measurement owner, transition/measurement
+  stage, post-window eligibility, deadline, and completed/cancelled turns. Older
+  Unity reports remain readable and show coordination as not reported.
 - Stress and controls are normalized 0-1. Scene stress is Component B's continuous
   score divided by 3, matching the audio input convention. Controls are not lux,
   BPM, seconds or measured sound levels. Applied audio comes from the mixer,

@@ -4,6 +4,7 @@ using System.Reflection;
 using AdaptiveAudioVR.Core;
 using AdaptiveAudioVR.RL.Agent;
 using AdaptiveAudioVR.Preference;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Policy;
@@ -44,6 +45,11 @@ internal static class AudioOnlineTests
             Run("Monitoring keeps decision and delayed outcome attribution separate", MonitorAttribution);
             Run("Low-quality and expired pending outcomes never update weights", InvalidAndExpired);
             Run("Synthetic contextual learning improves choices", ContextLearning);
+            CoordinationTests.Run(Run);
+            Run("Audio holding new decisions preserves its pending outcome", HoldDecisionAdmission);
+            Run("Audio waits for visual reward then learns only its own outcome", CoordinatedAudio);
+            Run("Audio retries a blocked turn using the same still-fresh publication", RetryCoordinatedAudio);
+            Run("Coordinated audio models do not load independent-controller weights", CoordinatedModelIdentity);
             Console.WriteLine("PASS: " + passed + " audio online-learning tests. Runtime tests use explicit Unity test doubles.");
             return 0;
         }
@@ -228,6 +234,57 @@ internal static class AudioOnlineTests
         Tick(agent, 60, Window(60)); Tick(agent, 120, Window(120, 2));
         Check(agent.DecisionCount == 1, "No decision after two unique baseline windows");
         return agent;
+    }
+
+    private static void HoldDecisionAdmission()
+    {
+        var agent = Warmup();
+        agent.SetControlContext(false, true, "No new decisions");
+        Tick(agent, 121, Window(120, 2)); Tick(agent, 240, Window(240, 4));
+        Check(agent.OnlineUpdateCount == 1 && agent.DecisionCount == 1,
+            "Blocking new decisions cancelled the pending outcome");
+    }
+
+    private static void CoordinatedAudio()
+    {
+        var c = new AdaptationCoordinator(); var agent = Agent(); agent.BindCoordination(c);
+        Check(c.TryAcquire(AdaptationOwner.Visual, "visual", Epoch, Epoch + 60, 60, Epoch + 60, 240, out var visual), "Visual reservation");
+        c.MarkTransitionCompleted(visual, Epoch + 120, 5);
+        Tick(agent, 60, Window(60)); Tick(agent, 120, Window(120, 2));
+        Check(agent.DecisionCount == 0 && !agent.HasPendingOutcome, "Audio acted during visual turn");
+        Check(c.TryAcceptOutcome(visual, Epoch + 180, Epoch + 240), "Visual outcome");
+        c.Release(visual, 240, Epoch + 240, "Visual completed");
+        Tick(agent, 240, Window(240, 4));
+        Check(agent.DecisionCount == 1 && c.Status.Owner == AdaptationOwner.Audio, "Audio handover failed");
+        Tick(agent, 241, Window(240, 4)); Tick(agent, 300, Window(300, 5));
+        Check(agent.OnlineUpdateCount == 0, "Audio reused contaminated window");
+        Tick(agent, 360, Window(360, 6));
+        Check(agent.OnlineUpdateCount == 1 && c.Status.CompletedTurns == 2, "Audio did not learn own outcome");
+        Tick(agent, 361, Window(360, 6));
+        Check(agent.OnlineUpdateCount == 1, "Outcome reused");
+        c.SetSuspended(true, Epoch + 362, "Pause");
+        Tick(agent, 363, Window(360, 6));
+        Check(agent.OnlineUpdateCount == 1 && !agent.HasPendingOutcome, "Paused reservation trained");
+    }
+
+    private static void RetryCoordinatedAudio()
+    {
+        var c = new AdaptationCoordinator(); var a = Agent(); a.BindCoordination(c);
+        Check(c.TryAcquire(AdaptationOwner.Visual, "v", Epoch, Epoch + 60, 60, Epoch + 60, 240, out var lease), "Visual turn");
+        c.MarkTransitionCompleted(lease, Epoch + 61, 5);
+        Tick(a, 60, Window(60)); Tick(a, 120, Window(120, 2)); Tick(a, 180, Window(180, 3));
+        Check(a.DecisionCount == 0, "Audio bypassed visual owner");
+        Check(c.TryAcceptOutcome(lease, Epoch + 120, Epoch + 180), "Visual outcome");
+        c.Release(lease, 180, Epoch + 180, "done");
+        Tick(a, 181, Window(180, 3));
+        Check(a.DecisionCount == 1, "Audio waited for another sensor publication after handover");
+    }
+
+    private static void CoordinatedModelIdentity()
+    {
+        var a = Agent(); Tick(a, 60, Window(60)); string independent = a.ModelPath;
+        a.BindCoordination(new AdaptationCoordinator()); Tick(a, 61, Window(60));
+        Check(a.ModelPath != independent && a.OnlineUpdateCount == 0, "Old reward regime reused its model");
     }
 
     private static void DelayedOnlineUpdate()

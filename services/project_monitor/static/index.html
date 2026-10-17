@@ -23,6 +23,7 @@
       <div class="section-heading agent-heading"><div><h2>Scene &amp; audio adaptation</h2><p id="agent-session" class="muted">No session selected</p></div><div class="agent-controls"><label>History<select id="agent-range"><option value="300">5 minutes</option><option value="900" selected>15 minutes</option></select></label><label class="live-toggle"><input id="agent-live" type="checkbox" checked>Live</label></div></div>
       <p id="agent-status" class="agent-status" role="status">Waiting for Unity observations.</p>
       <div id="agent-content" hidden>
+        <dl id="agent-coordination" class="agent-context agent-coordination" aria-label="Adaptation coordination"></dl>
         <div id="agent-panels" class="agent-columns"></div>
         <section class="agent-events" aria-labelledby="agent-events-title"><div class="section-heading"><h2 id="agent-events-title">Decision &amp; outcome history</h2><span id="agent-sample-count"></span></div><div class="table-scroll"><table><thead><tr><th>Event time (Unity)</th><th>Agent</th><th>Input / decision</th><th>Proposed / executed action</th><th>Outcome</th></tr></thead><tbody id="agent-events-body"></tbody></table></div></section>
       </div>

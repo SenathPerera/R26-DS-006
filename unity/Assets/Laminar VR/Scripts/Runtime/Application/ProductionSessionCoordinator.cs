@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Application;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Networking;
 using LaminarVR.AdaptiveMeditation.Physiology;
@@ -102,6 +103,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private double clockAnchorUtcUnixSeconds;
         private bool hasAdvancedClock;
         private bool headsetLifecycleSuspended;
+        private bool coordinatedAudioReady;
         private double headsetLifecycleSuspendedAtMonotonicSeconds;
 
         private string sessionId;
@@ -112,6 +114,36 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private bool hasSessionContext;
 
         public event Action<SessionPhaseTransition> PhaseChanged;
+
+        public AdaptationCoordinator SharedAdaptation { get; private set; }
+
+        public AdaptationCoordinator EnableAudioCoordination()
+        {
+            if (SharedAdaptation == null)
+            {
+                SharedAdaptation = new AdaptationCoordinator();
+                if (policyController != null) policyController.Coordination = SharedAdaptation;
+            }
+            return SharedAdaptation;
+        }
+
+        public void SetCoordinatedAudioReady(bool ready)
+        {
+            coordinatedAudioReady = ready;
+            if (!ready && SharedAdaptation != null)
+            {
+                SharedAdaptation.SetSuspended(true, UtcNowUnixSeconds(), "Audio output unavailable or interrupted");
+                if (policyController != null && policyController.HasPendingOutcome)
+                    RequestInvalidation(RewardAttributionInvalidationReason.TransitionCancelled);
+            }
+        }
+
+        public void InterruptCoordinatedAdaptation(string reason)
+        {
+            SharedAdaptation?.Invalidate(UtcNowUnixSeconds(), reason);
+            if (policyController != null && policyController.HasPendingOutcome)
+                RequestInvalidation(RewardAttributionInvalidationReason.TransitionCancelled);
+        }
 
         public bool IsInitialized { get; private set; }
 
@@ -224,6 +256,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         private void OnDestroy()
         {
+            SharedAdaptation?.SetSuspended(true, UtcNowUnixSeconds(), "Session coordinator destroyed");
             if (session != null)
             {
                 session.PhaseChanged -= HandlePhaseChanged;
@@ -332,6 +365,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             MonitorReward = null;
             MonitorPhysiology = null;
             MonitorDecisionAt = MonitorRewardAt = 0d;
+            SharedAdaptation = null;
+            coordinatedAudioReady = false;
             participantPseudonym = pseudonymousParticipantId.Trim();
             preferredEnvironment = safePreferredEnvironment;
             sessionContextSnapshot = contextSnapshot;
@@ -661,6 +696,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public void SetNetworkConnected(bool connected)
         {
             networkConnected = connected;
+            if (!connected) SharedAdaptation?.SetSuspended(true, UtcNowUnixSeconds(), "Network disconnected");
         }
 
         public bool ReportTelemetryTransferSucceeded(
@@ -873,6 +909,16 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             DrainCommands(monotonicTimeSeconds);
             session.AdvanceTo(monotonicTimeSeconds);
             TryCreatePolicyController();
+            if (SharedAdaptation != null)
+            {
+                SharedAdaptation.SetSuspended(!coordinatedAudioReady || !networkConnected
+                    || headsetLifecycleSuspended || session.Phase != VrSessionPhase.Adaptive,
+                    utcTimestampUnixSeconds, "Shared session is not adaptive and ready");
+                SharedAdaptation.Tick(monotonicTimeSeconds, utcTimestampUnixSeconds);
+                if (policyController != null && policyController.HasPendingOutcome
+                    && SharedAdaptation.Status.Owner != AdaptationOwner.Visual)
+                    RequestInvalidation(RewardAttributionInvalidationReason.TransitionCancelled);
+            }
 
             if (applicationBootstrap.EnvironmentManager.IsTransitionActive
                 && session.Phase != VrSessionPhase.Adaptive
@@ -1166,6 +1212,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 telemetryRecorder,
                 null,
                 stabilizationSelector);
+            policyController.Coordination = SharedAdaptation;
         }
 
         private void StartNextOperation(
@@ -1213,9 +1260,16 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     return;
                 }
 
-                if (decisionQueue.Count > 0)
+                if (decisionQueue.Count > 0 && CanRequestVisualTurn(monotonicTimeSeconds, utcTimestampUnixSeconds))
                 {
+                    // Scheduling events are opportunities, not actions to replay in a burst after a held turn.
                     var opportunity = decisionQueue.Dequeue();
+                    if (SharedAdaptation != null)
+                    {
+                        while (decisionQueue.Count > 0) opportunity = decisionQueue.Dequeue();
+                        opportunity = new SessionDecisionOpportunity(opportunity.SequenceNumber, monotonicTimeSeconds,
+                            opportunity.AdaptiveElapsedSeconds);
+                    }
                     if (policyController.HasPendingOutcome)
                     {
                         rewardCheckRequested = true;
@@ -1301,6 +1355,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 MonitorDecision = LastDecisionResult;
                 MonitorDecisionAt = utcTimestampUnixSeconds;
             }
+        }
+
+        private bool CanRequestVisualTurn(double monotonic, double utc)
+        {
+            if (SharedAdaptation == null) return true;
+            return physiologyBuffer.TryGetLatestUsable(PhysiologyDataUse.Decision, monotonic, 0,
+                out var window, out _) && SharedAdaptation.CanRequest(AdaptationOwner.Visual,
+                window.Window.WindowStartUtcUnixSeconds, window.Window.WindowEndUtcUnixSeconds, monotonic, utc);
         }
 
         private async Task CompleteAdaptiveTransitionAsync(
@@ -1443,6 +1505,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private void HandleDecisionOpportunityReached(
             SessionDecisionOpportunity opportunity)
         {
+            if (SharedAdaptation != null) decisionQueue.Clear();
             decisionQueue.Enqueue(opportunity);
             QueuePerformanceTelemetry("decision_opportunity");
         }
@@ -1539,6 +1602,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private void RequestInvalidation(
             RewardAttributionInvalidationReason reason)
         {
+            SharedAdaptation?.Invalidate(UtcNowUnixSeconds(), reason.ToString());
             if (policyController != null)
             {
                 pendingInvalidation = reason;

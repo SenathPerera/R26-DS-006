@@ -9,6 +9,7 @@ using AdaptiveAudioVR.RL.Agent;
 using AdaptiveAudioVR.Safety;
 using AdaptiveAudioVR.Signals;
 using LaminarVR.AdaptiveMeditation.Runtime.Application;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using LaminarVR.AdaptiveMeditation.Session;
 using UnityEngine;
 
@@ -81,6 +82,30 @@ namespace AdaptiveAudioVR.Core
         private AudioClip observedMeditationClip;
         private object observedVisualState;
         private bool hasObservedVisualState;
+        private long contentLease;
+        private double contentMayFinishAt = double.PositiveInfinity;
+        private bool realtimePlaybackReady = true;
+        private SafetyManager subscribedSafetyManager;
+        public AdaptationCoordinator SharedAdaptation => productionCoordinator != null ? productionCoordinator.SharedAdaptation : null;
+
+        public bool TryBeginContentChange(string id, out long reservation)
+        {
+            reservation = 0;
+            if (!IsSessionRunning || SharedAdaptation == null) return true;
+            if (!SharedAdaptation.TryBeginContent(id, Time.realtimeSinceStartupAsDouble, 90, out reservation)) return false;
+            contentLease = reservation;
+            contentMayFinishAt = double.PositiveInfinity;
+            return true;
+        }
+
+        public void CompleteContentChange(long reservation, float pipelineDelaySeconds = 0)
+        {
+            if (reservation != 0 && reservation == contentLease)
+                contentMayFinishAt = Time.realtimeSinceStartupAsDouble + Mathf.Max(0, pipelineDelaySeconds);
+        }
+
+        public void InterruptAdaptation(string reason) => productionCoordinator?.InterruptCoordinatedAdaptation(reason);
+        public void SetRealtimePlaybackReady(bool ready) => realtimePlaybackReady = ready;
         private bool applicationPaused;
         private bool applicationFocused = true;
 
@@ -104,6 +129,7 @@ namespace AdaptiveAudioVR.Core
             ResolveReferences();
         }
 
+        private void OnEnable() => ResolveReferences();
         private void OnApplicationPause(bool pauseStatus)
         {
             applicationPaused = pauseStatus;
@@ -224,6 +250,7 @@ namespace AdaptiveAudioVR.Core
 
         private void Update()
         {
+            UpdateSharedCoordination();
             if (IsSessionRunning && !string.IsNullOrWhiteSpace(RelaySessionId)
                 && productionCoordinator != null && productionCoordinator.IsInitialized
                 && (productionCoordinator.Phase == VrSessionPhase.Completed
@@ -421,6 +448,9 @@ namespace AdaptiveAudioVR.Core
             AudioClip currentClip = audioMixerController.CurrentMeditationClip;
             if (observedMeditationClip != currentClip)
             {
+                if (observedMeditationClip != null && SharedAdaptation != null
+                    && SharedAdaptation.Status.Owner != AdaptationOwner.Content)
+                    InterruptAdaptation("Unexpected meditation clip change");
                 audioRLAgent.InvalidatePendingOutcome("Meditation clip changed");
                 observedMeditationClip = currentClip;
             }
@@ -433,7 +463,11 @@ namespace AdaptiveAudioVR.Core
             if (excludeVisualChangesFromAudioLearning && visualManager != null)
             {
                 if (hasObservedVisualState && !visualManager.CurrentState.Equals(observedVisualState))
+                {
+                    if (SharedAdaptation != null && SharedAdaptation.Status.Owner != AdaptationOwner.Visual)
+                        InterruptAdaptation("Unexpected visual environment change");
                     audioRLAgent.InvalidatePendingOutcome("Visual environment changed during audio attribution");
+                }
                 observedVisualState = visualManager.CurrentState;
                 hasObservedVisualState = true;
                 if (visualManager.IsTransitionActive)
@@ -443,6 +477,50 @@ namespace AdaptiveAudioVR.Core
                 }
             }
             audioRLAgent.SetControlContext(canAdapt, canObserve, reason);
+        }
+
+        private void UpdateSharedCoordination()
+        {
+            if (productionCoordinator == null || audioRLAgent == null) return;
+            var coordination = productionCoordinator.EnableAudioCoordination();
+            if (!ReferenceEquals(audioRLAgent.Coordination, coordination))
+            {
+                contentLease = 0;
+                contentMayFinishAt = double.PositiveInfinity;
+            }
+            audioRLAgent.BindCoordination(coordination);
+            if (contentLease != 0 && !coordination.IsCurrent(contentLease))
+            {
+                if (double.IsPositiveInfinity(contentMayFinishAt)) realtimePlaybackReady = false;
+                contentLease = 0;
+                contentMayFinishAt = double.PositiveInfinity;
+            }
+            if (contentLease != 0 && Time.realtimeSinceStartupAsDouble >= contentMayFinishAt
+                && audioMixerController != null && !audioMixerController.IsCrossfading)
+            {
+                coordination.Release(contentLease, Time.realtimeSinceStartupAsDouble,
+                    System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000d, "Audio content change finished");
+                contentLease = 0;
+                observedMeditationClip = audioMixerController.CurrentMeditationClip;
+            }
+            bool expectedAudioTransition = coordination.Status.Owner == AdaptationOwner.Audio;
+            bool parametersStable = audioMixerController != null && AudioActionCatalog.Same(
+                AudioRLAction.Between(audioMixerController.CurrentAppliedParameters, audioRLAgent.CurrentTargetParameters),
+                AudioRLAction.NoChange, 0.002f);
+            productionCoordinator.SetCoordinatedAudioReady(IsSessionRunning && safetyManager != null
+                && safetyManager.IsSafeToRun() && audioMixerController != null
+                && audioMixerController.IsSessionPlaybackStarted && !audioMixerController.IsMeditationPlaybackPaused
+                && realtimePlaybackReady
+                && (!audioMixerController.IsCrossfading || coordination.Status.Owner == AdaptationOwner.Content)
+                && (expectedAudioTransition || parametersStable));
+        }
+
+        private void OnDisable()
+        {
+            if (subscribedSafetyManager != null) subscribedSafetyManager.EmergencyMuteChanged -= HandleEmergencyMute;
+            subscribedSafetyManager = null;
+            productionCoordinator?.SetCoordinatedAudioReady(false);
+            audioRLAgent?.InvalidatePendingOutcome("Audio session disabled");
         }
 
         private void ResolveReferences()
@@ -463,6 +541,20 @@ namespace AdaptiveAudioVR.Core
             sessionLogger ??= FindAnyObjectByType<SessionLogger>();
             safetyManager ??= FindAnyObjectByType<SafetyManager>();
             clipGenerationService ??= FindAnyObjectByType<LyriaClipGenerationService>();
+            if (subscribedSafetyManager != safetyManager)
+            {
+                if (subscribedSafetyManager != null) subscribedSafetyManager.EmergencyMuteChanged -= HandleEmergencyMute;
+                subscribedSafetyManager = safetyManager;
+                if (subscribedSafetyManager != null) subscribedSafetyManager.EmergencyMuteChanged += HandleEmergencyMute;
+            }
+        }
+
+        private void HandleEmergencyMute(bool muted)
+        {
+            if (!muted) return;
+            productionCoordinator?.SetCoordinatedAudioReady(false);
+            audioRLAgent?.InvalidatePendingOutcome("Emergency mute");
+            audioMixerController?.SetMuted(true);
         }
 
         private bool ValidateReferences()
