@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
@@ -34,6 +35,9 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         private int consecutiveSameDirectionActions;
         private double totalVariation;
         private double? lastActionCompletedMonotonicTimeSeconds;
+        private long coordinationLease;
+
+        public AdaptationCoordinator Coordination { get; set; }
 
         public PolicyController(
             IEnvironmentPolicy policy,
@@ -104,6 +108,34 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             double utcTimestampUnixSeconds,
             double sessionElapsedSeconds,
             CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await ProcessCoordinatedDecisionAsync(decisionId, opportunity, phase, networkConnected,
+                    preferredEnvironment, utcTimestampUnixSeconds, sessionElapsedSeconds, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (coordinationLease != 0)
+                {
+                    Coordination?.CancelReservation(coordinationLease, utcTimestampUnixSeconds, "Visual operation interrupted");
+                    environmentManager.CancelTransition(out _);
+                    attributionTracker.TryInvalidate(RewardAttributionInvalidationReason.TransitionCancelled,
+                        opportunity.MonotonicTimeSeconds, out _);
+                    pendingDecision = null;
+                }
+                throw;
+            }
+            finally
+            {
+                if (pendingDecision == null) ReleaseCoordination(opportunity.MonotonicTimeSeconds, utcTimestampUnixSeconds);
+            }
+        }
+
+        private async Task<PolicyDecisionCycleResult> ProcessCoordinatedDecisionAsync(
+            string decisionId, SessionDecisionOpportunity opportunity, VrSessionPhase phase,
+            bool networkConnected, EnvironmentState preferredEnvironment, double utcTimestampUnixSeconds,
+            double sessionElapsedSeconds, CancellationToken cancellationToken)
         {
             ValidateIdentity(decisionId, nameof(decisionId));
             ValidateTimes(
@@ -207,6 +239,17 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     cancellationToken).ConfigureAwait(false);
             }
 
+            if (Coordination != null && !Coordination.TryAcquire(AdaptationOwner.Visual, decisionId,
+                    physiology.Window.WindowStartUtcUnixSeconds, physiology.Window.WindowEndUtcUnixSeconds,
+                    opportunity.MonotonicTimeSeconds, utcTimestampUnixSeconds,
+                    sceneProfile.TransitionDurationSeconds + rewardConfiguration.MaximumAttributionWaitSeconds + 5,
+                    out coordinationLease))
+            {
+                return await SkipDecisionAsync(decisionId, PolicyDecisionCycleResultCode.SkippedCoordination,
+                    "Waiting for coordinated visual turn and clean physiology", null, utcTimestampUnixSeconds,
+                    sessionElapsedSeconds, cancellationToken).ConfigureAwait(false);
+            }
+
             var recentWindows = physiologyBuffer.GetRecentAccepted(
                 rewardConfiguration.TrendWindowCount);
             var trend = PhysiologyTrendCalculator.Calculate(
@@ -264,6 +307,12 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     null,
                     observation);
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Coordination != null && !Coordination.IsCurrent(coordinationLease))
+                return await SkipDecisionAsync(decisionId, PolicyDecisionCycleResultCode.SkippedCoordination,
+                    "Coordinated turn cancelled before execution", null, utcTimestampUnixSeconds,
+                    sessionElapsedSeconds, cancellationToken).ConfigureAwait(false);
 
             pendingDecision = new PendingDecision(
                 decisionId.Trim(),
@@ -476,6 +525,29 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             bool networkConnected,
             CancellationToken cancellationToken)
         {
+            try
+            {
+                if (pendingDecision != null && Coordination != null && !Coordination.IsCurrent(coordinationLease))
+                {
+                    await InvalidatePendingAsync(RewardAttributionInvalidationReason.TransitionCancelled,
+                        currentMonotonicTimeSeconds, utcTimestampUnixSeconds, sessionElapsedSeconds,
+                        cancellationToken).ConfigureAwait(false);
+                    return new PolicyRewardCycleResult(PolicyRewardCycleResultCode.AttributionInvalidated,
+                        RewardAttributionResolutionCode.InvalidatedForPhase, default);
+                }
+                return await ResolveCoordinatedRewardAsync(currentMonotonicTimeSeconds, utcTimestampUnixSeconds,
+                    sessionElapsedSeconds, phase, networkConnected, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (pendingDecision == null) ReleaseCoordination(currentMonotonicTimeSeconds, utcTimestampUnixSeconds);
+            }
+        }
+
+        private async Task<PolicyRewardCycleResult> ResolveCoordinatedRewardAsync(
+            double currentMonotonicTimeSeconds, double utcTimestampUnixSeconds, double sessionElapsedSeconds,
+            VrSessionPhase phase, bool networkConnected, CancellationToken cancellationToken)
+        {
             ValidateTimes(
                 currentMonotonicTimeSeconds,
                 utcTimestampUnixSeconds,
@@ -577,22 +649,6 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     calculation);
             }
 
-            if (stabilizationSelector != null)
-            {
-                // ADR-016 freezes binary pilot eligibility: any positive
-                // discomfort or safety intervention excludes the outcome.
-                stabilizationSelector.RecordOutcome(
-                    new StabilizationOutcome(
-                        match.Request.TransitionId,
-                        match.PostActionPhysiology.SequenceNumber,
-                        match.Request.EnvironmentAfter,
-                        calculation.Breakdown.TotalReward,
-                        calculation.Breakdown.DiscomfortSeverity
-                            .GetValueOrDefault() > 0d,
-                        calculation.Breakdown
-                            .SafetyInterventionOccurred));
-            }
-
             var rewardFields = new List<TelemetryField>
             {
                 TelemetryField.String(
@@ -654,18 +710,33 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 rewardFields,
                 cancellationToken).ConfigureAwait(false);
             pendingDecision = null;
+            cancellationToken.ThrowIfCancellationRequested();
             var policyStateBeforeUpdate = policy.CaptureState();
             PolicyStateSnapshot policyStateAfterUpdate;
             try
             {
-                policy.ObserveOutcome(
-                    new ActionOutcome(
+                Action commit = () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    policy.ObserveOutcome(new ActionOutcome(
                         completedDecision.DecisionId,
                         completedDecision.Decision,
                         match.Request.ExecutedAction,
                         calculation.Breakdown.TotalReward,
                         match.Request.PreActionPhysiology.SequenceNumber,
                         match.PostActionPhysiology.SequenceNumber));
+                    if (stabilizationSelector != null)
+                        stabilizationSelector.RecordOutcome(new StabilizationOutcome(match.Request.TransitionId,
+                            match.PostActionPhysiology.SequenceNumber, match.Request.EnvironmentAfter,
+                            calculation.Breakdown.TotalReward, calculation.Breakdown.DiscomfortSeverity.GetValueOrDefault() > 0d,
+                            calculation.Breakdown.SafetyInterventionOccurred));
+                };
+                if (Coordination == null) commit();
+                else if (!Coordination.TryCommitOutcome(coordinationLease,
+                        match.PostActionPhysiology.Window.WindowStartUtcUnixSeconds,
+                        match.PostActionPhysiology.Window.WindowEndUtcUnixSeconds, commit))
+                    return new PolicyRewardCycleResult(PolicyRewardCycleResultCode.AttributionInvalidated,
+                        attributionCode, default);
                 policyStateAfterUpdate = policy.CaptureState();
             }
             catch (Exception exception) when (
@@ -934,6 +1005,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     sessionElapsedSeconds,
                     cancellationToken).ConfigureAwait(false);
                 pendingDecision = null;
+                ReleaseCoordination(currentMonotonicTimeSeconds, utcTimestampUnixSeconds);
                 return true;
             }
 
@@ -969,10 +1041,20 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 out resultCode))
             {
                 pendingDecision = null;
+                ReleaseCoordination(completedMonotonicTimeSeconds, completedUtcUnixSeconds);
                 return false;
             }
 
+            Coordination?.MarkTransitionCompleted(coordinationLease, completedUtcUnixSeconds,
+                rewardConfiguration.SettlingSeconds);
+
             return true;
+        }
+
+        private void ReleaseCoordination(double monotonic, double utc)
+        {
+            Coordination?.Release(coordinationLease, monotonic, utc, "Visual turn finished");
+            coordinationLease = 0;
         }
 
         private SafetyBlockReason DetermineSafetyBlockReason(

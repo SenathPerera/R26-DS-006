@@ -12,7 +12,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         SkippedNetworkUnavailable,
         SkippedTransitionActive,
         SkippedRewardPending,
-        SkippedPhysiologyUnavailable
+        SkippedPhysiologyUnavailable,
+        SkippedCoordination
     }
 
     public readonly struct PolicyDecisionCycleResult

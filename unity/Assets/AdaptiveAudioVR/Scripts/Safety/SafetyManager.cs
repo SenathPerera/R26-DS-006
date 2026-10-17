@@ -8,11 +8,17 @@ namespace AdaptiveAudioVR.Safety
         [SerializeField] private bool emergencyMute;
         [SerializeField] private float signalTimeoutSeconds = 3f;
         [SerializeField] private bool missingProfileFallback = true;
+        public event System.Action<bool> EmergencyMuteChanged;
 
         public bool EmergencyMute
         {
             get => emergencyMute;
-            set => emergencyMute = value;
+            set
+            {
+                if (emergencyMute == value) return;
+                emergencyMute = value;
+                EmergencyMuteChanged?.Invoke(value);
+            }
         }
 
         public bool MissingProfileFallback => missingProfileFallback;

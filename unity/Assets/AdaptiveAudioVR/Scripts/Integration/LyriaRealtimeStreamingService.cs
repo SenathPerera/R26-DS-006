@@ -73,6 +73,11 @@ namespace AdaptiveAudioVR.Integration
         private SignalPacket lastSentSignal;
         private AudioParameters lastSentParameters;
         private bool pendingBufferedPlaybackStart;
+        private long contentReservation;
+        private readonly SemaphoreSlim sendLock = new SemaphoreSlim(1, 1);
+        private bool pendingRealtimeStart;
+        private bool pendingManualSync;
+        private bool pendingManualAutoPlay;
 
         private void Awake()
         {
@@ -98,9 +103,11 @@ namespace AdaptiveAudioVR.Integration
             ProcessInboundMessages();
             TryStartBufferedPlayback();
 
-            if (autoSteerFromRl && IsConnected && !IsConnecting && Time.unscaledTime >= nextSteeringTime)
+            if (IsConnected && !IsConnecting && Time.unscaledTime >= nextSteeringTime)
             {
-                TrySendRealtimeSteeringUpdate();
+                if (pendingRealtimeStart) _ = StartRealtimeStreamAsync();
+                else if (pendingManualSync) _ = SendCurrentFrameSyncAsync(pendingManualAutoPlay);
+                else if (autoSteerFromRl) _ = TrySendRealtimeSteeringUpdate();
                 nextSteeringTime = Time.unscaledTime + Mathf.Max(0.25f, steeringUpdateIntervalSeconds);
             }
         }
@@ -131,6 +138,7 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
+            pendingRealtimeStart = true;
             _ = StartRealtimeStreamAsync();
         }
 
@@ -156,7 +164,9 @@ namespace AdaptiveAudioVR.Integration
 
         public void PushCurrentFrameToRealtime()
         {
-            _ = SendCurrentFrameSyncAsync(autoPlay: IsStreaming || !IsPaused);
+            pendingManualSync = true;
+            pendingManualAutoPlay = IsStreaming || !IsPaused;
+            _ = SendCurrentFrameSyncAsync(pendingManualAutoPlay);
         }
 
         public void RefreshRealtimeCapability()
@@ -181,6 +191,12 @@ namespace AdaptiveAudioVR.Integration
 
             if (IsConnecting)
             {
+                return;
+            }
+
+            if (IsConnected && IsPaused)
+            {
+                await SendPlaybackControlAsync("play");
                 return;
             }
 
@@ -221,12 +237,14 @@ namespace AdaptiveAudioVR.Integration
                     SetCapabilityResult(false, $"Local realtime bridge connect failed: {ex.Message}", realtimeModel);
                     IsConnecting = false;
                     IsConnected = false;
+                    pendingRealtimeStart = false;
                     SuppressClipGeneration(false);
                     return;
                 }
             }
 
-            await SendClientMessageAsync(syncMessage);
+            if (!await SendClientMessageAsync(syncMessage)) { pendingRealtimeStart = true; return; }
+            pendingRealtimeStart = false;
             LastSentPromptSignature = promptSignature;
             lastObservedPromptSignature = promptSignature;
             lastSentSignal = bootstrap.CurrentSignal;
@@ -246,6 +264,7 @@ namespace AdaptiveAudioVR.Integration
 
         private async Task DisconnectAsync(bool restoreClip)
         {
+            pendingRealtimeStart = pendingManualSync = false;
             pendingBufferedPlaybackStart = false;
             HasBufferedPlaybackStarted = false;
             IsStreaming = false;
@@ -310,6 +329,7 @@ namespace AdaptiveAudioVR.Integration
 
             pcmAudioPlayer?.ClearBuffer();
             pcmAudioPlayer?.DetachFromMixer();
+            bootstrap?.InterruptAdaptation("Realtime stream disconnected");
 
             if (restoreClip && restorePreviousClipOnStop && fallbackMeditationClip != null && audioMixerController != null)
             {
@@ -318,6 +338,7 @@ namespace AdaptiveAudioVR.Integration
             }
 
             SuppressClipGeneration(false);
+            bootstrap?.SetRealtimePlaybackReady(true);
             LastStatusMessage = restoreClip ? "Realtime stream stopped." : "Realtime stream disconnected.";
         }
 
@@ -329,7 +350,18 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
-            await SendClientMessageAsync(new RealtimeClientMessage { type = controlType });
+            if (controlType == "pause" || controlType == "stop")
+            {
+                bootstrap?.InterruptAdaptation("Realtime playback interrupted");
+                bootstrap?.SetRealtimePlaybackReady(false);
+            }
+            else if (controlType == "play" && IsPaused)
+            {
+                bootstrap?.InterruptAdaptation("Realtime music resuming");
+                bootstrap?.SetRealtimePlaybackReady(true);
+            }
+            bool sent = await SendClientMessageAsync(new RealtimeClientMessage { type = controlType });
+            if (controlType == "play") pendingRealtimeStart = !sent;
         }
 
         private async Task SendCurrentFrameSyncAsync(bool autoPlay)
@@ -351,7 +383,8 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
-            await SendClientMessageAsync(syncMessage);
+            if (!await SendClientMessageAsync(syncMessage)) return;
+            pendingManualSync = false;
             LastSentPromptSignature = promptSignature;
             lastObservedPromptSignature = promptSignature;
             lastSentSignal = bootstrap.CurrentSignal;
@@ -365,7 +398,7 @@ namespace AdaptiveAudioVR.Integration
             }
         }
 
-        private void TrySendRealtimeSteeringUpdate()
+        private async Task TrySendRealtimeSteeringUpdate()
         {
             if (bootstrap == null || !TryBuildSyncMessage(autoPlay: false, out RealtimeClientMessage syncMessage, out string promptSignature))
             {
@@ -398,7 +431,7 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
-            _ = SendClientMessageAsync(syncMessage);
+            if (!await SendClientMessageAsync(syncMessage)) return;
             LastSentPromptSignature = promptSignature;
             lastObservedPromptSignature = promptSignature;
             lastSentSignal = currentSignal;
@@ -491,17 +524,43 @@ namespace AdaptiveAudioVR.Integration
             return builder.ToString();
         }
 
-        private async Task SendClientMessageAsync(RealtimeClientMessage message)
+        private async Task<bool> SendClientMessageAsync(RealtimeClientMessage message)
         {
             if (websocket == null || websocket.State != WebSocketState.Open)
             {
                 LastStatusMessage = "Realtime websocket is not open.";
-                return;
+                return false;
             }
 
-            string json = JsonUtility.ToJson(message);
-            byte[] payload = Encoding.UTF8.GetBytes(json);
-            await websocket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true, socketCancellation != null ? socketCancellation.Token : CancellationToken.None);
+            await sendLock.WaitAsync();
+            try
+            {
+                bool changesContent = message.type == "sync" || message.type == "prompts"
+                    || message.type == "config" || message.type == "play";
+                if (changesContent && bootstrap != null && bootstrap.IsSessionRunning && !(message.type == "play" && IsPaused))
+                {
+                    if (contentReservation != 0 && bootstrap.SharedAdaptation != null
+                        && bootstrap.SharedAdaptation.IsCurrent(contentReservation)) return false;
+                    if (!bootstrap.TryBeginContentChange("Realtime music steering", out contentReservation))
+                    {
+                        LastStatusMessage = "Realtime steering deferred during coordinated measurement.";
+                        return false;
+                    }
+                }
+                string json = JsonUtility.ToJson(message);
+                byte[] payload = Encoding.UTF8.GetBytes(json);
+                await websocket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Text, true,
+                    socketCancellation != null ? socketCancellation.Token : CancellationToken.None);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LastErrorMessage = ex.Message;
+                bootstrap?.InterruptAdaptation("Realtime command failed");
+                bootstrap?.SetRealtimePlaybackReady(false);
+                return false;
+            }
+            finally { sendLock.Release(); }
         }
 
         private async Task ReceiveLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
@@ -645,6 +704,12 @@ namespace AdaptiveAudioVR.Integration
                     LastStatusMessage = string.IsNullOrWhiteSpace(inbound.message) ? LastStatusMessage : inbound.message;
                     if (string.Equals(inbound.state, "playing", StringComparison.OrdinalIgnoreCase))
                     {
+                        bootstrap?.SetRealtimePlaybackReady(true);
+                        if (HasBufferedPlaybackStarted)
+                        {
+                            bootstrap?.CompleteContentChange(contentReservation, BufferedSeconds + 2f);
+                            contentReservation = 0;
+                        }
                         IsStreaming = true;
                         IsPaused = false;
                         pendingBufferedPlaybackStart = true;
@@ -655,6 +720,8 @@ namespace AdaptiveAudioVR.Integration
                     }
                     else if (string.Equals(inbound.state, "paused", StringComparison.OrdinalIgnoreCase))
                     {
+                        bootstrap?.InterruptAdaptation("Realtime music paused");
+                        bootstrap?.SetRealtimePlaybackReady(false);
                         IsPaused = true;
                         IsStreaming = false;
                         if (audioMixerController != null)
@@ -664,6 +731,8 @@ namespace AdaptiveAudioVR.Integration
                     }
                     else if (string.Equals(inbound.state, "stopped", StringComparison.OrdinalIgnoreCase))
                     {
+                        bootstrap?.InterruptAdaptation("Realtime music stopped");
+                        bootstrap?.SetRealtimePlaybackReady(false);
                         IsPaused = false;
                         IsStreaming = false;
                         pendingBufferedPlaybackStart = false;
@@ -675,6 +744,8 @@ namespace AdaptiveAudioVR.Integration
                     }
                     else if (string.Equals(inbound.state, "closed", StringComparison.OrdinalIgnoreCase))
                     {
+                        bootstrap?.InterruptAdaptation("Realtime music connection closed");
+                        bootstrap?.SetRealtimePlaybackReady(false);
                         IsConnected = false;
                         IsConnecting = false;
                         IsStreaming = false;
@@ -682,6 +753,18 @@ namespace AdaptiveAudioVR.Integration
                         pendingBufferedPlaybackStart = false;
                         HasBufferedPlaybackStarted = false;
                         SuppressClipGeneration(false);
+                    }
+                    else if (inbound.state == "synced" || inbound.state == "config_updated" || inbound.state == "prompts_updated")
+                    {
+                        if (contentReservation != 0 && bootstrap?.SharedAdaptation != null
+                            && !bootstrap.SharedAdaptation.IsCurrent(contentReservation))
+                        {
+                            bootstrap.InterruptAdaptation("Realtime steering recovered after interruption");
+                            bootstrap.SetRealtimePlaybackReady(true);
+                        }
+                        // Audio already queued before the acknowledgement must leave the playback buffer first.
+                        bootstrap?.CompleteContentChange(contentReservation, BufferedSeconds + 2f);
+                        contentReservation = 0;
                     }
                     break;
                 case "warning":
@@ -696,6 +779,8 @@ namespace AdaptiveAudioVR.Integration
                     LastStatusMessage = string.IsNullOrWhiteSpace(inbound.message) ? LastWarningMessage : inbound.message;
                     break;
                 case "error":
+                    bootstrap?.InterruptAdaptation("Realtime music error");
+                    bootstrap?.SetRealtimePlaybackReady(false);
                     LastErrorMessage = inbound.message ?? "Unknown realtime error.";
                     LastStatusMessage = LastErrorMessage;
                     if (!string.IsNullOrWhiteSpace(LastErrorMessage))
@@ -718,7 +803,14 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
+            if (bootstrap != null && bootstrap.IsSessionRunning
+                && (contentReservation == 0 || bootstrap.SharedAdaptation == null
+                    || !bootstrap.SharedAdaptation.IsCurrent(contentReservation))
+                && !bootstrap.TryBeginContentChange("Realtime playback attachment", out contentReservation)) return;
+
             pcmAudioPlayer.AttachToMixer(audioMixerController, restartPlayback: true);
+            bootstrap?.CompleteContentChange(contentReservation, BufferedSeconds + 2f);
+            contentReservation = 0;
             audioMixerController.SetMeditationPlaybackPaused(false);
             HasBufferedPlaybackStarted = true;
             pendingBufferedPlaybackStart = false;

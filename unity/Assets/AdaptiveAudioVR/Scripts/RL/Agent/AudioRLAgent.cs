@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using AdaptiveAudioVR.Core;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using UnityEngine;
 
 namespace AdaptiveAudioVR.RL.Agent
@@ -91,6 +92,21 @@ namespace AdaptiveAudioVR.RL.Agent
         private AudioRLReplayBuffer replayBuffer;
         private AudioSessionBaseline baseline;
         private PendingDecision pending;
+        private long coordinationLease;
+        public AdaptationCoordinator Coordination { get; private set; }
+        public bool HasPendingOutcome => pending != null;
+
+        public void BindCoordination(AdaptationCoordinator coordinator)
+        {
+            if (ReferenceEquals(Coordination, coordinator)) return;
+            InvalidatePendingOutcome("Shared coordinator changed");
+            if ((Coordination == null) != (coordinator == null))
+            {
+                SaveModel();
+                productionDomain = null;
+            }
+            Coordination = coordinator;
+        }
         private AudioRLAction previousSafeAction;
         private SignalPacket previousObservation;
         private bool hasPreviousObservation;
@@ -174,9 +190,9 @@ namespace AdaptiveAudioVR.RL.Agent
 
         public void SetControlContext(bool canAdapt, bool canObserveOutcomes, string reason)
         {
-            if ((adaptiveAllowed && !canAdapt) || (outcomesAllowed && !canObserveOutcomes))
+            if (outcomesAllowed && !canObserveOutcomes)
                 InvalidatePendingOutcome(reason);
-            if ((!adaptiveAllowed && canAdapt) || (!outcomesAllowed && canObserveOutcomes))
+            if (!outcomesAllowed && canObserveOutcomes)
                 resumeAfterUtc = UtcSeconds();
             adaptiveAllowed = canAdapt;
             outcomesAllowed = canObserveOutcomes;
@@ -224,6 +240,12 @@ namespace AdaptiveAudioVR.RL.Agent
                 return CurrentParameters;
             }
             EnsureDomain(signal.hasPhysiologyWindow);
+            Coordination?.Tick(now, utcNow);
+            if (pending != null && Coordination != null && !Coordination.IsCurrent(coordinationLease))
+            {
+                Hold("Coordinated measurement interrupted", AudioRLSafetyMode.Normal);
+                InvalidatePendingOutcome("Coordinated measurement interrupted");
+            }
             if (!outcomesAllowed)
             {
                 Hold(gateReason, AudioRLSafetyMode.Normal);
@@ -238,6 +260,8 @@ namespace AdaptiveAudioVR.RL.Agent
                 {
                     pending.eligiblePostStartUtc = utcNow + (signal.hasPhysiologyWindow ? settlingSeconds : 0);
                     pending.settledAt = now + (signal.hasPhysiologyWindow ? settlingSeconds : 0);
+                    Coordination?.MarkTransitionCompleted(coordinationLease, utcNow,
+                        signal.hasPhysiologyWindow ? settlingSeconds : 0);
                 }
             }
             bool fresh = signal.hasPhysiologyWindow ? signal.windowEnd > lastWindowEnd
@@ -260,6 +284,13 @@ namespace AdaptiveAudioVR.RL.Agent
                 previousObservation = signal;
                 hasPreviousObservation = true;
             }
+            else if (Coordination != null && pending == null && adaptiveAllowed && AtTarget()
+                && baseline.Count >= Mathf.Max(2, warmupObservationCount)
+                && signal.windowStart >= resumeAfterUtc && now - lastDecisionTime >= productionMinimumDecisionIntervalSeconds)
+            {
+                // A denied reservation must be retried without waiting for another sensor publication.
+                Decide(BuildState(signal));
+            }
             CurrentParameters = AudioParameters.MoveTowards(CurrentParameters, CurrentTargetParameters,
                 outputSlewPerSecond * Mathf.Max(0, deltaTime));
             RefreshPolicyStatus();
@@ -276,9 +307,29 @@ namespace AdaptiveAudioVR.RL.Agent
             LogOutcome(null, false, false, reason);
             InvalidOutcomeCount++;
             pending = null;
+            Coordination?.Release(coordinationLease, now, utcNow > 0 ? utcNow : UtcSeconds(), reason);
+            coordinationLease = 0;
         }
 
         private void Decide(AudioRLState state)
+        {
+            if (Coordination != null && !Coordination.TryAcquire(AdaptationOwner.Audio,
+                    SessionId + "-" + (DecisionCount + 1), state.signal.windowStart, state.signal.windowEnd,
+                    now, utcNow, outcomeTimeoutSeconds, out coordinationLease))
+            {
+                CurrentLearningStatus = "Waiting for coordinated audio turn and clean physiology";
+                return;
+            }
+            try { DecideReserved(state); }
+            catch
+            {
+                Coordination?.Release(coordinationLease, now, utcNow, "Audio decision failed");
+                coordinationLease = 0;
+                throw;
+            }
+        }
+
+        private void DecideReserved(AudioRLState state)
         {
             var eligible = new List<int> { 0 };
             for (int arm = 1; arm < AudioActionCatalog.Count; arm++)
@@ -322,13 +373,21 @@ namespace AdaptiveAudioVR.RL.Agent
             bool update = pending.mode == AudioRLPolicyMode.PersonalizedBandit && allowOnlineLearning
                 && (next.isProductionWindow || allowSimulationLearning) && pending.executedArm >= 0
                 && !pending.safety.interventionApplied;
-            if (update) policy.Model.Observe(pending.executedArm, pending.features, CurrentReward);
+            Action commit = () => { if (update) policy.Model.Observe(pending.executedArm, pending.features, CurrentReward); };
+            if (Coordination == null) commit();
+            else if (!Coordination.TryCommitOutcome(coordinationLease, next.signal.windowStart, next.signal.windowEnd, commit))
+            {
+                InvalidatePendingOutcome("Shared outcome reservation is no longer valid");
+                return;
+            }
             CurrentLearningStatus = update ? "Valid delayed outcome: personalized LinUCB updated"
                 : "Valid delayed outcome: evaluation only; model unchanged";
             LogOutcome(next, true, update, CurrentLearningStatus);
             if (next.signal.hasPhysiologyWindow) lastUsedPostEnd = next.signal.windowEnd;
             RewardVersion++;
             pending = null;
+            Coordination?.Release(coordinationLease, now, utcNow, "Audio turn finished");
+            coordinationLease = 0;
             if (update) SaveModel();
         }
 
@@ -384,6 +443,7 @@ namespace AdaptiveAudioVR.RL.Agent
                 explorationAlpha, ridge, productionMinimumDecisionIntervalSeconds, settlingSeconds, outcomeTimeoutSeconds };
             string configuration = JsonUtility.ToJson(rewardWeights) + "|" + string.Join("|", Array.ConvertAll(settings,
                 value => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
+            if (Coordination != null) configuration += "|" + AdaptationCoordinator.SchemaVersion;
             persistence = new AudioBanditPersistence(Path.Combine(Application.persistentDataPath, "AudioOnlineModels"),
                 ActiveProfile.userId, environmentId, !production, configuration);
             if (persistPersonalizedModel && !string.IsNullOrWhiteSpace(ActiveProfile.userId))
