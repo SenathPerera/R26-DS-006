@@ -54,13 +54,20 @@ export class ComponentBPipelineService {
   setEndpoint(endpoint: string) {
     try {
       const normalized = validateEndpoint(endpoint);
-      if (normalized === this.endpoint) return;
+      if (normalized === this.endpoint) {
+        this.patch({lastError: null});
+        this.log(`Component B endpoint reapplied: ${normalized}`);
+        if (this.enabled) this.connect(false);
+        return true;
+      }
       this.endpoint = normalized;
       this.patch({endpoint: normalized, lastError: null});
       this.log(`Component B endpoint set to ${normalized}`);
       if (this.enabled) this.connect(false);
+      return true;
     } catch (error) {
       this.patch({connectionState: 'error', lastError: messageOf(error)});
+      return false;
     }
   }
 

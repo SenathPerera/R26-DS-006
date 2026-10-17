@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {Text, View} from 'react-native';
+import {Keyboard, Text, View} from 'react-native';
 import {Bluetooth, BluetoothSearching, Link2Off, RotateCw, Server} from 'lucide-react-native';
 import {Card, Field, Header, Metric, PrimaryButton, Screen, SecondaryButton, SectionHeader, StatusPill, uiStyles} from '../../components/ui';
 import {WEARABLE_DEVICE_NAME, WEARABLE_RAW_PPG_UUID, WEARABLE_SERVICE_UUID, WEARABLE_TELEMETRY_UUID} from '../../services/ble/wearableBleService';
@@ -51,11 +51,19 @@ export function WearableDetailScreen({navigation}: any) {
   const componentB = useMindSyncStore(state => state.componentB);
   const setComponentBEndpoint = useMindSyncStore(state => state.setComponentBEndpoint);
   const [componentBEndpoint, setComponentBEndpointInput] = useState(componentB.endpoint);
+  const [endpointApplyMessage, setEndpointApplyMessage] = useState<string | null>(null);
+  const applyComponentBEndpoint = () => {
+    Keyboard.dismiss();
+    const normalized = componentBEndpoint.trim();
+    const applied = setComponentBEndpoint(normalized);
+    setComponentBEndpointInput(normalized);
+    setEndpointApplyMessage(applied ? `Applied ${normalized}` : null);
+  };
   const t = ble.telemetry;
   const tone = status === 'connected' ? 'good' : status === 'error' ? 'danger' : 'warning';
   const componentBTone = componentB.connectionState === 'connected' ? 'good' : componentB.connectionState === 'error' ? 'danger' : 'warning';
   return (
-    <Screen>
+    <Screen keyboardShouldPersistTaps="always">
       <Header title="Wearable detail" subtitle="Live sensor readiness and device metadata." onBack={navigation.goBack} />
       <Card>
         <Text style={uiStyles.value}>{device?.verified ? WEARABLE_DEVICE_NAME : device?.name ?? 'No wearable selected'}</Text>
@@ -103,8 +111,11 @@ export function WearableDetailScreen({navigation}: any) {
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="url"
+          returnKeyType="done"
+          onSubmitEditing={applyComponentBEndpoint}
         />
-        <SecondaryButton label="Apply backend endpoint" icon={Server} onPress={() => setComponentBEndpoint(componentBEndpoint)} />
+        <SecondaryButton label="Apply backend endpoint" icon={Server} onPress={applyComponentBEndpoint} />
+        {endpointApplyMessage ? <Text style={[uiStyles.label, {color: colors.green}]}>{endpointApplyMessage}</Text> : null}
         {componentB.lastError ? <Text style={[uiStyles.body, {color: colors.rose}]}>{componentB.lastError}</Text> : null}
       </Card>
       {ble.lastError ? <Card><Text style={[uiStyles.value, {color: colors.rose}]}>Last error</Text><Text style={uiStyles.body}>{ble.lastError}</Text></Card> : null}
