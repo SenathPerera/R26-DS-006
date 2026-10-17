@@ -1,6 +1,6 @@
 import {generatedEnvironment} from './generatedEnvironment';
 import type {StudyCondition} from '../types/domain';
-export const developmentBackendHost = '192.168.1.23';
+export const developmentBackendHost = '192.168.43.254';
 
 export function buildDevelopmentEndpoints(host: string) {
   const normalizedHost = host.trim();

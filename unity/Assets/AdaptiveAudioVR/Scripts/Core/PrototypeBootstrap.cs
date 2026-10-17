@@ -106,6 +106,8 @@ namespace AdaptiveAudioVR.Core
 
         public void InterruptAdaptation(string reason) => productionCoordinator?.InterruptCoordinatedAdaptation(reason);
         public void SetRealtimePlaybackReady(bool ready) => realtimePlaybackReady = ready;
+        private bool applicationPaused;
+        private bool applicationFocused = true;
 
         public void SetRuleOnlyMode()
         {
@@ -123,10 +125,27 @@ namespace AdaptiveAudioVR.Core
 
         private void Awake()
         {
+            applicationFocused = Application.isFocused;
             ResolveReferences();
         }
 
         private void OnEnable() => ResolveReferences();
+        private void OnApplicationPause(bool pauseStatus)
+        {
+            applicationPaused = pauseStatus;
+            RefreshAudioMute();
+        }
+
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            applicationFocused = hasFocus;
+            RefreshAudioMute();
+        }
+
+        private void OnApplicationQuit()
+        {
+            audioMixerController?.HoldSessionPlayback();
+        }
 
         private void Start()
         {
@@ -342,11 +361,7 @@ namespace AdaptiveAudioVR.Core
                 sessionState.currentLyriaFrame = actionSafetyShield.ClampFrame(sessionState.currentLyriaFrame, signal, nextParameters);
             }
 
-            bool sharedSessionStopped = productionCoordinator != null && productionCoordinator.IsInitialized
-                && (productionCoordinator.Phase == VrSessionPhase.Paused
-                    || productionCoordinator.Phase == VrSessionPhase.Completed
-                    || productionCoordinator.Phase == VrSessionPhase.Aborted);
-            audioMixerController.SetMuted(safetyManager.EmergencyMute || sharedSessionStopped);
+            RefreshAudioMute();
             audioMixerController.SetTargetParameters(nextParameters);
             if (audioRLAgent == null && rlAdaptiveController != null)
             {
@@ -364,6 +379,25 @@ namespace AdaptiveAudioVR.Core
                 sessionState.currentActionName,
                 sessionState.latestReward,
                 sessionState.currentLyriaFrame != null ? sessionState.currentLyriaFrame.config : default);
+        }
+
+        private void RefreshAudioMute()
+        {
+            if (audioMixerController == null)
+            {
+                return;
+            }
+
+            bool sharedSessionStopped = productionCoordinator != null && productionCoordinator.IsInitialized
+                && (productionCoordinator.Phase == VrSessionPhase.Paused
+                    || productionCoordinator.Phase == VrSessionPhase.Completed
+                    || productionCoordinator.Phase == VrSessionPhase.Aborted);
+            bool lifecycleUnavailable = applicationPaused || !applicationFocused
+                || (productionCoordinator != null && productionCoordinator.IsHeadsetLifecycleSuspended);
+            audioMixerController.SetMuted(
+                lifecycleUnavailable
+                || (safetyManager != null && safetyManager.EmergencyMute)
+                || sharedSessionStopped);
         }
 
         public bool TryBeginPreparedSession()

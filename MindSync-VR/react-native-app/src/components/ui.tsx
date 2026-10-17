@@ -5,6 +5,7 @@ import {
   LayoutChangeEvent,
   Pressable,
   ScrollView,
+  ScrollViewProps,
   StyleProp,
   StyleSheet,
   Text,
@@ -28,12 +29,22 @@ import Svg from 'react-native-svg';
 import {ChevronLeft, LucideIcon} from 'lucide-react-native';
 import {colors, radii, spacing, typography} from '../theme/theme';
 
-export function Screen({children, scroll = true, style}: {children: ReactNode; scroll?: boolean; style?: StyleProp<ViewStyle>}) {
+export function Screen({
+  children,
+  scroll = true,
+  style,
+  keyboardShouldPersistTaps = 'handled',
+}: {
+  children: ReactNode;
+  scroll?: boolean;
+  style?: StyleProp<ViewStyle>;
+  keyboardShouldPersistTaps?: ScrollViewProps['keyboardShouldPersistTaps'];
+}) {
   const content = <View style={[styles.screenContent, style]}>{children}</View>;
   return (
     <LinearGradient colors={[colors.midnight, colors.deep, '#151A3B']} style={styles.fill}>
       <SafeAreaView style={styles.fill} edges={['top', 'left', 'right']}>
-        {scroll ? <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">{content}</ScrollView> : content}
+        {scroll ? <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps={keyboardShouldPersistTaps}>{content}</ScrollView> : content}
       </SafeAreaView>
     </LinearGradient>
   );

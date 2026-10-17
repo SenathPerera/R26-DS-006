@@ -13,6 +13,7 @@ type Callbacks = {
 
 const MAX_QUEUED_FRAMES = 2;
 const MAX_RECONNECT_DELAY_MS = 10_000;
+const PROGRESS_UI_INTERVAL_MS = 250;
 
 function messageOf(error: unknown) {
   return error instanceof Error ? error.message : 'Unexpected Component B relay error';
@@ -37,11 +38,13 @@ export class ComponentBPipelineService {
   private rawSamplesReceived = 0;
   private framesSent = 0;
   private framesAcknowledged = 0;
+  private progressPatchTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingProgressPatch: Partial<ComponentBPipelineState> = {};
   private readonly assembler: ComponentBFrameAssembler;
 
   constructor() {
     this.assembler = new ComponentBFrameAssembler({
-      onProgress: frameSamplesBuffered => this.patch({frameSamplesBuffered}),
+      onProgress: frameSamplesBuffered => this.scheduleProgressPatch({frameSamplesBuffered}),
       onFrame: frame => this.enqueue(frame),
       onDiscontinuity: message => this.log(message),
     });
@@ -54,13 +57,20 @@ export class ComponentBPipelineService {
   setEndpoint(endpoint: string) {
     try {
       const normalized = validateEndpoint(endpoint);
-      if (normalized === this.endpoint) return;
+      if (normalized === this.endpoint) {
+        this.patch({lastError: null});
+        this.log(`Component B endpoint reapplied: ${normalized}`);
+        if (this.enabled) this.connect(false);
+        return true;
+      }
       this.endpoint = normalized;
       this.patch({endpoint: normalized, lastError: null});
       this.log(`Component B endpoint set to ${normalized}`);
       if (this.enabled) this.connect(false);
+      return true;
     } catch (error) {
       this.patch({connectionState: 'error', lastError: messageOf(error)});
+      return false;
     }
   }
 
@@ -73,6 +83,7 @@ export class ComponentBPipelineService {
     this.framesAcknowledged = 0;
     this.queue = [];
     this.assembler.reset();
+    this.clearProgressPatch();
     this.patch({
       rawSamplesReceived: 0,
       frameSamplesBuffered: 0,
@@ -94,6 +105,7 @@ export class ComponentBPipelineService {
     this.closeSocket();
     this.queue = [];
     this.assembler.reset();
+    this.clearProgressPatch();
     this.patch({connectionState: 'idle', frameSamplesBuffered: 0, framesQueued: 0});
   }
 
@@ -109,7 +121,7 @@ export class ComponentBPipelineService {
   acceptRawPpg(batch: RawPpgBatch) {
     if (!this.enabled) return;
     this.rawSamplesReceived += batch.samples.length;
-    this.patch({rawSamplesReceived: this.rawSamplesReceived});
+    this.scheduleProgressPatch({rawSamplesReceived: this.rawSamplesReceived});
     this.assembler.ingest(batch);
   }
 
@@ -264,6 +276,23 @@ export class ComponentBPipelineService {
 
   private patch(patch: Partial<ComponentBPipelineState>) {
     this.callbacks?.onState(patch);
+  }
+
+  private scheduleProgressPatch(patch: Partial<ComponentBPipelineState>) {
+    this.pendingProgressPatch = {...this.pendingProgressPatch, ...patch};
+    if (this.progressPatchTimer) return;
+    this.progressPatchTimer = setTimeout(() => {
+      this.progressPatchTimer = null;
+      const pending = this.pendingProgressPatch;
+      this.pendingProgressPatch = {};
+      this.patch(pending);
+    }, PROGRESS_UI_INTERVAL_MS);
+  }
+
+  private clearProgressPatch() {
+    if (this.progressPatchTimer) clearTimeout(this.progressPatchTimer);
+    this.progressPatchTimer = null;
+    this.pendingProgressPatch = {};
   }
 
   private log(message: string) {

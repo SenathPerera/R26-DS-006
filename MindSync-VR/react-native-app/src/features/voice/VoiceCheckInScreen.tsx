@@ -26,6 +26,7 @@ import {useSarah} from './useSarah';
 import {Users, Waves, Zap} from 'lucide-react-native';
 import {createCompleteSessionRecord} from '../../services/session/completeSessionRecord';
 import {sessionRecordOutbox} from '../../services/session/sessionRecordOutbox';
+import {sessionControlFromQuestPhase} from '../../services/realtime/realtimeService';
 
 type Stage = StageId; // intro | room | pre | vr | post | report
 type Phase = 'pre' | 'post';
@@ -471,6 +472,8 @@ function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void | P
   const sarah = useSarah();
   const pairingCode = useMindSyncStore(s => s.pairingCode);
   const relay = useMindSyncStore(s => s.relay);
+  const sendVrCommand = useMindSyncStore(s => s.sendVrCommand);
+  const sessionControl = sessionControlFromQuestPhase(relay.questPhase);
   useEffect(() => {
     void sarah.say(`Go ahead and put the headset on${name ? `, ${name}` : ''}. I'll be right here when you're back.`, 'english');
     return () => sarah.stop();
@@ -478,17 +481,36 @@ function VrStage({name, onBack2, onBack}: {name: string; onBack2: () => void | P
   }, []);
   return (
     <>
-      <StageHeader stage="vr" title={HEADER.vr.title} status={HEADER.vr.status} onBack={onBack} />
+      <StageHeader stage="vr" title={HEADER.vr.title} status={sessionControl === 'resume' ? 'Session paused' : sessionControl === 'pause' ? 'In progress' : HEADER.vr.status} onBack={onBack} />
       <GlassCard accent={palette.aqua}>
-        <Text style={styles.smallLabel}>ONE-TIME HEADSET CODE</Text>
-        <Text style={styles.accessCode}>{pairingCode ?? '••••••'}</Text>
-        <Text style={styles.body}>
-          {relay.connectionState === 'connected'
-            ? 'Open MindSync on your Quest and enter this code. It expires in five minutes.'
-            : 'Connecting your phone to the session relay…'}
-        </Text>
-        {relay.lastError ? <Text style={styles.errorText}>Relay unavailable. Return and tap Start my session again.</Text> : null}
+        {relay.questPhase === null ? (
+          <>
+            <Text style={styles.smallLabel}>ONE-TIME HEADSET CODE</Text>
+            <Text style={styles.accessCode}>{pairingCode ?? '••••••'}</Text>
+            <Text style={styles.body}>{relay.connectionState === 'connected'
+              ? 'Open MindSync on your Quest and enter this code. It expires in five minutes.'
+              : 'Connecting your phone to the session relay…'}</Text>
+          </>
+        ) : (
+          <>
+            <Text style={styles.smallLabel}>QUEST SESSION</Text>
+            <Text style={styles.body}>{sessionControl === 'resume'
+              ? 'Your Quest session is paused. Resume it below when you are ready.'
+              : sessionControl === 'pause'
+                ? 'Your Quest session is running.'
+                : relay.questPhase === 'completed' || relay.questPhase === 'aborted'
+                  ? 'Your Quest session has ended.'
+                  : 'Your Quest is connected and preparing the session.'}</Text>
+          </>
+        )}
+        {relay.lastError ? <Text style={styles.errorText}>{relay.lastError === 'quest-not-connected' || relay.lastError === 'relay-not-connected' ? 'Quest connection lost. Keep both apps open and try again.' : 'Relay unavailable. Return and tap Start my session again.'}</Text> : null}
       </GlassCard>
+      {sessionControl ? (
+        <GlassCard>
+          <Text style={styles.body}>{sessionControl === 'resume' ? 'Sound is muted while the session is paused. Resume requires fresh wearable data.' : 'You can pause the meditation without leaving this screen.'}</Text>
+          <PrimaryButton label={sessionControl === 'resume' ? 'Resume meditation' : 'Pause meditation'} onPress={() => sendVrCommand(sessionControl)} />
+        </GlassCard>
+      ) : null}
       <View style={{alignItems: 'center', paddingVertical: space.xl}}><Headset /></View>
       <Text style={styles.display}>Time to drop in.</Text>
       <Text style={styles.body}>Put on your headset and let the session take over. I’ll be waiting when you’re back — we’ll see what changed.</Text>
