@@ -10,7 +10,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
             CancellationToken cancellationToken);
     }
 
-    // Operational flags only. No participant IDs, prompts or physiological values.
+    // Allowlisted local monitoring data. Never serialize identities or raw sensor buffers.
     [Serializable]
     public sealed class SessionRuntimeDiagnostics
     {
@@ -35,6 +35,70 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
         public float physiologyAgeSeconds;
         public bool audioPreferenceError;
         public int pendingTelemetry;
+        public AgentMonitorSnapshot agents;
+    }
+
+    [Serializable]
+    public sealed class AgentMonitorSnapshot
+    {
+        public string schemaVersion = "mindsync-agents-v1";
+        public double capturedAt;
+        public string phase;
+        public AgentMonitorState visual;
+        public AgentMonitorState audio;
+    }
+
+    [Serializable]
+    public sealed class AgentMonitorState
+    {
+        public bool available;
+        public string mode = "unknown";
+        public string state = "unknown";
+        public bool transitioning;
+        public long updates;
+        public float[] applied;
+        public float[] target;
+        public AgentMonitorInput input = new AgentMonitorInput();
+        public AgentMonitorDecision decision = new AgentMonitorDecision();
+        public AgentMonitorReward reward = new AgentMonitorReward();
+    }
+
+    [Serializable]
+    public sealed class AgentMonitorInput
+    {
+        public bool available;
+        public string source = "unknown";
+        public double stress;
+        public double confidence;
+        public double quality;
+        public double ageSeconds;
+    }
+
+    [Serializable]
+    public sealed class AgentMonitorDecision
+    {
+        public bool available;
+        public long sequence;
+        public double at;
+        public double stress;
+        public string proposed = "unknown";
+        public string executed = "unknown";
+        public string safety = "unknown";
+        public string result = "unknown";
+        public float[] proposedDelta;
+        public float[] safeDelta;
+    }
+
+    [Serializable]
+    public sealed class AgentMonitorReward
+    {
+        public bool available;
+        public bool valid;
+        public double at;
+        public long sequence;
+        public string action = "unknown";
+        public string status = "Waiting";
+        public double total;
     }
 
     [Serializable]

@@ -41,6 +41,7 @@ internal static class AudioOnlineTests
             Run("Overlapping baseline windows do not count as independent samples", BaselineOverlap);
             Run("Frozen online evaluation computes rewards without updating weights", FrozenEvaluation);
             Run("Replay snapshots cannot mutate stored outcome evidence", ReplayIsolation);
+            Run("Monitoring keeps decision and delayed outcome attribution separate", MonitorAttribution);
             Run("Low-quality and expired pending outcomes never update weights", InvalidAndExpired);
             Run("Synthetic contextual learning improves choices", ContextLearning);
             Console.WriteLine("PASS: " + passed + " audio online-learning tests. Runtime tests use explicit Unity test doubles.");
@@ -240,6 +241,23 @@ internal static class AudioOnlineTests
         Tick(agent, 241, Window(240, 4, 0.5f));
         Check(agent.OnlineUpdateCount == 1, "Reused physiology updated twice");
         Check(agent.GetReplaySnapshot()[0].onlineUpdateApplied, "Update missing from audit log");
+    }
+
+    private static void MonitorAttribution()
+    {
+        var agent = Warmup();
+        Check(agent.MonitorDecision != null && agent.MonitorOutcome == null, "Unobserved reward was reported");
+        Near(agent.MonitorDecision.state.signal.stress, Window(120, 2).stress);
+        Tick(agent, 121, Window(120, 2));
+        Tick(agent, 180, Window(180, 3, 0.6f));
+        Tick(agent, 240, Window(240, 4, 0.5f));
+        Check(agent.MonitorOutcome.rewardValid && agent.MonitorOutcomeDecision == 1,
+            "Reward attributed to a newer decision");
+        var outcome = agent.MonitorOutcome;
+        Tick(agent, 241, Window(240, 4, 0.5f));
+        Check(ReferenceEquals(outcome, agent.MonitorOutcome), "Waiting tick replaced the outcome");
+        agent.Initialize(agent.ActiveProfile, PersonalizationStrategy.CreateNeutral(), "new-session");
+        Check(agent.MonitorDecision == null && agent.MonitorOutcome == null, "Prior session evidence leaked");
     }
 
     private static void BaselineConditions()

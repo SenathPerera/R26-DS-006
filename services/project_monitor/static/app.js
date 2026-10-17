@@ -21,6 +21,8 @@ function renderDetails() {
 function render(data) {
   if (snapshot && snapshot.session !== data.session) { previous.clear(); events = []; }
   snapshot = data;
+  window.agentMonitor.select(data.session);
+  window.agentMonitor.refresh();
   $("backend-count").textContent = data.services.filter(s => s.reachable).length + " / " + data.services.length;
   $("stage-count").textContent = data.stages.filter(s => ["active", "ready"].includes(s.status)).length + " / " + data.stages.length;
   $("alert-count").textContent = data.alerts.length;
@@ -92,22 +94,29 @@ function renderTimeline() {
 async function refresh() {
   if (busy) return;
   busy = true; $("refresh").disabled = true;
+  const requestedSession = $("session").value;
   try {
-    const response = await fetch("/api/snapshot?session=" + encodeURIComponent($("session").value), {signal: AbortSignal.timeout(5000), cache: "no-store"});
+    const response = await fetch("/api/snapshot?session=" + encodeURIComponent(requestedSession), {signal: AbortSignal.timeout(5000), cache: "no-store"});
     if (!response.ok) throw new Error("Monitor unavailable");
     const data = await response.json();
+    if ($("session").value !== requestedSession) return;
     if (!data.checkedAt || Date.now() / 1000 - data.checkedAt > 15) throw new Error("Collector stale");
     render(data); lastGood = Date.now();
     $("connection-error").hidden = true; document.body.classList.remove("monitor-stale");
     $("live-state").textContent = "LIVE / EVIDENCE RECEIVED";
     $("last-update").textContent = "Checked " + new Date(data.checkedAt * 1000).toLocaleTimeString();
   } catch {
+    if ($("session").value !== requestedSession) return;
+    window.agentMonitor.offline();
     $("connection-error").hidden = false; document.body.classList.add("monitor-stale");
     $("live-state").textContent = "MONITOR OFFLINE / HISTORICAL VIEW";
     $("last-update").textContent = lastGood ? "Last received " + new Date(lastGood).toLocaleTimeString() : "No evidence received";
-  } finally { busy = false; $("refresh").disabled = false; }
+  } finally {
+    busy = false; $("refresh").disabled = false;
+    if ($("session").value !== requestedSession) refresh();
+  }
 }
 $("refresh").onclick = refresh;
-$("session").onchange = () => { previous.clear(); events = []; refresh(); };
+$("session").onchange = () => { previous.clear(); events = []; window.agentMonitor.select(null); refresh(); };
 $("clear").onclick = () => { events = []; renderTimeline(); };
 refresh(); setInterval(refresh, 3000);
