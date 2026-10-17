@@ -47,7 +47,8 @@ namespace AdaptiveAudioVR.Preference
             }
             if (bundle.schemaVersion != "mindsync-audio-preferences-v1"
                 || (bundle.preferenceMode != "usual" && bundle.preferenceMode != "adjust")
-                || (bundle.preferenceMode == "adjust") != (bundle.sessionOverride != null))
+                || !TryReadSessionOverridePresence(configuration.RawJson, out bool hasSessionOverride)
+                || (bundle.preferenceMode == "adjust") != hasSessionOverride)
             {
                 error = "audio-preference-mode-invalid";
                 return false;
@@ -57,16 +58,23 @@ namespace AdaptiveAudioVR.Preference
                 error = "audio-scene-unsupported";
                 return false;
             }
-            if (!TryMapProfile(bundle.longTerm, configuration.ParticipantPseudonym, out var longTerm)
-                || (bundle.sessionOverride != null
-                    && !TryMapProfile(bundle.sessionOverride, configuration.ParticipantPseudonym, out _)))
+            if (!TryMapProfile(bundle.longTerm, configuration.ParticipantPseudonym, out var longTerm))
             {
                 error = "audio-preference-profile-invalid";
                 return false;
             }
 
-            TryMapProfile(bundle.sessionOverride ?? bundle.longTerm,
-                configuration.ParticipantPseudonym, out var effective);
+            UserPreferences effective = longTerm;
+            if (bundle.preferenceMode == "adjust"
+                && !TryMapProfile(
+                    bundle.sessionOverride,
+                    configuration.ParticipantPseudonym,
+                    out effective))
+            {
+                error = "audio-preference-profile-invalid";
+                return false;
+            }
+
             preferences = new AudioSessionPreferences {
                 SessionId = configuration.SessionId,
                 ParticipantPseudonym = configuration.ParticipantPseudonym,
@@ -76,6 +84,36 @@ namespace AdaptiveAudioVR.Preference
             };
             error = string.Empty;
             return true;
+        }
+
+        private static bool TryReadSessionOverridePresence(string json, out bool hasSessionOverride)
+        {
+            hasSessionOverride = false;
+            const string property = "\"sessionOverride\"";
+            int index = json.IndexOf(property, StringComparison.Ordinal);
+            if (index < 0) return false;
+
+            index += property.Length;
+            while (index < json.Length && char.IsWhiteSpace(json[index])) index++;
+            if (index >= json.Length || json[index] != ':') return false;
+            index++;
+            while (index < json.Length && char.IsWhiteSpace(json[index])) index++;
+            if (index >= json.Length) return false;
+
+            // Validate the wire value so the mode rule follows the JSON contract.
+            if (json[index] == '{')
+            {
+                hasSessionOverride = true;
+                return true;
+            }
+
+            const string nullToken = "null";
+            int afterNull = index + nullToken.Length;
+            return afterNull <= json.Length
+                && string.Compare(json, index, nullToken, 0, nullToken.Length,
+                    StringComparison.Ordinal) == 0
+                && (afterNull == json.Length || char.IsWhiteSpace(json[afterNull])
+                    || json[afterNull] == ',' || json[afterNull] == '}');
         }
 
         private static bool TryMapProfile(ProfileDto source, string participant,

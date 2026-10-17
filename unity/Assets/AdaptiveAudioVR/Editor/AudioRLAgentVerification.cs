@@ -4,9 +4,13 @@ using System.Reflection;
 using AdaptiveAudioVR.Audio;
 using AdaptiveAudioVR.Core;
 using AdaptiveAudioVR.Integration;
+using AdaptiveAudioVR.Preference;
 using AdaptiveAudioVR.RL;
 using AdaptiveAudioVR.RL.Agent;
 using AdaptiveAudioVR.Signals;
+using LaminarVR.AdaptiveMeditation.Environment;
+using LaminarVR.AdaptiveMeditation.Networking;
+using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Runtime.Networking;
 using UnityEditor;
@@ -60,6 +64,7 @@ namespace AdaptiveAudioVR.Editor
             VerifyComponentBSignalMapping();
             VerifyJapaneseTempleGenerationContext();
             VerifyGeneratedClipStartGate();
+            VerifySessionPreferenceMapping();
         }
 
         private static void VerifySevenDimensionalActionMapping()
@@ -409,6 +414,97 @@ namespace AdaptiveAudioVR.Editor
                 UnityEngine.Object.DestroyImmediate(generatedClip);
                 UnityEngine.Object.DestroyImmediate(rawClip);
             }
+        }
+
+        private static void VerifySessionPreferenceMapping()
+        {
+            const string participant = "11111111-1111-1111-1111-111111111111";
+            const string profileJson = "{\"preferredInstruments\":[\"piano\",\"flute\"],\"mood\":\"calm\",\"tempoPreference\":\"slow\",\"audioIntensity\":0.3,\"ambientMusicBalance\":\"mostly_ambience\",\"brightnessPreference\":\"soft_dark\",\"noveltyTolerance\":0.2,\"avoidDissonance\":true,\"rhythmPreference\":\"minimal\",\"natureSoundPreference\":\"medium\",\"reverbPreference\":\"spacious\",\"volumePreference\":\"low\"}";
+            SessionRelayConfigurationMessage usualConfiguration = BuildAudioConfiguration(
+                participant,
+                $"{{\"schemaVersion\":\"mindsync-audio-preferences-v1\",\"longTerm\":{profileJson},\"preferenceMode\":\"usual\",\"sessionOverride\":null}}");
+            Ensure(
+                AudioSessionPreferenceMapper.TryMap(
+                    usualConfiguration,
+                    out AudioSessionPreferences usual,
+                    out string usualError),
+                $"Usual audio preferences were rejected: {usualError}");
+            Ensure(usual.Effective != null, "Usual audio preferences did not produce an effective profile.");
+            Ensure(
+                usual.Effective.userId == participant,
+                "Usual audio preferences lost the participant pseudonym.");
+
+            SessionRelayConfigurationMessage adjustedConfiguration = BuildAudioConfiguration(
+                participant,
+                $"{{\"schemaVersion\":\"mindsync-audio-preferences-v1\",\"longTerm\":{profileJson},\"preferenceMode\":\"adjust\",\"sessionOverride\":{profileJson}}}");
+            Ensure(
+                AudioSessionPreferenceMapper.TryMap(
+                    adjustedConfiguration,
+                    out AudioSessionPreferences adjusted,
+                    out string adjustedError),
+                $"Adjusted audio preferences were rejected: {adjustedError}");
+            Ensure(adjusted.Effective != null, "Adjusted audio preferences did not produce an effective profile.");
+
+            SessionRelayConfigurationMessage invalidUsualConfiguration = BuildAudioConfiguration(
+                participant,
+                $"{{\"schemaVersion\":\"mindsync-audio-preferences-v1\",\"longTerm\":{profileJson},\"preferenceMode\":\"usual\",\"sessionOverride\":{profileJson}}}");
+            Ensure(
+                !AudioSessionPreferenceMapper.TryMap(
+                    invalidUsualConfiguration,
+                    out _,
+                    out string invalidUsualError)
+                && invalidUsualError == "audio-preference-mode-invalid",
+                "Usual audio preferences accepted a session override.");
+
+            SessionRelayConfigurationMessage emptyUsualOverride = BuildAudioConfiguration(
+                participant,
+                $"{{\"schemaVersion\":\"mindsync-audio-preferences-v1\",\"longTerm\":{profileJson},\"preferenceMode\":\"usual\",\"sessionOverride\":{{}}}}");
+            Ensure(
+                !AudioSessionPreferenceMapper.TryMap(
+                    emptyUsualOverride,
+                    out _,
+                    out string emptyUsualError)
+                && emptyUsualError == "audio-preference-mode-invalid",
+                "Usual audio preferences accepted an empty session override object.");
+
+            SessionRelayConfigurationMessage invalidAdjustedConfiguration = BuildAudioConfiguration(
+                participant,
+                $"{{\"schemaVersion\":\"mindsync-audio-preferences-v1\",\"longTerm\":{profileJson},\"preferenceMode\":\"adjust\",\"sessionOverride\":null}}");
+            Ensure(
+                !AudioSessionPreferenceMapper.TryMap(
+                    invalidAdjustedConfiguration,
+                    out _,
+                    out string invalidAdjustedError)
+                && invalidAdjustedError == "audio-preference-mode-invalid",
+                "Adjusted audio preferences accepted a missing session override.");
+        }
+
+        private static SessionRelayConfigurationMessage BuildAudioConfiguration(
+            string participant,
+            string audioPreferencesJson)
+        {
+            const string sessionId = "session-audio-verification";
+            string rawJson = $"{{\"schemaVersion\":\"mindsync-session-v3\",\"messageId\":\"audio-verification\",\"messageType\":\"session_configuration\",\"payload\":{{\"sessionId\":\"{sessionId}\",\"participantPseudonym\":\"{participant}\",\"sceneId\":\"temple-pond\",\"audioPreferences\":{audioPreferencesJson}}}}}";
+            return new SessionRelayConfigurationMessage(
+                "mindsync-session-v3",
+                "audio-verification",
+                sessionId,
+                participant,
+                "temple-pond",
+                StudyPolicyMode.ContextualBandit,
+                new EnvironmentState(0.319f, 0.5f, 0f, 0.5f, 0.5f),
+                new SessionContextSnapshot(
+                    "mindsync-session-context-v1",
+                    "2026-10-17T13:56:10.627Z",
+                    5d,
+                    0d,
+                    0.5d,
+                    0.5d,
+                    false,
+                    1166,
+                    7,
+                    2),
+                rawJson);
         }
 
         private static void SetPrivateField(object target, string fieldName, object value)
