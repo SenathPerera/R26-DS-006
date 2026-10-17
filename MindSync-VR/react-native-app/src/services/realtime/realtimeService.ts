@@ -24,6 +24,7 @@ export type CreatePreparedSessionInput = {
 };
 
 type RelayHandlers = {
+  getDiagnostics?: () => Record<string, boolean | number | string>;
   onConnectionState: (state: 'connecting' | 'connected' | 'error', error?: string) => void;
   onMessage: (message: RelayEnvelope) => void;
 };
@@ -39,6 +40,7 @@ export type VisualLogAcknowledgement = {
 export class RealtimeService {
   private socket: WebSocket | null = null;
   private activeSessionId: string | null = null;
+  private diagnosticsTimer: ReturnType<typeof setInterval> | null = null;
 
   async createPreparedSession(input: CreatePreparedSessionInput): Promise<PreparedVrSession> {
     const response = await fetch(`${environment.apiBaseUrl}/sessions`, {
@@ -61,8 +63,27 @@ export class RealtimeService {
     handlers.onConnectionState('connecting');
     const url = `${environment.websocketUrl}?role=mobile&sessionId=${encodeURIComponent(session.sessionId)}&mobileToken=${encodeURIComponent(session.mobileToken)}`;
     this.socket = new WebSocket(url);
-    this.socket.onopen = () => handlers.onConnectionState('connected');
+    const socket = this.socket;
+    this.socket.onopen = () => {
+      if (this.socket !== socket) return;
+      handlers.onConnectionState('connected');
+      const report = () => {
+        if (!handlers.getDiagnostics || this.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
+        try {
+          socket.send(JSON.stringify({
+            schemaVersion: 'mindsync-monitor-v1', messageType: 'client_diagnostics',
+            payload: {sessionId: session.sessionId, values: handlers.getDiagnostics()},
+          }));
+        } catch { /* Diagnostics must not interrupt the session. */ }
+      };
+      if (handlers.getDiagnostics) {
+        this.stopDiagnostics();
+        report();
+        this.diagnosticsTimer = setInterval(report, 5000);
+      }
+    };
     this.socket.onmessage = event => {
+      if (this.socket !== socket) return;
       try {
         const message = JSON.parse(event.data) as unknown;
         if (isRelayEnvelope(message)) handlers.onMessage(message);
@@ -70,8 +91,14 @@ export class RealtimeService {
         console.warn('[MindSync realtime] Ignored malformed message');
       }
     };
-    this.socket.onerror = () => handlers.onConnectionState('error', 'relay-websocket-error');
+    this.socket.onerror = () => {
+      if (this.socket !== socket) return;
+      this.stopDiagnostics();
+      handlers.onConnectionState('error', 'relay-websocket-error');
+    };
     this.socket.onclose = event => {
+      if (this.socket !== socket) return;
+      this.stopDiagnostics();
       if (event.code !== 1000) handlers.onConnectionState('error', event.reason || `relay-closed-${event.code}`);
     };
   }
@@ -128,9 +155,16 @@ export class RealtimeService {
   }
 
   disconnect() {
-    this.socket?.close();
+    this.stopDiagnostics();
+    const socket = this.socket;
     this.socket = null;
     this.activeSessionId = null;
+    socket?.close();
+  }
+
+  private stopDiagnostics() {
+    if (this.diagnosticsTimer !== null) clearInterval(this.diagnosticsTimer);
+    this.diagnosticsTimer = null;
   }
 }
 

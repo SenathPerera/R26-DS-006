@@ -18,6 +18,7 @@ class SessionRelayAppTests(unittest.TestCase):
         relay.INITIALIZATION_DELAY_SECONDS = 0
         relay.store = SessionStore(code_factory=lambda: "482731")
         relay.channels = relay.SessionChannels()
+        relay.diagnostics = relay.RelayDiagnostics()
         self._client_context = TestClient(relay.app)
         self.client = self._client_context.__enter__()
 
@@ -81,6 +82,17 @@ class SessionRelayAppTests(unittest.TestCase):
                     configuration["payload"]["sessionContext"],
                 )
 
+                # Diagnostic messages are session-authenticated, never forwarded,
+                # and must not change the durable study-log count below.
+                mobile.send_json({
+                    "schemaVersion": "mindsync-monitor-v1", "messageType": "client_diagnostics",
+                    "payload": {"sessionId": session_id, "values": {"wearableConnected": True}},
+                })
+                quest.send_json({
+                    "schemaVersion": "mindsync-monitor-v1", "messageType": "client_diagnostics",
+                    "payload": {"sessionId": session_id, "values": {"audioPrepared": True}},
+                })
+
                 # A command sent before readiness must arrive before start. This
                 # guards against starting immediately after configuration.
                 mobile.send_json(
@@ -105,6 +117,8 @@ class SessionRelayAppTests(unittest.TestCase):
                 self.assertEqual(ready, mobile.receive_json())
                 start = quest.receive_json()
                 self.assertEqual("start", start["payload"]["command"])
+                self.assertTrue(relay.diagnostics.sessions[session_id]["mobile"]["values"]["wearableConnected"])
+                self.assertTrue(relay.diagnostics.sessions[session_id]["quest"]["values"]["audioPrepared"])
 
                 duplicate_ready = self._envelope(
                     "quest_state",

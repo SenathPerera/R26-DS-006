@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +14,9 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from services.project_monitor.instrumentation import ServiceMetrics, install_monitoring
 
 try:
     from google import genai
@@ -39,6 +43,8 @@ REALTIME_CHANNELS = 2
 REALTIME_FORMAT = "pcm_s16le"
 
 app = FastAPI(title="Lyria Phase 1 Backend", version="0.1.0")
+monitor_metrics = ServiceMetrics("lyria")
+install_monitoring(app, monitor_metrics)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -135,6 +141,17 @@ async def realtime_capability(model: str = DEFAULT_REALTIME_MODEL) -> RealtimeCa
 
 @app.post("/generate-clip", response_model=GenerateClipResponse)
 def generate_clip(payload: GenerateClipRequest) -> GenerateClipResponse:
+    started = monitor_metrics.begin("generateClip")
+    success = False
+    try:
+        result = _generate_clip(payload)
+        success = result.success
+        return result
+    finally:
+        monitor_metrics.end("generateClip", started, success)
+
+
+def _generate_clip(payload: GenerateClipRequest) -> GenerateClipResponse:
     if genai is None:
         raise HTTPException(
             status_code=500,

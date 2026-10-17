@@ -90,6 +90,8 @@ Thumbs.db
 #/docs/plans/ADAPTIVE_VR_14_STEP_IMPLEMENTATION_PLAN.md
 /.codex_tmp/
 *.md
+!/services/project_monitor/README.md
+/.venv-relay
 !/docs/research/COMPONENT_C_SIMULATION_EVALUATION_PROTOCOL.md
 !/docs/research/COMPONENT_C_QUEST2_TECHNICAL_VALIDATION_PROTOCOL.md
 !/analysis/component-c-bandit-evaluation/README.md

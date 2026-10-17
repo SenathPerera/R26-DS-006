@@ -194,6 +194,9 @@ namespace AdaptiveAudioVR.Integration
             SetPrivateField(bootstrap, "requireParticipantPreferences", true);
             audioPreferenceReceiver.Configure(
                 FindAnyObjectByType<SessionRelayBridge>(), bootstrap);
+            GetOrAddComponent<ProjectMonitorReporter>(appRoot).Configure(
+                bootstrap, clipGenerationService, componentBSignalReceiver,
+                audioPreferenceReceiver, audioMixerController);
 
             ComponentBPhysiologyBridge componentBBridge =
                 FindAnyObjectByType<ComponentBPhysiologyBridge>();

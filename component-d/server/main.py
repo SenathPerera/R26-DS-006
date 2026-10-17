@@ -38,6 +38,8 @@ from pydantic import BaseModel
 # `componentd` package imports regardless of the cwd uvicorn is launched from.
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from services.project_monitor.instrumentation import ServiceMetrics, install_monitoring
 
 from componentd.config import (MODELS_DIR, SAMPLE_RATE, STRESS_LEVELS,
                                 faint_confidence_penalty)
@@ -134,6 +136,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="CogniVoice Component D", version="2.0",
               lifespan=lifespan)
+monitor_metrics = ServiceMetrics("component-d")
+install_monitoring(app, monitor_metrics)
 
 # The frontend (Vite dev server) and this API run on different ports,
 # which browsers treat as different origins - without this, every fetch
@@ -328,7 +332,13 @@ async def infer(file: UploadFile = File(...),
     result["session_id"] = sid
 
     if poll_b:
-        reading = poll_into_store(hrv_store, sid, phase)
+        monitor_started = monitor_metrics.begin("pollB")
+        monitor_success = False
+        try:
+            reading = poll_into_store(hrv_store, sid, phase)
+            monitor_success = reading is not None
+        finally:
+            monitor_metrics.end("pollB", monitor_started, monitor_success)
         result["body"] = None if reading is None else {
             "level": reading.level, "confidence": reading.confidence,
             "source": "component_b"}

@@ -30,9 +30,19 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Networking
     }
 
     public sealed class SessionRelayWebSocketTransport
-        : ISessionRelayTransport
+        : ISessionRelayTransport, ISessionRelayDiagnosticsPublisher
     {
         private const string ConnectFailureCode = "relay-connect-failed";
+        public Task PublishDiagnosticsAsync(string sessionId, SessionRuntimeDiagnostics values,
+            CancellationToken cancellationToken)
+        {
+            EnsureActiveSession(sessionId);
+            return SendAsync(UnityEngine.JsonUtility.ToJson(new DiagnosticsEnvelope
+            {
+                payload = new DiagnosticsPayload { sessionId = sessionId, values = values }
+            }), cancellationToken);
+        }
+
         private const string PairingInvalidCode = "relay-pairing-invalid";
         private const string PairingRejectedCode = "relay-pairing-rejected";
         private const string RemoteClosedCode = "relay-remote-closed";

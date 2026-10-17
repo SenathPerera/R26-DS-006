@@ -6,6 +6,12 @@ web dashboard subscribe to predictions.
 
 import asyncio
 import logging
+import sys
+import time
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from services.project_monitor.instrumentation import ServiceMetrics, install_monitoring
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +36,8 @@ app.add_middleware(
 )
 
 subscribers: set[WebSocket] = set()
+monitor_metrics = ServiceMetrics("component-b")
+install_monitoring(app, monitor_metrics, lambda: {"subscribers": len(subscribers)})
 
 
 @app.get("/health")
@@ -66,11 +74,13 @@ async def ingest(ws: WebSocket):
     and must not be shared between them.
     """
     await ws.accept()
+    monitor_metrics.count("ingestConnections", 1)
     try:
         # TensorFlow/XGBoost artifact loading is synchronous and can take
         # several seconds. Keep it off the ASGI event loop so prediction
         # subscribers and additional handshakes remain responsive.
         engine = await asyncio.to_thread(new_stream)
+        monitor_metrics.set(modelReady=engine is not None)
         # Per connection for the same reason as `engine`: the resolver
         # caches this wearer's last measured temperature and anchors the
         # synthetic curve's phase to when this session started. A shared
@@ -88,6 +98,7 @@ async def ingest(ws: WebSocket):
             except WebSocketDisconnect:
                 raise
             except (ValidationError, ValueError, TypeError) as exc:
+                monitor_metrics.count("invalidFrames")
                 detail = exc.errors() if isinstance(exc, ValidationError) else str(exc)
                 await ws.send_json({"status": "invalid_batch", "detail": detail})
                 continue
@@ -96,6 +107,8 @@ async def ingest(ws: WebSocket):
                 batch.temperature,
                 batch.timestamp,
             )
+            monitor_metrics.count("acceptedFrames")
+            monitor_metrics.set(lastFrameAt=time.time(), temperatureSource=temperature.source)
             await ws.send_json({
                 "status": "accepted",
                 "timestamp": batch.timestamp,
@@ -114,6 +127,7 @@ async def ingest(ws: WebSocket):
             try:
                 rr, ts, _ = ppg_to_rr(batch.ppg, batch.sample_rate)
             except Exception:
+                monitor_metrics.count("processingErrors")
                 log.exception("PPG processing failed for frame %.3f",
                               batch.timestamp)
                 await ws.send_json({
@@ -138,6 +152,8 @@ async def ingest(ws: WebSocket):
                     await broadcast(StressPrediction(**out).model_dump())
     except WebSocketDisconnect:
         pass
+    finally:
+        monitor_metrics.count("ingestConnections", -1)
 
 
 @app.websocket("/stream")
@@ -149,11 +165,15 @@ async def stream(ws: WebSocket):
         while True:
             await ws.receive_text()      # keepalive
     except WebSocketDisconnect:
+        pass
+    finally:
         subscribers.discard(ws)
 
 
 async def broadcast(payload: dict):
     latest.set(payload)
+    monitor_metrics.count("predictions")
+    monitor_metrics.set(lastPredictionAt=time.time())
     dead = []
     for ws in subscribers:
         try:
