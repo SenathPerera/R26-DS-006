@@ -59,6 +59,7 @@ namespace AdaptiveAudioVR.Core
         public AudioRLPolicyMode CurrentRLMode => audioRLAgent != null ? audioRLAgent.CurrentPolicyMode : AudioRLPolicyMode.RuleBasedAdaptive;
         public AudioRLAction CurrentProposedAction => audioRLAgent != null ? audioRLAgent.CurrentProposedAction : AudioRLAction.NoChange;
         public int CurrentOnlineUpdateCount => audioRLAgent != null ? audioRLAgent.OnlineUpdateCount : 0;
+        internal AudioRLAgent MonitorAgent => audioRLAgent;
         public string CurrentLearningStatus => audioRLAgent != null ? audioRLAgent.CurrentLearningStatus : "No online agent";
         public AudioRLAction CurrentRuleAction => audioRLAgent != null ? audioRLAgent.CurrentRuleAction : AudioRLAction.NoChange;
         public AudioRLAction CurrentResidualAction => audioRLAgent != null ? audioRLAgent.CurrentResidualAction : AudioRLAction.NoChange;

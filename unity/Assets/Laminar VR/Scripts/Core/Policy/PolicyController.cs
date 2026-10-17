@@ -261,7 +261,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     PolicyDecisionCycleResultCode.SafetyRejected,
                     decision,
                     validation,
-                    null);
+                    null,
+                    observation);
             }
 
             pendingDecision = new PendingDecision(
@@ -293,7 +294,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     PolicyDecisionCycleResultCode.RewardWindowOpened,
                     decision,
                     validation,
-                    null);
+                    null,
+                    observation);
             }
 
             environmentManager.BeginTransition(
@@ -318,7 +320,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 PolicyDecisionCycleResultCode.TransitionStarted,
                 decision,
                 validation,
-                null);
+                null,
+                observation);
         }
 
         public async Task<EnvironmentTransitionProgress>

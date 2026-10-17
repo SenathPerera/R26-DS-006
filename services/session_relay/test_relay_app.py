@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from . import app as relay
 from .session_store import SessionStore
+from services.project_monitor.test_agents import sample as agent_sample
 
 
 class SessionRelayAppTests(unittest.TestCase):
@@ -90,7 +91,7 @@ class SessionRelayAppTests(unittest.TestCase):
                 })
                 quest.send_json({
                     "schemaVersion": "mindsync-monitor-v1", "messageType": "client_diagnostics",
-                    "payload": {"sessionId": session_id, "values": {"audioPrepared": True}},
+                    "payload": {"sessionId": session_id, "values": {"audioPrepared": True, "agents": agent_sample()}},
                 })
 
                 # A command sent before readiness must arrive before start. This
@@ -119,6 +120,8 @@ class SessionRelayAppTests(unittest.TestCase):
                 self.assertEqual("start", start["payload"]["command"])
                 self.assertTrue(relay.diagnostics.sessions[session_id]["mobile"]["values"]["wearableConnected"])
                 self.assertTrue(relay.diagnostics.sessions[session_id]["quest"]["values"]["audioPrepared"])
+                self.assertEqual(1, len(relay.diagnostics.agents[session_id].samples))
+                self.assertNotIn("agents", relay.diagnostics.sessions[session_id]["quest"]["values"])
 
                 duplicate_ready = self._envelope(
                     "quest_state",

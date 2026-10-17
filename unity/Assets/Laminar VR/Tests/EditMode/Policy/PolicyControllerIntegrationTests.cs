@@ -41,6 +41,10 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
 
             double rewardMonotonicTime;
             double postWindowEndUtc;
+            Assert.That(decisionResult.Observation, Is.Not.Null);
+            Assert.That(decisionResult.Observation.Physiology.SequenceNumber,
+                Is.EqualTo(decisionResult.Decision.PhysiologySequenceNumber));
+            var observedEnvironment = decisionResult.Observation.CurrentEnvironment;
             if (policyMode != StudyPolicyMode.RuleBasedAdaptive)
             {
                 Assert.That(
@@ -82,6 +86,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
             }
 
             harness.Session.AdvanceTo(rewardMonotonicTime);
+            // Monitor evidence must retain the pre-action values after transitions.
+            Assert.That(decisionResult.Observation.CurrentEnvironment,
+                Is.EqualTo(observedEnvironment));
             var ingestion = harness.PhysiologyBuffer.Ingest(
                 CreateWindow(postWindowEndUtc, 2.2d),
                 postWindowEndUtc,
