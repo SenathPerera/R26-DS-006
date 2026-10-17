@@ -100,7 +100,7 @@ def build_flow(services, selected=None, now=None):
     physiology_age = quest.get("physiologyAgeSeconds", -1)
     physiology_status = quest_problem or ("waiting" if physiology_age < 0 else "active" if physiology_age <= 90 else "stale")
     add("delivery", "05 / Run", "B stream to Unity", physiology_status,
-        "Audio-side receiver confirms accepted Component B windows; no signal values are exposed.",
+        "Audio-side receiver confirms accepted Component B windows; raw sensor readings are not exposed.",
         {"B stream socket": quest.get("physiologySocket"), "audio accepted windows": quest.get("physiologyPayloads"),
          "visual forwarded windows": quest.get("visualPhysiologyWindows"), "window age (s)": physiology_age if physiology_age >= 0 else None})
     add("visual", "05 / Run", "C / Adaptive scene", quest_problem or ("complete" if terminal else "active" if phase == "adaptive" else "ready" if running else "waiting"),

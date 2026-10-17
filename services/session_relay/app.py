@@ -197,7 +197,8 @@ channels = SessionChannels()
 app = FastAPI(title="MindSync Session Relay", version="1.0.0")
 monitor_metrics = ServiceMetrics("relay")
 diagnostics = RelayDiagnostics()
-install_monitoring(app, monitor_metrics, lambda: diagnostics.snapshot(channels))
+install_monitoring(app, monitor_metrics, lambda: diagnostics.snapshot(channels),
+                   lambda label: diagnostics.agent_snapshot(label, channels))
 
 
 @app.get("/health")

@@ -56,6 +56,53 @@ are attached to authenticated sessions. B counters may include another test clie
 Voice check-in runs before/after meditation; C and E run in parallel. The local
 monitor does not claim that C and E share a single decision loop.
 
+## Live Agents
+
+Open **http://127.0.0.1:8090/#agents**, select the paired session, and use the
+**Live agents** tab. Restart the session relay and rebuild the integrated Unity
+player for the new reports. No mobile APK, database migration, model retraining,
+or firmware update is needed for this view.
+
+- Scene controls: illumination, warmth, atmospheric softness, color richness,
+  ambient motion.
+- Audio controls, in wire order: intensity, density, brightness, tempo, fade,
+  music mix, ambient mix.
+- Both show the input stress, confidence, quality and source; current applied
+  controls; target controls; change since the previous report; and the last
+  decision's proposed versus safety-filtered deltas.
+- Stress and controls are normalized 0-1. Scene stress is Component B's continuous
+  score divided by 3, matching the audio input convention. Controls are not lux,
+  BPM, seconds or measured sound levels. Applied audio comes from the mixer,
+  not the policy target. Rendering/playback values are not independent proof
+  of what the headset user perceives.
+- The chart selector covers every variable and overlays that agent's own stress
+  input and target. The 5/15-minute range and Live checkbox support inspection.
+  Each agent can receive input at a different time and may use a different mode.
+  Simulator input is labelled explicitly, never presented as measured stress.
+- Decision/outcome history deduplicates retained results. A reward carries its
+  own decision/window sequence and event time; it is not assumed to belong to the
+  latest action. Visual sequence IDs are physiology windows, audio IDs are local
+  decision numbers; they are not comparable between agents. Invalid or absent
+  rewards are not shown as zero. Model update counts come from the actual policies.
+- These are five-second observations, not a lossless event recorder. Decisions
+  or transient values between heartbeats can be missed. Stress co-variation is
+  not evidence that an action caused an improvement.
+
+The relay keeps at most 180 snapshots per session and expires observations after
+15 minutes, with a maximum of 32 sessions. Charts use server receipt time; event
+times come from Unity. Keep the PC and headset clocks synchronized. Missing
+samples, input older than 90 seconds (3 seconds for simulation), or disconnected
+clients are marked explicitly; plotted lines break across report gaps over 15s.
+The last observed decision may predate the plotted range.
+
+On macOS/Linux, from the repository root:
+
+```sh
+python3 -m venv .venv-relay
+.venv-relay/bin/python -m pip install -r services/project_monitor/requirements.txt
+.venv-relay/bin/python -m uvicorn services.project_monitor.app:app --host 127.0.0.1 --port 8090
+```
+
 ## Freshness, Privacy And Safety
 
 - Backends are polled every 3 seconds with bounded timeouts; client reports are
@@ -63,15 +110,20 @@ monitor does not claim that C and E share a single decision loop.
   and physiology/frame evidence at 90 seconds (allows a 60-second window).
 - Missing diagnostics show **Not reported**, never synthetic healthy data.
   Monitor connection loss dims the historical view and displays a warning.
-- Status payloads contain allowlisted flags, counts, modes and timestamps. No
+- Status payloads contain allowlisted flags, counts, modes and timestamps. The
+  separate local-only agent feed adds derived stress, confidence/quality,
+  control values, actions and rewards. No
   names, participant pseudonyms, pairing codes, tokens, prompts, voice clips or
-  physiology readings are returned. Session labels are truncated hashes.
+  raw PPG, HR/HRV or temperature readings are returned. Session labels are
+  truncated hashes. Derived stress remains sensitive session data; do not
+  publish this dashboard or its screenshots with identifiable participant context.
 - Reports use the existing authenticated relay connection. They are not forwarded
   to peers, written into study logs or used as agent input. Invalid diagnostic
   fields are discarded. A maximum of 32 sessions is retained in relay memory.
 - Counters reset on backend restart. The browser keeps up to 40 status changes
   in memory only. Reloading the page clears that timeline.
-- `/monitor/status` on each backend is restricted to loopback clients. The UI
+- `/monitor/status` on each backend and `/monitor/agents` on the relay are
+  restricted to loopback clients. The UI
   also checks host/origin and has no external assets or external API calls.
 - Existing application transports may use plain HTTP/WS on the LAN. This feature
   does not add TLS or repair existing backend authentication limitations.
@@ -83,6 +135,14 @@ monitor does not claim that C and E share a single decision loop.
 ```powershell
 .\.venv-relay\Scripts\python.exe -m pip install httpx==0.28.1
 .\.venv-relay\Scripts\python.exe -m unittest services.project_monitor.test_monitor services.session_relay.test_relay_app services.session_relay.test_session_store
+```
+
+Agent-specific checks (use your Python environment's executable):
+
+```sh
+python -m unittest services.project_monitor.test_agents
+node --test services/project_monitor/test_agents.cjs
+node services/project_monitor/test_agents_browser.cjs # requires Playwright + Chromium and a running monitor
 ```
 
 Check mobile TypeScript with `node_modules\.bin\tsc.cmd --noEmit` from the app

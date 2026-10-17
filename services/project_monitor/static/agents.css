@@ -1,0 +1,51 @@
+.view-toolbar{display:flex;align-items:center;justify-content:space-between;gap:20px;border-bottom:1px solid var(--line);padding:0 0 14px;margin-bottom:26px}
+.view-toolbar [role=tablist]{display:flex;gap:6px}
+.view-toolbar [role=tab]{border:0;border-bottom:3px solid transparent;background:none;padding:12px;color:var(--muted)}
+.view-toolbar [aria-selected=true]{border-color:var(--teal);color:var(--ink);font-weight:bold}
+#agents-view{letter-spacing:0;color:#223638}
+#agents-view h2{font-size:20px;letter-spacing:0;font-weight:bold}
+#agents-view h3{font-size:18px;margin:0;letter-spacing:0}
+#agents-view h4{font-size:13px;margin:22px 0 10px}
+.agent-heading{flex-wrap:wrap}
+.agent-heading p{margin:5px 0 0}
+.agent-controls{display:flex;align-items:center;gap:20px}
+.agent-controls label{font-size:12px;display:flex;align-items:center;gap:8px}
+.live-toggle{cursor:pointer}
+.live-toggle input{accent-color:var(--teal);width:18px;height:18px}
+.agent-status{font-size:13px;padding:12px 0;border-top:1px solid var(--line);border-bottom:1px solid var(--line);color:var(--muted)}
+.agent-status[data-state=live]{color:var(--teal)}
+.agent-status[data-state=stale],.agent-status[data-state=offline],.agent-status[data-state=disconnected]{color:var(--red)}
+.agent-columns{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:32px}
+.agent-panel{min-width:0;padding:16px 0}
+.agent-panel+.agent-panel{border-left:1px solid var(--line);padding-left:32px}
+.agent-title{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
+.agent-title .badge{white-space:normal;overflow-wrap:anywhere;text-align:right}
+.agent-context{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:16px 0}
+.agent-context>div{border-left:2px solid var(--line);padding:0 10px;min-width:0}
+.agent-context dt{font-size:11px;color:var(--muted)}
+.agent-context dd{font:18px/1.5 Consolas,monospace;margin:4px 0 0;overflow-wrap:anywhere}
+.agent-context small{display:block;font:11px/1.5 "Trebuchet MS",sans-serif;color:var(--muted)}
+.chart-toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;font-size:12px;margin-top:20px}
+.chart-toolbar select{max-width:65%}
+.agent-chart{display:block;width:100%;height:220px;margin:10px 0 0}
+.chart-legend{display:flex;flex-wrap:wrap;gap:16px;font-size:11px;margin:4px 0 16px}
+.chart-legend span:before{content:"";display:inline-block;width:18px;border-top:3px solid;margin-right:6px;vertical-align:middle}
+.chart-legend .stress{color:#b13e40}.chart-legend .applied{color:#006e61}.chart-legend .target{color:#426db3}
+.chart-legend .target:before{border-top-style:dashed}
+.agent-footnote{color:var(--muted);font-size:11px;min-height:34px;margin:8px 0 0}
+.table-scroll{overflow:auto;max-width:100%}
+#agents-view table{width:100%;border-collapse:collapse;font-size:12px;font-variant-numeric:tabular-nums}
+#agents-view th{font-size:10px;color:var(--muted);font-weight:normal;text-align:right;padding:10px 7px;border-bottom:1px solid var(--line);vertical-align:bottom}
+#agents-view td{padding:11px 7px;border-bottom:1px solid var(--line);text-align:right;font-family:Consolas,monospace;white-space:nowrap}
+#agents-view th:first-child,#agents-view td:first-child{text-align:left}
+#agents-view td:first-child{font-family:inherit;white-space:normal;min-width:96px}
+.agent-events{border-top:1px solid var(--line);margin-top:22px;padding-top:22px}
+#agents-view .agent-events td,#agents-view .agent-events th{text-align:left;white-space:normal;overflow-wrap:anywhere;font-family:inherit}
+#agents-view .agent-events table{min-width:660px}
+#agents-view .agent-events td small{display:block;color:var(--muted);margin-top:4px}
+.agent-decision{font-size:12px;margin:16px 0 0;border-top:1px solid var(--line);padding-top:12px;overflow-wrap:anywhere;min-height:110px}
+.agent-decision p{margin:6px 0}
+.agent-offline .agent-columns{opacity:.6}
+.agent-empty{padding:35px 0;color:var(--muted);font-size:13px}
+@media(max-width:1100px){.agent-columns{grid-template-columns:1fr}.agent-panel+.agent-panel{border-left:0;border-top:1px solid var(--line);padding-left:0}}
+@media(max-width:600px){.view-toolbar{align-items:flex-start;flex-direction:column;gap:10px}.agent-controls{gap:12px}.agent-context{gap:4px}.agent-context>div{padding:0 6px}.agent-context dd{font-size:16px}#agents-view th,#agents-view td{padding:9px 5px;font-size:11px}.agent-title{flex-wrap:wrap}.agent-chart{height:210px}.agent-events .section-heading{flex-wrap:wrap}}

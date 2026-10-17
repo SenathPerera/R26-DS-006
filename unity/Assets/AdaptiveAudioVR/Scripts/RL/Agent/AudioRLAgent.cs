@@ -70,6 +70,11 @@ namespace AdaptiveAudioVR.RL.Agent
         public int RewardVersion { get; private set; }
         public int ReplayBufferCount => replayBuffer?.Count ?? 0;
         public int DecisionCount { get; private set; }
+        public AudioRLTransition MonitorDecision { get; private set; }
+        public AudioRLTransition MonitorOutcome { get; private set; }
+        public double MonitorDecisionAt { get; private set; }
+        public double MonitorOutcomeAt { get; private set; }
+        public int MonitorOutcomeDecision { get; private set; }
         public int OnlineUpdateCount => policy?.Model.UpdateCount ?? 0;
         public int InvalidOutcomeCount { get; private set; }
         public int BaselineObservationCount => baseline?.Count ?? 0;
@@ -121,6 +126,9 @@ namespace AdaptiveAudioVR.RL.Agent
             CurrentRewardBreakdown = AudioRLRewardBreakdown.Zero;
             CurrentRuleAction = CurrentProposedAction = CurrentFinalSafeAction = previousSafeAction = AudioRLAction.NoChange;
             DecisionCount = RewardVersion = InvalidOutcomeCount = noveltyCount = conditionSegment = 0;
+            MonitorDecision = MonitorOutcome = null;
+            MonitorDecisionAt = MonitorOutcomeAt = 0d;
+            MonitorOutcomeDecision = 0;
             productionDomain = null;
             pending = null;
             persistence = null;
@@ -344,7 +352,18 @@ namespace AdaptiveAudioVR.RL.Agent
                 selectionScore = pending.selection.Score, onlineUpdateCount = OnlineUpdateCount,
                 eligiblePostStartUtc = double.IsPositiveInfinity(pending.eligiblePostStartUtc) ? 0 : pending.eligiblePostStartUtc
             };
-            if (eventType == "outcome") replayBuffer.Add(transition);
+            if (eventType == "decision")
+            {
+                MonitorDecision = transition;
+                MonitorDecisionAt = utcNow;
+            }
+            if (eventType == "outcome")
+            {
+                MonitorOutcome = transition;
+                MonitorOutcomeAt = utcNow;
+                MonitorOutcomeDecision = DecisionCount;
+                replayBuffer.Add(transition);
+            }
             transitionLogger?.Log(transition);
         }
 

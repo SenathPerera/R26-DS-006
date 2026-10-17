@@ -67,18 +67,37 @@ class ServiceMetrics:
             })
 
 
-def install_monitoring(app, metrics: ServiceMetrics, details=None):
+def monitor_access_error(request):
+    if not request.client or not is_loopback(request.client.host):
+        return JSONResponse({"detail": "localhost-only"}, status_code=403)
+    origin = request.headers.get("origin")
+    if origin and origin != str(request.base_url).rstrip("/"):
+        return JSONResponse({"detail": "same-origin-only"}, status_code=403)
+    return None
+
+
+def install_monitoring(app, metrics: ServiceMetrics, details=None, agents=None):
     @app.get("/monitor/status", include_in_schema=False)
     async def monitor_status(request: Request):
-        if not request.client or not is_loopback(request.client.host):
-            return JSONResponse({"detail": "localhost-only"}, status_code=403)
-        origin = request.headers.get("origin")
-        if origin and origin != str(request.base_url).rstrip("/"):
-            return JSONResponse({"detail": "same-origin-only"}, status_code=403)
+        denied = monitor_access_error(request)
+        if denied is not None:
+            return denied
         result = metrics.snapshot()
         if details is not None:
             result["details"] = details()
         return JSONResponse(result, headers={"Cache-Control": "no-store"})
+
+    if agents is not None:
+        @app.get("/monitor/agents", include_in_schema=False)
+        async def monitor_agents(request: Request, session: str = ""):
+            denied = monitor_access_error(request)
+            if denied is not None:
+                return denied
+            # Public diagnostic labels only; never accept a raw session ID.
+            import re
+            if not re.fullmatch(r"[0-9a-f]{10}", session):
+                return JSONResponse({"detail": "invalid-session-label"}, status_code=400)
+            return JSONResponse(agents(session), headers={"Cache-Control": "no-store"})
 
     @app.middleware("http")
     async def record_http(request: Request, call_next):
@@ -94,7 +113,7 @@ def install_monitoring(app, metrics: ServiceMetrics, details=None):
                 metrics.end(operation, started, success)
         route = request.scope.get("route")
         path = getattr(route, "path", "")
-        if path and path not in {"/health", "/monitor/status"}:
+        if path and path not in {"/health", "/monitor/status", "/monitor/agents"}:
             # Route templates omit pairing tokens, session IDs and query strings.
             metrics.count("httpRequests")
             metrics.set(lastHttpAt=time.time())

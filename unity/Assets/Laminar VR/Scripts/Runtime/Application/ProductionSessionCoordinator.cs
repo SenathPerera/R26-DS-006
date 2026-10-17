@@ -147,6 +147,13 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
 
         public PolicyRewardCycleResult? LastRewardResult { get; private set; }
 
+        // Keep completed evidence when subsequent polling returns Waiting or NoPending.
+        public PolicyDecisionCycleResult? MonitorDecision { get; private set; }
+        public PolicyRewardCycleResult? MonitorReward { get; private set; }
+        public double MonitorDecisionAt { get; private set; }
+        public double MonitorRewardAt { get; private set; }
+        public PhysiologyWindow MonitorPhysiology { get; private set; }
+
         public int AcceptedBaselineWindowCount =>
             baselineAccumulator?.AcceptedWindowCount ?? 0;
 
@@ -321,6 +328,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             sessionId = activeSessionId.Trim();
+            MonitorDecision = null;
+            MonitorReward = null;
+            MonitorPhysiology = null;
+            MonitorDecisionAt = MonitorRewardAt = 0d;
             participantPseudonym = pseudonymousParticipantId.Trim();
             preferredEnvironment = safePreferredEnvironment;
             sessionContextSnapshot = contextSnapshot;
@@ -1055,6 +1066,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 }
 
                 rewardCheckRequested = true;
+                MonitorPhysiology = queued.Window;
                 if (session.Phase == VrSessionPhase.Acclimatization
                     && physiologyBuffer.TryGetLatestAccepted(out var snapshot))
                 {
@@ -1284,6 +1296,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 utcTimestampUnixSeconds,
                 session.ActiveSessionElapsedSeconds,
                 adaptationCancellation.Token);
+            if (LastDecisionResult.Value.Decision != null)
+            {
+                MonitorDecision = LastDecisionResult;
+                MonitorDecisionAt = utcTimestampUnixSeconds;
+            }
         }
 
         private async Task CompleteAdaptiveTransitionAsync(
@@ -1312,6 +1329,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 session.Phase,
                 networkConnected,
                 adaptationCancellation.Token);
+            if (LastRewardResult.Value.ResultCode != PolicyRewardCycleResultCode.Waiting
+                && LastRewardResult.Value.ResultCode != PolicyRewardCycleResultCode.NoPending)
+            {
+                MonitorReward = LastRewardResult;
+                MonitorRewardAt = utcTimestampUnixSeconds;
+            }
         }
 
         private async Task InvalidateAsync(

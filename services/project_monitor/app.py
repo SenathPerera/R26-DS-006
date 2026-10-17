@@ -34,13 +34,13 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def read_json(url):
+def read_json(url, max_bytes=256_000):
     # Never use system HTTP proxies or follow redirects to external services.
     opener = build_opener(ProxyHandler({}), NoRedirect())
     try:
         with opener.open(url, timeout=1.2) as response:
-            content = response.read(256_001)
-            if len(content) > 256_000:
+            content = response.read(max_bytes + 1)
+            if len(content) > max_bytes:
                 return None
             value = json.loads(content)
             return value if isinstance(value, dict) else None
@@ -163,6 +163,21 @@ async def local_only(request: Request, call_next):
 @app.get("/api/snapshot")
 async def snapshot(session: str | None = None):
     return collector.snapshot(session)
+
+
+@app.get("/api/agents")
+async def agents(session: str = ""):
+    if not re.fullmatch(r"[0-9a-f]{10}", session):
+        return JSONResponse({"detail": "invalid-session-label"}, status_code=400)
+    relay = next((s for s in collector.services if s["id"] == "relay"), {})
+    if not relay.get("reachable"):
+        return JSONResponse({"detail": "relay-unavailable"}, status_code=503)
+    # URL was constructed from the configured localhost port, never from user input.
+    result = await asyncio.to_thread(read_json, relay["url"] + "/monitor/agents?session=" + session, 1_048_576)
+    if (not result or result.get("schemaVersion") != "mindsync-agents-v1"
+            or result.get("session") != session):
+        return JSONResponse({"detail": "agent-diagnostics-unavailable"}, status_code=503)
+    return result
 
 
 @app.get("/")
