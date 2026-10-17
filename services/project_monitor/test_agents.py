@@ -38,6 +38,24 @@ def message(snapshot, session="private-session"):
 
 
 class AgentTests(unittest.TestCase):
+    def test_coordination_extension_is_allowlisted_and_keeps_legacy_reports_valid(self):
+        payload = sample()
+        payload["coordination"] = {
+            "owner": "Audio", "stage": "Measuring", "reason": "Waiting for a complete post action window",
+            "eligiblePostStartUtc": 125, "remainingSeconds": 180,
+            "completedTurns": 3, "cancelledTurns": 1,
+        }
+        self.assertTrue(validate_snapshot(payload))
+        history = AgentHistory()
+        history.append(payload, 100)
+        self.assertEqual("Audio", history.snapshot(100)[0]["coordination"]["owner"])
+        self.assertTrue(validate_snapshot(sample()), "Older Unity snapshots must remain readable")
+        for key, invalid in (("owner", "Both"), ("stage", "<script>"), ("remainingSeconds", float("nan")),
+                             ("cancelledTurns", -1), ("token", "secret")):
+            changed = json.loads(json.dumps(payload))
+            changed["coordination"][key] = invalid
+            self.assertFalse(validate_snapshot(changed))
+
     def test_strict_schema_rejects_extra_fields_bad_shapes_nonfinite_and_bool_numbers(self):
         self.assertTrue(validate_snapshot(sample()))
         mutations = [
@@ -146,7 +164,10 @@ class AgentTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         dto = (root / "unity/Assets/Laminar VR/Scripts/Runtime/Networking/SessionRuntimeDiagnostics.cs").read_text()
         import re
-        types = {"AgentMonitorSnapshot": sample(), "AgentMonitorState": sample()["audio"],
+        coordination = {"owner": "Audio", "stage": "Measuring", "reason": "Waiting",
+                        "eligiblePostStartUtc": 100, "remainingSeconds": 100, "completedTurns": 1, "cancelledTurns": 0}
+        types = {"AgentMonitorSnapshot": {**sample(), "coordination": coordination},
+                 "AgentMonitorCoordination": coordination, "AgentMonitorState": sample()["audio"],
                  "AgentMonitorInput": sample()["audio"]["input"],
                  "AgentMonitorDecision": sample()["audio"]["decision"],
                  "AgentMonitorReward": sample()["audio"]["reward"]}

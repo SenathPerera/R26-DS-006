@@ -1,7 +1,11 @@
 // Only used by the standalone logic test executable, never imported by Unity.
 using System;
 using System.Collections.Generic;
+#if NET8_0_OR_GREATER
+using System.Text.Json;
+#else
 using System.Web.Script.Serialization;
+#endif
 
 namespace UnityEngine
 {
@@ -36,8 +40,14 @@ namespace UnityEngine
     }
     public static class JsonUtility
     {
+#if NET8_0_OR_GREATER
+        private static readonly JsonSerializerOptions Options = new JsonSerializerOptions { IncludeFields = true };
+        public static string ToJson(object value, bool pretty = false) => JsonSerializer.Serialize(value, Options);
+        public static T FromJson<T>(string value) => JsonSerializer.Deserialize<T>(value, Options);
+#else
         public static string ToJson(object value, bool pretty = false) => new JavaScriptSerializer { MaxJsonLength = 4000000 }.Serialize(value);
         public static T FromJson<T>(string value) => new JavaScriptSerializer { MaxJsonLength = 4000000 }.Deserialize<T>(value);
+#endif
     }
     public static class Mathf
     {

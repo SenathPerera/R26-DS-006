@@ -24,7 +24,9 @@ function samples(label, now) {
       reward: {available: i > 18, valid: true, at: now - 55, sequence: size === 5 ? 6 : 2,
         action: "Hold", status: "Updated", total: .31},
     });
-    return {receivedAt: at, capturedAt: at, phase: "Adaptive", visual: make(5), audio: make(7)};
+    return {receivedAt: at, capturedAt: at, phase: "Adaptive", visual: make(5), audio: make(7),
+      coordination: {owner: "Audio", stage: "Measuring", reason: "Waiting for a complete post action window",
+        eligiblePostStartUtc: now - 20, remainingSeconds: 140, completedTurns: 3, cancelledTurns: 1}};
   });
 }
 async function main() {
@@ -67,6 +69,8 @@ async function main() {
     assert.equal(await page.locator(".agent-panel").nth(0).locator("tbody tr").count(), 5);
     assert.equal(await page.locator(".agent-panel").nth(1).locator("tbody tr").count(), 7);
     assert.equal(await page.locator("#agent-events-body tr").count(), 4);
+    assert.match(await page.locator("#agent-coordination").textContent(), /Audio.*Measuring/);
+    assert.match(await page.locator("#agent-coordination").textContent(), /3 \/ 1/);
     for (const width of [1440, 390]) {
       await page.setViewportSize({width, height: width === 1440 ? 1050 : 844});
       await page.locator("#agents-view").scrollIntoViewIfNeeded();
@@ -113,9 +117,9 @@ async function main() {
     await page.evaluate(() => { window.agentMonitor.refresh(); });
     await page.locator("#session").selectOption("bbbbbbbbbb");
     await page.waitForFunction(() => document.querySelector("#agent-session").textContent.includes("bbbbbbbbbb"));
-    await page.waitForFunction(() => document.querySelector(".agent-context").textContent.includes("0.810"));
+    await page.waitForFunction(() => document.querySelector(".agent-panel .agent-context").textContent.includes("0.810"));
     await page.waitForTimeout(900);
-    assert.match(await page.locator(".agent-context").first().textContent(), /0.810/);
+    assert.match(await page.locator(".agent-panel .agent-context").first().textContent(), /0.810/);
     await page.locator("#flow-tab").click();
     assert.equal(await page.locator("#flow-view").isVisible(), true);
     await page.locator("#agents-tab").click();
