@@ -94,6 +94,8 @@ Thumbs.db
 /.venv-relay
 !/docs/research/COMPONENT_C_SIMULATION_EVALUATION_PROTOCOL.md
 !/docs/research/COMPONENT_C_QUEST2_TECHNICAL_VALIDATION_PROTOCOL.md
+!/docs/unity/TEMPLE_SKY_MOTION.md
+!/docs/unity/TEMPLE_REFERENCE_GARDEN.md
 !/analysis/component-c-bandit-evaluation/README.md
 /docs/research/iccmm-2026-camera-ready/
 
@@ -107,3 +109,5 @@ Thumbs.db
 # Raw Quest device-validation captures contain generated logs, local paths,
 # and device/network identifiers. Keep per-run output directories local.
 /analysis/component-c-bandit-evaluation/device-validation/*/
+
+/services/lyria_backend/generated
