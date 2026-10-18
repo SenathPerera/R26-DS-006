@@ -91,6 +91,24 @@ that fade. Recovery waits for clean physiology before attributing rewards.
 No implementation can reconstruct missing music after the playback buffer has
 already emptied, so prolonged outages can still be audible.
 
+Unexpected provider stop/pause events also trigger recovery unless the user
+explicitly paused/stopped realtime playback. A low PCM reserve after a receive
+gap begins the fallback fade before the full 20-second transport stall timeout.
+Cached sources are looped for the active session and restarted if Unity stops
+one unexpectedly. A restart cancels the current measurement; session stop,
+pause, mute, and headset lifecycle controls are never overridden. Disabling the
+realtime component during an active session restores cached music as well.
+
+Online audio exploration balances only exactly tied UCB scores among eligible
+safe actions. The first cold-start tie still holds; subsequent equal scores can
+try other micro-actions even if the previous outcome was discarded. Attempts do
+not update reward weights, and frozen evaluation does not use this tie rotation.
+The selection configuration is versioned separately from earlier model files.
+Unreliable input still freezes adaptation, and neither a stress change nor a
+visual action guarantees an audio action. The monitor now reports fixed
+`Discarded_*` categories for audio outcomes instead of an unexplained `Invalid`;
+exact reasons remain in the local Quest RL transition logs.
+
 Both music sources use equal-power crossfading. For an acknowledged generation
 revision, the PCM queue also blends up to one second of its buffered tail with
 the new revision, preserving a two-second queue reserve. That blend is inside

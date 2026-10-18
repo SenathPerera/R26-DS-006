@@ -80,11 +80,14 @@ namespace AdaptiveAudioVR.RL.Agent
             }
         }
 
-        public AudioBanditSelection Select(double[] features, IReadOnlyList<int> eligibleArms, bool explore = true)
+        public AudioBanditSelection Select(double[] features, IReadOnlyList<int> eligibleArms, bool explore = true,
+            IReadOnlyList<int> selectionAttempts = null)
         {
             ValidateFeatures(features);
             if (eligibleArms == null || eligibleArms.Count == 0)
                 throw new ArgumentException("At least NoChange must be eligible.", nameof(eligibleArms));
+            if (selectionAttempts != null && selectionAttempts.Count != ArmCount)
+                throw new ArgumentException("Attempt counts must match the action catalogue.", nameof(selectionAttempts));
             var best = new AudioBanditSelection(-1, 0, 0, double.NegativeInfinity);
             foreach (int arm in eligibleArms)
             {
@@ -96,8 +99,13 @@ namespace AdaptiveAudioVR.RL.Agent
                 double uncertainty = Math.Sqrt(Math.Max(0, Dot(features, projected)));
                 double score = mean + (explore ? Alpha * uncertainty : 0d);
                 if (!IsFinite(score)) throw new InvalidOperationException("Non-finite bandit score.");
-                // All nonzero catalogue actions have equal size. Arm zero is NoChange.
-                if (score > best.Score + 1e-10 || (Math.Abs(score - best.Score) <= 1e-10 && arm < best.Arm))
+                // Attempt counts break only genuine UCB ties; they are not reward observations.
+                bool fewerAttempts = explore && Alpha > 0 && selectionAttempts != null && best.Arm >= 0
+                    && selectionAttempts[arm] < selectionAttempts[best.Arm];
+                bool equalAttempts = !explore || Alpha <= 0 || selectionAttempts == null || best.Arm < 0
+                    || selectionAttempts[arm] == selectionAttempts[best.Arm];
+                if (score > best.Score + 1e-10 || (Math.Abs(score - best.Score) <= 1e-10
+                    && (fewerAttempts || (equalAttempts && arm < best.Arm))))
                     best = new AudioBanditSelection(arm, mean, uncertainty, score);
             }
             return best;

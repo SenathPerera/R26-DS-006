@@ -266,7 +266,8 @@ namespace AdaptiveAudioVR.Integration
                     available = true, valid = outcome.rewardValid, at = agent.MonitorOutcomeAt,
                     sequence = agent.MonitorOutcomeDecision,
                     action = AudioActionCatalog.Name(outcome.executedArm),
-                    status = !outcome.rewardValid ? "Invalid" : outcome.onlineUpdateApplied ? "Updated" : "EvaluationOnly",
+                    status = !outcome.rewardValid ? AudioRLTransition.DescribeInvalidOutcome(outcome.outcomeReason)
+                        : outcome.onlineUpdateApplied ? "Updated" : "EvaluationOnly",
                     total = outcome.rewardValid && outcome.reward != null ? outcome.reward.totalReward : 0d
                 };
             }

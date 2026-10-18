@@ -72,6 +72,7 @@ namespace AdaptiveAudioVR.Integration
         private Task receiveLoopTask;
         private AudioClip fallbackMeditationClip;
         private bool clipGenerationWasEnabled;
+        private bool clipGenerationSuppressed;
         private float nextSteeringTime;
         private string lastObservedPromptSignature = string.Empty;
         private SignalPacket lastSentSignal;
@@ -158,7 +159,7 @@ namespace AdaptiveAudioVR.Integration
 
         private async void OnDisable()
         {
-            await DisconnectAsync(restoreClip: false);
+            await DisconnectAsync(restoreClip: !shuttingDown && bootstrap != null && bootstrap.IsSessionRunning);
         }
 
         private void UpdateAutomaticPlayback()
@@ -189,7 +190,11 @@ namespace AdaptiveAudioVR.Integration
                 observedReceivedSamples = pcmAudioPlayer.TotalReceivedSamples;
                 lastAudioReceivedAt = now;
             }
-            if (generationFaulted || recoveryRequested || (IsStreaming && now - lastAudioReceivedAt > Math.Max(5, streamStallTimeoutSeconds)))
+            bool lowPlaybackReserve = IsStreaming && HasBufferedPlaybackStarted && !IsPaused
+                && BufferedSeconds <= Math.Max(1, restoreCrossfadeSeconds)
+                && now - lastAudioReceivedAt >= Math.Max(3, restoreCrossfadeSeconds);
+            if (generationFaulted || recoveryRequested || lowPlaybackReserve
+                || (IsStreaming && now - lastAudioReceivedAt > Math.Max(5, streamStallTimeoutSeconds)))
             {
                 _ = RecoverRealtimeAsync();
                 return;
@@ -479,7 +484,7 @@ namespace AdaptiveAudioVR.Integration
             pcmAudioPlayer?.DetachFromMixer();
             bootstrap?.InterruptAdaptation("Realtime stream disconnected");
 
-            if (restoreClip && restorePreviousClipOnStop && fallbackMeditationClip != null && audioMixerController != null)
+            if (restoreClip && !shuttingDown && fallbackMeditationClip != null && audioMixerController != null)
             {
                 audioMixerController.SetMeditationPlaybackPaused(false);
                 audioMixerController.CrossfadeToMeditationClip(fallbackMeditationClip, restoreCrossfadeSeconds);
@@ -1021,7 +1026,8 @@ namespace AdaptiveAudioVR.Integration
                         bootstrap?.SetRealtimePlaybackReady(false);
                         IsPaused = true;
                         IsStreaming = false;
-                        if (audioMixerController != null)
+                        recoveryRequested = !manuallyStopped;
+                        if (audioMixerController != null && manuallyStopped)
                         {
                             audioMixerController.SetMeditationPlaybackPaused(true);
                         }
@@ -1032,8 +1038,9 @@ namespace AdaptiveAudioVR.Integration
                         bootstrap?.SetRealtimePlaybackReady(false);
                         IsPaused = false;
                         IsStreaming = false;
+                        recoveryRequested = !manuallyStopped;
                         pendingBufferedPlaybackStart = false;
-                        pcmAudioPlayer.ClearBuffer();
+                        if (manuallyStopped) pcmAudioPlayer.ClearBuffer();
                         if (audioMixerController != null)
                         {
                             audioMixerController.SetMeditationPlaybackPaused(false);
@@ -1139,12 +1146,15 @@ namespace AdaptiveAudioVR.Integration
 
             if (suppress)
             {
+                if (clipGenerationSuppressed) return;
                 clipGenerationWasEnabled = clipGenerationService.enabled;
+                clipGenerationSuppressed = true;
                 clipGenerationService.enabled = false;
             }
-            else
+            else if (clipGenerationSuppressed)
             {
                 clipGenerationService.enabled = clipGenerationWasEnabled;
+                clipGenerationSuppressed = false;
             }
         }
 

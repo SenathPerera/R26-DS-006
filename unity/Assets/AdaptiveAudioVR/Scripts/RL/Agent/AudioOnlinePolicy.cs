@@ -92,9 +92,11 @@ namespace AdaptiveAudioVR.RL.Agent
 
     public sealed class AudioOnlinePolicy
     {
+        public const string SelectionSchema = "audio-linucb-balanced-ties-v2";
         public AudioLinUcbModel Model { get; }
         private readonly float actionDelta;
         private readonly AudioRuleBaselinePolicy rules;
+        private readonly int[] selectionAttempts = new int[AudioActionCatalog.Count];
 
         public AudioOnlinePolicy(float actionDelta, double alpha, double ridge)
         {
@@ -105,7 +107,13 @@ namespace AdaptiveAudioVR.RL.Agent
 
         public AudioBanditSelection Select(AudioRLPolicyMode mode, AudioRLState state, double[] features, IReadOnlyList<int> eligible, bool explore = true)
         {
-            if (mode == AudioRLPolicyMode.PersonalizedBandit) return Model.Select(features, eligible, explore);
+            if (mode == AudioRLPolicyMode.PersonalizedBandit)
+            {
+                var selection = Model.Select(features, eligible, explore, selectionAttempts);
+                if (explore && Model.Alpha > 0 && selectionAttempts[selection.Arm] < int.MaxValue)
+                    selectionAttempts[selection.Arm]++;
+                return selection;
+            }
             int best = 0;
             double bestError = double.PositiveInfinity;
             AudioRLAction desired = mode == AudioRLPolicyMode.StaticPersonalized

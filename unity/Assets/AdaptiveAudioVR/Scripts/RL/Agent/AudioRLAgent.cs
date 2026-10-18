@@ -516,7 +516,8 @@ namespace AdaptiveAudioVR.RL.Agent
             string configuration = JsonUtility.ToJson(rewardWeights) + "|" + string.Join("|", Array.ConvertAll(settings,
                 value => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
             if (Coordination != null) configuration += "|" + AdaptationCoordinator.SchemaVersion;
-            configuration += "|" + AudioMusicalMapping.Schema + "|generation=" + GenerationPlaybackAvailable;
+            configuration += "|" + AudioMusicalMapping.Schema + "|" + AudioOnlinePolicy.SelectionSchema
+                + "|generation=" + GenerationPlaybackAvailable;
             if (ResponsiveTesting) configuration += "|" + ResponsiveTestingPreset.Id;
             persistence = new AudioBanditPersistence(Path.Combine(Application.persistentDataPath, "AudioOnlineModels"),
                 ActiveProfile.userId, environmentId, !production, configuration);

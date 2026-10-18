@@ -33,6 +33,13 @@ internal static class GenerationPlaybackTests
         run("Stale socket callbacks cannot affect a new realtime connection", StaleConnection);
         run("Realtime waits for startup buffering before acquiring playback ownership", StartupBuffer);
         run("Failed stream attachment can fade back to the still-playing original clip", ReverseCrossfade);
+        run("Unexpected stream stop recovers but explicit manual stop stays stopped", UnexpectedStreamStop);
+        run("Unexpected stream pause recovers but explicit manual pause stays paused", UnexpectedStreamPause);
+        run("Low stream reserve switches to cached music before the long stall timeout", DepletedStream);
+        run("Stopped cached sources restart only inside an active audible session", SourceWatchdog);
+        run("Disabling realtime restores cached session music", DisableRealtime);
+        run("Twenty-minute simulated playback retains cached music after provider ending", LongSession);
+        run("Realtime clip suppression is idempotent and preserves the original enabled state", ClipSuppression);
     }
 
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
@@ -376,5 +383,130 @@ internal static class GenerationPlaybackTests
         Time.deltaTime = 2.5f; routine.MoveNext(); routine.MoveNext();
         Check(current.clip == fallback && current.isPlaying && !transition.isPlaying && !mixer.IsCrossfading,
             "Interrupted crossfade ended on the failed stream");
+    }
+
+    private static void UnexpectedStreamStop()
+    {
+        var f = Stream(); Receive(f, state: "stopped");
+        Check((bool)typeof(LyriaRealtimeStreamingService).GetField("recoveryRequested", Private).GetValue(f.Service),
+            "Connected but stopped stream was left idle forever");
+        var manual = Stream(); Set(manual.Service, "manuallyStopped", true); Receive(manual, state: "stopped");
+        Check(!(bool)typeof(LyriaRealtimeStreamingService).GetField("recoveryRequested", Private).GetValue(manual.Service),
+            "Explicit stop was overridden");
+    }
+
+    private static void UnexpectedStreamPause()
+    {
+        var f = Stream(); Receive(f, state: "paused");
+        Check((bool)typeof(LyriaRealtimeStreamingService).GetField("recoveryRequested", Private).GetValue(f.Service),
+            "Unrequested provider pause never recovered");
+        var manual = Stream(); Set(manual.Service, "manuallyStopped", true); Receive(manual, state: "paused");
+        Check(!(bool)typeof(LyriaRealtimeStreamingService).GetField("recoveryRequested", Private).GetValue(manual.Service),
+            "Explicit pause was overridden");
+    }
+
+    private static void DepletedStream()
+    {
+        var f = Stream();
+        Set(f.Service, "sessionWasRunning", true); Set(f.Service, "observedSessionId", "test-session");
+        Set(f.Service, "observedReceivedSamples", f.Pcm.TotalReceivedSamples);
+        Set(f.Service, "lastAudioReceivedAt", 120d);
+        Set(f.Service, "submittedGenerationId", null);
+        var fallback = new AudioClip(); Set(f.Service, "fallbackMeditationClip", fallback);
+        Set(f.Service, "restorePreviousClipOnStop", false);
+        var mixer = (AudioMixerController)typeof(LyriaRealtimeStreamingService).GetField("audioMixerController", Private).GetValue(f.Service);
+        Set(mixer, "transitionMeditationSource", new AudioSource());
+        Time.realtimeSinceStartupAsDouble = 124; Read(f, 96000);
+        Invoke(f.Service, "UpdateAutomaticPlayback");
+        Check(!f.Service.IsConnected && !f.Agent.HasPendingOutcome, "Waited for audible silence or a 20-second stall before recovery");
+        Check(f.Service.LastStatusMessage.Contains("reconnection scheduled"), "Recovery did not schedule a retry");
+        Check(mixer.IsCrossfading, "Manual-stop preference suppressed automatic recovery music");
+    }
+
+    private static void SourceWatchdog()
+    {
+        var mixer = new AudioMixerController();
+        var music = new AudioSource { clip = new AudioClip() };
+        var ambience = new AudioSource { clip = new AudioClip() };
+        Set(mixer, "currentMeditationSource", music); Set(mixer, "transitionMeditationSource", new AudioSource());
+        Set(mixer, "ambientSource", ambience);
+        Check(!mixer.EnsureSessionPlayback() && !music.isPlaying, "Watchdog started before session");
+        mixer.BeginSessionPlayback(); music.Stop(); ambience.Stop();
+        Check(mixer.EnsureSessionPlayback() && music.isPlaying && ambience.isPlaying, "Unexpected source stop was permanent");
+        Check(!mixer.EnsureSessionPlayback(), "Healthy playback was restarted");
+        mixer.SetMeditationPlaybackPaused(true);
+        Check(!mixer.EnsureSessionPlayback() && !music.isPlaying, "Manual pause ignored");
+        mixer.SetMeditationPlaybackPaused(false); mixer.SetMuted(true); music.Stop();
+        Check(!mixer.EnsureSessionPlayback() && !music.isPlaying, "Mute ignored");
+        mixer.SetMuted(false); mixer.HoldSessionPlayback();
+        Check(!mixer.EnsureSessionPlayback() && !music.isPlaying && !ambience.isPlaying, "Session stop ignored");
+    }
+
+    private static void DisableRealtime()
+    {
+        var f = Stream(); var fallback = new AudioClip();
+        Set(f.Service, "fallbackMeditationClip", fallback);
+        var mixer = (AudioMixerController)typeof(LyriaRealtimeStreamingService).GetField("audioMixerController", Private).GetValue(f.Service);
+        Set(mixer, "transitionMeditationSource", new AudioSource());
+        Invoke(f.Service, "OnDisable");
+        Check(mixer.IsCrossfading && !f.Service.IsConnected, "Realtime disable stranded the mixer on an empty stream");
+    }
+
+    private static void LongSession()
+    {
+        var f = Stream();
+        var mixer = (AudioMixerController)typeof(LyriaRealtimeStreamingService).GetField("audioMixerController", Private).GetValue(f.Service);
+        var fallback = new AudioClip();
+        Set(mixer, "transitionMeditationSource", new AudioSource()); mixer.BeginSessionPlayback();
+        Set(f.Service, "fallbackMeditationClip", fallback);
+        Set(f.Service, "sessionWasRunning", true); Set(f.Service, "observedSessionId", "test-session");
+        Set(f.Service, "nextAutomaticAttemptAt", double.PositiveInfinity);
+        f.Bootstrap.IsPrepared = false; // Transport reconnects are covered separately; no network in this runner.
+        var chunk = PcmBytes(96000, 3276);
+        var output = new float[96000];
+        var read = typeof(RealtimePcmAudioPlayer).GetMethod("OnAudioRead", Private);
+        for (int second = 121; second <= 1320; second++)
+        {
+            Time.realtimeSinceStartupAsDouble = second;
+            if (second < 840)
+            {
+                f.Pcm.EnqueuePcm16(chunk);
+                read.Invoke(f.Pcm, new object[] { output });
+                Invoke(f.Service, "UpdateAutomaticPlayback");
+                Check(f.Service.IsConnected, "Healthy streaming recovered unnecessarily");
+            }
+            // Provider ends after twelve minutes; cached music must cover the rest of the session.
+            if (second == 840)
+            {
+                Receive(f, state: "closed"); Invoke(f.Service, "UpdateAutomaticPlayback");
+                var fade = (System.Collections.IEnumerator)typeof(AudioMixerController).GetMethod("CrossfadeMeditationCoroutine", Private)
+                    .Invoke(mixer, new object[] { fallback, 2.5f, true });
+                Time.deltaTime = 2.5f; while (fade.MoveNext()) { }
+                Check(mixer.CurrentMeditationClip == fallback, "Provider ending did not restore cached music");
+            }
+            if (second > 840) Invoke(f.Service, "UpdateAutomaticPlayback");
+            mixer.EnsureSessionPlayback();
+            Check(mixer.IsMeditationPlaying, "Music stopped before session stop at second " + second);
+        }
+        Check(f.Pcm.UnderflowSampleCount == 0 && f.Pcm.DroppedSampleCount == 0, "Healthy PCM flow lost samples");
+        mixer.HoldSessionPlayback();
+        Check(!mixer.EnsureSessionPlayback() && !mixer.IsMeditationPlaying, "Twenty-minute session stop was not honored");
+    }
+
+    private static void ClipSuppression()
+    {
+        var service = new LyriaRealtimeStreamingService(); var clips = new LyriaClipGenerationService();
+        Set(service, "clipGenerationService", clips);
+        Set(service, "pcmAudioPlayer", new RealtimePcmAudioPlayer());
+        var suppress = typeof(LyriaRealtimeStreamingService).GetMethod("SuppressClipGeneration", Private);
+        suppress.Invoke(service, new object[] { false });
+        Check(clips.enabled, "Disconnect before a stream disabled clip generation");
+        suppress.Invoke(service, new object[] { true }); suppress.Invoke(service, new object[] { true });
+        Check(!clips.enabled, "Clip generation was not suppressed");
+        suppress.Invoke(service, new object[] { false });
+        Check(clips.enabled, "Repeated suppression lost the original enabled state");
+        clips.enabled = false;
+        suppress.Invoke(service, new object[] { true }); suppress.Invoke(service, new object[] { false });
+        Check(!clips.enabled, "Originally disabled clip generation was enabled");
     }
 }

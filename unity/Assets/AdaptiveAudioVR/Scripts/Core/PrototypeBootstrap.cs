@@ -289,6 +289,10 @@ namespace AdaptiveAudioVR.Core
                 return;
             }
 
+            RefreshAudioMute();
+            if (audioMixerController.EnsureSessionPlayback())
+                InterruptAdaptation("Audio source restarted after unexpected playback stop");
+
             SignalPacket signal = signalSimulator.CurrentSignal;
             bool hasProfile = CurrentProfile != null;
             AudioParameters baseline = hasProfile
@@ -372,7 +376,6 @@ namespace AdaptiveAudioVR.Core
                 sessionState.currentLyriaFrame = actionSafetyShield.ClampFrame(sessionState.currentLyriaFrame, signal, nextParameters);
             }
 
-            RefreshAudioMute();
             audioMixerController.SetTargetParameters(nextParameters);
             if (audioRLAgent == null && rlAdaptiveController != null)
             {

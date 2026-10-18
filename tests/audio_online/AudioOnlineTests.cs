@@ -23,6 +23,8 @@ internal static class AudioOnlineTests
         {
             Run("LinUCB known ridge regression result", KnownMath);
             Run("LinUCB eligible-action masking and deterministic tie", Masking);
+            Run("Audio exploration rotates tied safe actions without inventing rewards", ExplorationTies);
+            Run("Discarded audio outcomes report bounded diagnostic categories", OutcomeReasons);
             Run("Invalid observations leave model unchanged", InvalidMath);
             Run("Snapshot round trip and atomic corrupt-snapshot rejection", Snapshots);
             Run("User, environment, configuration and simulation model isolation", Persistence);
@@ -90,6 +92,31 @@ internal static class AudioOnlineTests
         Throws(() => model.Observe(0, new[] { 1d }, 1));
         Throws(() => model.Observe(0, new[] { 1d, 0 }, double.PositiveInfinity));
         Check(model.UpdateCount == 0, "Invalid sample updated model");
+    }
+
+    private static void ExplorationTies()
+    {
+        var policy = new AudioOnlinePolicy(0.03f, 0.25, 1);
+        var features = new double[AudioBanditFeatures.Count]; features[0] = 1;
+        var eligible = new[] { 5, 0, 2 };
+        Check(policy.Select(AudioRLPolicyMode.PersonalizedBandit, null, features, eligible).Arm == 0, "First tied action must hold");
+        Check(policy.Select(AudioRLPolicyMode.PersonalizedBandit, null, features, eligible).Arm == 2, "Repeated hold starved equally scored safe action");
+        Check(policy.Select(AudioRLPolicyMode.PersonalizedBandit, null, features, eligible).Arm == 5, "Tie exploration ignored eligible action");
+        Check(policy.Model.UpdateCount == 0, "Exploration attempt fabricated an observation");
+        for (int i = 0; i < 3; i++)
+            Check(policy.Select(AudioRLPolicyMode.PersonalizedBandit, null, features, eligible, false).Arm == 0, "Frozen evaluation explored");
+        policy.Model.Observe(5, features, 3);
+        Check(policy.Select(AudioRLPolicyMode.PersonalizedBandit, null, features, eligible).Arm == 5, "Tie balancing replaced a strictly better score");
+        Check(policy.Select(AudioRLPolicyMode.PersonalizedBandit, null, features, new[] { 0 }).Arm == 0, "Masked action escaped safety gate");
+    }
+
+    private static void OutcomeReasons()
+    {
+        Check(AudioRLTransition.DescribeInvalidOutcome("Invalid or unreliable stress/confidence/quality.") == "Discarded_InputReliability", "Input gate hidden");
+        Check(AudioRLTransition.DescribeInvalidOutcome("Realtime playback gap or dropped PCM; outcome discarded") == "Discarded_PlaybackInterrupted", "Playback cause hidden");
+        Check(AudioRLTransition.DescribeInvalidOutcome("Visual environment changed during audio attribution") == "Discarded_VisualChange", "Visual interference hidden");
+        Check(AudioRLTransition.DescribeInvalidOutcome("No eligible outcome arrived before timeout") == "Discarded_Timeout", "Timeout hidden");
+        Check(AudioRLTransition.DescribeInvalidOutcome("private-user https://secret.invalid/?key=secret") == "Discarded", "Unrecognized details leaked to monitor");
     }
 
     private static void Snapshots()

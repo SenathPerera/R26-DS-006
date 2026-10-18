@@ -38,6 +38,23 @@ namespace AdaptiveAudioVR.RL.Agent
         public string safetyReason;
         public bool usedProductionPhysiology;
 
+        public static string DescribeInvalidOutcome(string reason)
+        {
+            string value = (reason ?? string.Empty).ToLowerInvariant();
+            if (value.Contains("quality") || value.Contains("confidence") || value.Contains("rmssd") || value.Contains("heart rate"))
+                return "Discarded_InputReliability";
+            if (value.Contains("stale") || value.Contains("future") || value.Contains("malformed")) return "Discarded_InputTiming";
+            if (value.Contains("timeout")) return "Discarded_Timeout";
+            if (value.Contains("capability") || value.Contains("domain") || value.Contains("reinitialized")) return "Discarded_ContextChanged";
+            if (value.Contains("visual")) return "Discarded_VisualChange";
+            if (value.Contains("playback") || value.Contains("pcm") || value.Contains("clip") || value.Contains("crossfade")
+                || value.Contains("lyria") || value.Contains("realtime")) return "Discarded_PlaybackInterrupted";
+            if (value.Contains("coordinat") || value.Contains("reservation")) return "Discarded_CoordinationInterrupted";
+            if (value.Contains("session") || value.Contains("mute") || value.Contains("pause") || value.Contains("disabled"))
+                return "Discarded_SessionInterrupted";
+            return "Discarded";
+        }
+
         public AudioRLTransition Snapshot()
         {
             return new AudioRLTransition

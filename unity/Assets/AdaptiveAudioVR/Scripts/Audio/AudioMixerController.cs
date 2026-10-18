@@ -116,6 +116,22 @@ namespace AdaptiveAudioVR.Audio
             IsMeditationPlaybackPaused = false;
         }
 
+        public bool EnsureSessionPlayback()
+        {
+            if (!IsSessionPlaybackStarted || IsMeditationPlaybackPaused || IsMuted || IsCrossfading) return false;
+            bool musicRestarted = RestartStoppedSource(currentMeditationSource);
+            bool ambientRestarted = RestartStoppedSource(ambientSource);
+            return musicRestarted || ambientRestarted;
+        }
+
+        private static bool RestartStoppedSource(AudioSource source)
+        {
+            if (source == null || source.clip == null || source.isPlaying) return false;
+            source.loop = true;
+            source.Play();
+            return true;
+        }
+
         private void Update()
         {
             float fadeAwareSmoothing = Mathf.Lerp(smoothingSpeed * 1.75f, smoothingSpeed * 0.45f, targetParameters.fade);

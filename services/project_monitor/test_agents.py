@@ -181,6 +181,15 @@ class AgentTests(unittest.TestCase):
         self.assertNotIn("ParticipantPseudonym", reporter)
         self.assertIn("observation.CurrentEnvironment", reporter)
         self.assertNotIn("features[", reporter)
+        self.assertIn("AudioRLTransition.DescribeInvalidOutcome(outcome.outcomeReason)", reporter)
+
+    def test_fixed_audio_cancellation_categories_keep_wire_compatibility(self):
+        for category in ("Discarded_InputReliability", "Discarded_InputTiming", "Discarded_Timeout",
+                         "Discarded_ContextChanged", "Discarded_VisualChange", "Discarded_PlaybackInterrupted",
+                         "Discarded_CoordinationInterrupted", "Discarded_SessionInterrupted", "Discarded"):
+            value = sample()
+            value["audio"]["reward"].update(available=True, valid=False, status=category, total=0)
+            self.assertTrue(validate_snapshot(value), category)
 
 
 if __name__ == "__main__":
