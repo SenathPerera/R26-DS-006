@@ -95,6 +95,22 @@ namespace AdaptiveAudioVR.RL.Agent
         private long coordinationLease;
         public AdaptationCoordinator Coordination { get; private set; }
         public bool HasPendingOutcome => pending != null;
+        public bool ResponsiveTesting { get; private set; }
+        public float MinimumInputQuality => ResponsiveTesting
+            ? (float)ResponsiveTestingPreset.MinimumQuality : lowSignalQualityThreshold;
+        public float MinimumInputConfidence => ResponsiveTesting
+            ? (float)ResponsiveTestingPreset.MinimumAudioConfidence : lowConfidenceThreshold;
+        private float ProductionDecisionInterval => ResponsiveTesting
+            ? (float)ResponsiveTestingPreset.DecisionIntervalSeconds : productionMinimumDecisionIntervalSeconds;
+        private float Exploration => ResponsiveTesting
+            ? Mathf.Max(explorationAlpha, (float)ResponsiveTestingPreset.ExplorationCoefficient) : explorationAlpha;
+
+        public void ConfigureResponsiveTesting(bool value)
+        {
+            if (IsInitialized && ResponsiveTesting != value)
+                throw new InvalidOperationException("Select the testing preset before audio initialization.");
+            ResponsiveTesting = value;
+        }
 
         public void BindCoordination(AdaptationCoordinator coordinator)
         {
@@ -154,9 +170,10 @@ namespace AdaptiveAudioVR.RL.Agent
             resumeAfterUtc = 0;
             baseline = new AudioSessionBaseline();
             microActionDelta = Mathf.Min(microActionDelta, maximumActionDelta, maximumActionAcceleration);
-            policy = new AudioOnlinePolicy(microActionDelta, explorationAlpha, ridge);
-            safetyFilter = new AudioRLSafetyFilter(maximumActionDelta, confidenceFreezeThreshold, lowConfidenceThreshold,
-                signalQualityFreezeThreshold, lowSignalQualityThreshold, maximumBaselineDistance,
+            policy = new AudioOnlinePolicy(microActionDelta, Exploration, ridge);
+            safetyFilter = new AudioRLSafetyFilter(maximumActionDelta,
+                ResponsiveTesting ? 0.10f : confidenceFreezeThreshold, MinimumInputConfidence,
+                ResponsiveTesting ? 0.15f : signalQualityFreezeThreshold, MinimumInputQuality, maximumBaselineDistance,
                 maximumActionAcceleration, minimumAmbientMix, maximumMusicMix);
             rewardCalculator = new AudioRLRewardCalculator(rewardWeights, maximumActionDelta);
             replayBuffer = new AudioRLReplayBuffer(replayBufferCapacity);
@@ -231,9 +248,9 @@ namespace AdaptiveAudioVR.RL.Agent
                 resumeAfterUtc = utcNow;
                 return CurrentParameters;
             }
-            if (!AudioOutcomeGate.IsValidWindow(signal, utcNow, lowSignalQualityThreshold, lowConfidenceThreshold, out string invalid))
+            if (!AudioOutcomeGate.IsValidWindow(signal, utcNow, MinimumInputQuality, MinimumInputConfidence, out string invalid))
             {
-                Hold(invalid, signal.signalQuality < lowSignalQualityThreshold
+                Hold(invalid, signal.signalQuality < MinimumInputQuality
                     ? AudioRLSafetyMode.SignalQualityFreeze : AudioRLSafetyMode.ConfidenceFreeze);
                 InvalidatePendingOutcome(invalid);
                 resumeAfterUtc = utcNow;
@@ -277,7 +294,7 @@ namespace AdaptiveAudioVR.RL.Agent
                     && AudioOutcomeGate.CanAttribute(pending.state.signal, signal, pending.eligiblePostStartUtc, lastUsedPostEnd, out _))
                     CompleteOutcome(state);
                 bool freshAfterResume = !signal.hasPhysiologyWindow || signal.windowStart >= resumeAfterUtc;
-                double interval = signal.hasPhysiologyWindow ? productionMinimumDecisionIntervalSeconds : simulationDecisionIntervalSeconds;
+                double interval = signal.hasPhysiologyWindow ? ProductionDecisionInterval : simulationDecisionIntervalSeconds;
                 if (pending == null && adaptiveAllowed && baseline.Count >= Mathf.Max(2, warmupObservationCount)
                     && freshAfterResume && now - lastDecisionTime >= interval && AtTarget())
                     Decide(state);
@@ -286,7 +303,7 @@ namespace AdaptiveAudioVR.RL.Agent
             }
             else if (Coordination != null && pending == null && adaptiveAllowed && AtTarget()
                 && baseline.Count >= Mathf.Max(2, warmupObservationCount)
-                && signal.windowStart >= resumeAfterUtc && now - lastDecisionTime >= productionMinimumDecisionIntervalSeconds)
+                && signal.windowStart >= resumeAfterUtc && now - lastDecisionTime >= ProductionDecisionInterval)
             {
                 // A denied reservation must be retried without waiting for another sensor publication.
                 Decide(BuildState(signal));
@@ -401,7 +418,8 @@ namespace AdaptiveAudioVR.RL.Agent
                 state = pending.state.Snapshot(), proposedPolicyAction = pending.proposal,
                 ruleBaselineAction = pending.mode == AudioRLPolicyMode.RuleBasedAdaptive ? pending.proposal : AudioRLAction.NoChange,
                 finalSafeAction = pending.action, reward = valid ? CurrentRewardBreakdown : null, nextState = next?.Snapshot(),
-                policyMode = pending.mode.ToString(), policyStatus = pending.mode + " / whole controller",
+                policyMode = pending.mode.ToString(), policyStatus = pending.mode + " / whole controller"
+                    + (ResponsiveTesting ? " / " + ResponsiveTestingPreset.Id : string.Empty),
                 controllerMode = CurrentControllerMode.ToString(), safetyMode = pending.safety.safetyMode.ToString(),
                 safetyReason = pending.safety.reason, usedProductionPhysiology = pending.state.isProductionWindow,
                 rewardValid = valid, onlineUpdateApplied = updated, outcomeReason = reason,
@@ -437,13 +455,14 @@ namespace AdaptiveAudioVR.RL.Agent
             lastWindowEnd = lastUsedPostEnd = double.MinValue;
             lastDecisionTime = lastObservationTime = double.NegativeInfinity;
             previousSafeAction = AudioRLAction.NoChange;
-            policy = new AudioOnlinePolicy(microActionDelta, explorationAlpha, ridge);
+            policy = new AudioOnlinePolicy(microActionDelta, Exploration, ridge);
             float[] settings = { microActionDelta, maximumActionDelta, maximumActionAcceleration, maximumBaselineDistance,
-                lowConfidenceThreshold, lowSignalQualityThreshold, minimumAmbientMix, maximumMusicMix,
-                explorationAlpha, ridge, productionMinimumDecisionIntervalSeconds, settlingSeconds, outcomeTimeoutSeconds };
+                MinimumInputConfidence, MinimumInputQuality, minimumAmbientMix, maximumMusicMix,
+                Exploration, ridge, ProductionDecisionInterval, settlingSeconds, outcomeTimeoutSeconds };
             string configuration = JsonUtility.ToJson(rewardWeights) + "|" + string.Join("|", Array.ConvertAll(settings,
                 value => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
             if (Coordination != null) configuration += "|" + AdaptationCoordinator.SchemaVersion;
+            if (ResponsiveTesting) configuration += "|" + ResponsiveTestingPreset.Id;
             persistence = new AudioBanditPersistence(Path.Combine(Application.persistentDataPath, "AudioOnlineModels"),
                 ActiveProfile.userId, environmentId, !production, configuration);
             if (persistPersonalizedModel && !string.IsNullOrWhiteSpace(ActiveProfile.userId))
@@ -490,6 +509,7 @@ namespace AdaptiveAudioVR.RL.Agent
             CurrentPolicyStatus = policyMode == AudioRLPolicyMode.PersonalizedBandit
                 ? $"Personalized LinUCB | {source} | Updates {OnlineUpdateCount} | {(learningEnabled ? "online" : "evaluation frozen")}"
                 : policyMode + " | evaluation only";
+            if (ResponsiveTesting) CurrentPolicyStatus += " | " + ResponsiveTestingPreset.Id;
         }
 
         private static AdaptiveControllerMode ResolveControllerMode(SignalPacket signal) => signal.stress >= 0.65f

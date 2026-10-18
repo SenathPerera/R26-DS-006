@@ -72,6 +72,17 @@ Show-PredictionSnapshot $snapshot
 Assert-True (($script:Report -join "`n") -match 'confidence is below') 'Low confidence was not identified.'
 
 $script:Report.Clear()
+$audio.mode = 'PersonalizedBandit_Testing'
+$script:AgentFixture.visual = @{ mode = 'ContextualBandit_Testing' }
+$script:PredictionFixture.signalQuality = 0.4
+$script:PredictionFixture.stress.confidence = 0.3
+$script:PredictionFixture.windowStart = $epoch - 75
+Show-PredictionSnapshot $snapshot
+$reportText = $script:Report -join "`n"
+Assert-True ($reportText -match 'Unity reports responsive testing') 'Testing mode was not recognized.'
+Assert-True ($reportText -notmatch '\[WARN\]') 'Testing input was compared with production gates or cadence.'
+
+$script:Report.Clear()
 $empty = [pscustomobject]@{ Agent = $null; AgentProbe = $null; Prediction = $null }
 Show-AgentSnapshot $empty
 Show-PredictionSnapshot $empty

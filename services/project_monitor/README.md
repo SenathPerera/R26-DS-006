@@ -113,6 +113,39 @@ older installed Unity player. A `NoChange`/`Hold stable` action is valid; a
 rejected reward does not train either policy. Improve the incoming signal and
 inspect the cancellation trace before changing learning or quality settings.
 
+### Responsive RL Testing
+
+To test the real agents with more permissive inputs, stop Play mode, select the
+scene object with `AdaptiveAudioVrSceneInstaller`, and enable **Responsive Testing**
+under **Testing** in its Inspector. Start a new session. On Quest, enable Unity's
+**Development Build** option and rebuild/install the player; this preset is
+inactive in ordinary release players. Disable the switch and restart the player
+to restore the pilot settings.
+
+| Setting | Pilot Default | Testing |
+| --- | --- | --- |
+| Visual decision/reward quality minimum | 0.50 | 0.35 |
+| Audio input quality minimum | 0.60 | 0.35 |
+| Audio input confidence minimum | 0.45 | 0.20 |
+| Visual/audio decision opportunity interval | 75 s | 15 s |
+| Visual physiology forwarding interval | 60 s | 5 s |
+| Visual reward timeout | 120 s | at least 240 s |
+
+Both agents remain LinUCB policies for the ContextualBandit study condition.
+Exploration is at least 0.50 in testing. The policies have no minimum stress-delta
+trigger, so small changes already enter their context; a change of 0.01 on the
+normalized stress scale can contribute to a reward. `NoChange` and `Hold stable`
+remain valid selections and visible changes are not guaranteed on each input.
+Fifteen seconds is a decision opportunity, not a promise of an action or model
+update: warmup, settling and complete non-overlapping reward windows still apply,
+and the shared coordinator gives only one agent a measurement turn at a time.
+
+The preset creates runtime configuration copies with `responsive-testing-v1`
+identities. Pilot assets and output/action limits stay unchanged; testing model
+identities differ from production, and session/audio logs identify the preset.
+Live-agent badges gain a `_Testing` suffix and the diagnostic script uses the
+testing limits only when the running Unity player reports those badges.
+
 On macOS/Linux, from the repository root:
 
 ```sh

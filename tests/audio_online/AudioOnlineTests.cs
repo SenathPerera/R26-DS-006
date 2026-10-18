@@ -50,6 +50,9 @@ internal static class AudioOnlineTests
             Run("Audio waits for visual reward then learns only its own outcome", CoordinatedAudio);
             Run("Audio retries a blocked turn using the same still-fresh publication", RetryCoordinatedAudio);
             Run("Coordinated audio models do not load independent-controller weights", CoordinatedModelIdentity);
+            Run("Responsive test preset preserves window validation and action limits", ResponsivePreset);
+            Run("Responsive audio admits lower reliability without changing production gates", ResponsiveAudio);
+            Run("Responsive audio still waits for its coordinated clean reward window", ResponsiveAttribution);
             Console.WriteLine("PASS: " + passed + " audio online-learning tests. Runtime tests use explicit Unity test doubles.");
             return 0;
         }
@@ -211,9 +214,10 @@ internal static class AudioOnlineTests
         Check(!AudioOutcomeGate.IsValidWindow(signal, Epoch + 120, 0.6f, 0.45f, out _), "Poor quality accepted");
     }
 
-    private static AudioRLAgent Agent(AudioRLPolicyMode mode = AudioRLPolicyMode.PersonalizedBandit)
+    private static AudioRLAgent Agent(AudioRLPolicyMode mode = AudioRLPolicyMode.PersonalizedBandit, bool responsiveTesting = false)
     {
         var agent = new AudioRLAgent();
+        agent.ConfigureResponsiveTesting(responsiveTesting);
         typeof(AudioRLAgent).GetField("persistPersonalizedModel", BindingFlags.NonPublic | BindingFlags.Instance).SetValue(agent, false);
         agent.SetPolicyMode(mode);
         var p = Parameters();
@@ -424,5 +428,87 @@ internal static class AudioOnlineTests
         }
         Check(late >= 18 && late > early, "Online model failed synthetic contextual-learning sanity test");
         Console.WriteLine("Synthetic sanity check: preferred choices first 20=" + early + ", last 20=" + late + ". This is not participant evidence.");
+    }
+
+    private static void ResponsivePreset()
+    {
+        var physiology = new LaminarVR.AdaptiveMeditation.Physiology.PhysiologyValidationConfiguration(
+            "pilot", 1, 90, 30, 2, 0.001, 0.005, 0.5, 0.5, 8);
+        var testPhysiology = ResponsiveTestingPreset.Apply(physiology);
+        Near(physiology.MinimumDecisionSignalQuality, 0.5);
+        Near(testPhysiology.MinimumDecisionSignalQuality, 0.35);
+        Near(testPhysiology.MinimumRewardSignalQuality, 0.35);
+        Near(testPhysiology.MinimumWindowDurationSeconds, physiology.MinimumWindowDurationSeconds);
+        Near(testPhysiology.StaleAfterSeconds, physiology.StaleAfterSeconds);
+        Near(testPhysiology.MaximumFutureClockSkewSeconds, physiology.MaximumFutureClockSkewSeconds);
+        var timing = ResponsiveTestingPreset.Apply(new LaminarVR.AdaptiveMeditation.Session.SessionTimingConfiguration(
+            "pilot", 1, 120, 900, 150, 75));
+        var coordinator = ResponsiveTestingPreset.Apply(new LaminarVR.AdaptiveMeditation.Application.ProductionCoordinatorConfiguration(
+            "pilot", 1, 60, 3, 1));
+        var reward = ResponsiveTestingPreset.Apply(new LaminarVR.AdaptiveMeditation.Rewards.RewardPipelineConfiguration(
+            "pilot", 1, LaminarVR.AdaptiveMeditation.Physiology.BaselineStandardDeviationMethod.Population,
+            2, 0.01, 5, 3, 5, 120, 1, 0.35, 0.15, 0.1, 0, 2));
+        Check(coordinator.TryValidateCompatibility(timing, testPhysiology, reward, out _), "Testing cadence is incompatible");
+        Near(timing.DecisionIntervalSeconds, 15);
+        Near(timing.AcclimatizationDurationSeconds, 120);
+        Near(coordinator.ExpectedPhysiologyOutputIntervalSeconds, 5);
+        Near(coordinator.SafetyLimits.MaximumTotalVariation, 1);
+        Near(reward.SettlingSeconds, 5);
+        Near(reward.MaximumAttributionWaitSeconds, 240);
+        var model = new LaminarVR.AdaptiveMeditation.Policy.ContextualBandit.LinUcbModelConfiguration("pilot", 1, "f", 2, 1, 0.25);
+        var testingModel = ResponsiveTestingPreset.Apply(model);
+        Check(model.ModelVersion != testingModel.ModelVersion, "Testing visual model shares production identity");
+        Near(testingModel.ExplorationCoefficient, 0.5);
+        Near(model.ExplorationCoefficient, 0.25);
+    }
+
+    private static SignalPacket LowerReliability(double end, long sequence)
+    {
+        var signal = Window(end, sequence, 0.40f);
+        signal.signalQuality = 0.4f;
+        signal.confidence = 0.3f;
+        return signal;
+    }
+
+    private static void ResponsiveAudio()
+    {
+        var production = Agent();
+        var testing = Agent(responsiveTesting: true);
+        Tick(production, 60, LowerReliability(60, 1));
+        Tick(testing, 60, LowerReliability(60, 1));
+        Tick(production, 120, LowerReliability(120, 2));
+        Tick(testing, 120, LowerReliability(120, 2));
+        Check(production.DecisionCount == 0 && production.CurrentSafetyMode == AudioRLSafetyMode.SignalQualityFreeze,
+            "Production input gate was weakened");
+        Check(testing.DecisionCount == 1 && testing.HasPendingOutcome, "Testing rejected an eligible lower-quality window");
+        Tick(production, 180, Window(180, 3));
+        Check(testing.ModelPath != production.ModelPath, "Testing audio model shares production persistence");
+        bool rejected = false;
+        try { testing.ConfigureResponsiveTesting(false); } catch (InvalidOperationException) { rejected = true; }
+        Check(rejected, "Testing preset changed during an initialized session");
+        var bad = LowerReliability(180, 3); bad.signalQuality = 0.1f;
+        Tick(testing, 180, bad);
+        Check(!testing.HasPendingOutcome && testing.OnlineUpdateCount == 0, "Testing learned from unusable input");
+    }
+
+    private static void ResponsiveAttribution()
+    {
+        var coordinator = new AdaptationCoordinator();
+        var agent = Agent(responsiveTesting: true);
+        agent.BindCoordination(coordinator);
+        Tick(agent, 60, LowerReliability(60, 1));
+        Tick(agent, 120, LowerReliability(120, 2));
+        Tick(agent, 121, LowerReliability(120, 2));
+        Tick(agent, 135, LowerReliability(135, 3));
+        Check(agent.DecisionCount == 1 && agent.OnlineUpdateCount == 0,
+            "Short test cadence bypassed pending reward or accepted an overlapping window");
+        var after = LowerReliability(190, 4); after.stress -= 0.01f;
+        Tick(agent, 190, after);
+        Check(agent.OnlineUpdateCount == 1 && coordinator.Status.CompletedTurns == 1,
+            "Small stress change did not produce a valid test-policy reward");
+        Check(agent.CurrentPolicyStatus.Contains(ResponsiveTestingPreset.Id), "Testing status is not identified");
+        Tick(agent, 196, after);
+        Check(agent.DecisionCount == 2 && agent.CurrentFinalSafeAction.MaximumAbsoluteMagnitude > 0,
+            "Real audio exploration did not select a safe control change after learning");
     }
 }

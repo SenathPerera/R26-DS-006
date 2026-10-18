@@ -1,4 +1,5 @@
 using System;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
@@ -46,6 +47,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private bool hasExplicitStudyPolicySelection;
 
         public bool IsInitialized { get; private set; }
+        public bool ResponsiveTesting { get; private set; }
+
+        public void ConfigureResponsiveTesting(bool value)
+        {
+            if (IsInitialized && ResponsiveTesting != value)
+                throw new InvalidOperationException("Select the testing preset before session initialization.");
+            ResponsiveTesting = value;
+        }
 
         public string LastValidationError { get; private set; } = string.Empty;
 
@@ -265,6 +274,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 {
                     return Fail(linUcbError, out validationError);
                 }
+                if (ResponsiveTesting)
+                    linUcbConfiguration = ResponsiveTestingPreset.Apply(linUcbConfiguration);
             }
 
             if (!StudyPolicyFactory.TryCreate(

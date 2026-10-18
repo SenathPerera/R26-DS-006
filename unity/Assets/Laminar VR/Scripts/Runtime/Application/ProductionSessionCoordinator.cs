@@ -116,6 +116,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         public event Action<SessionPhaseTransition> PhaseChanged;
 
         public AdaptationCoordinator SharedAdaptation { get; private set; }
+        public bool ResponsiveTesting { get; private set; }
+
+        public void ConfigureResponsiveTesting(bool value)
+        {
+            if (IsInitialized && ResponsiveTesting != value)
+                throw new InvalidOperationException("Select the testing preset before session initialization.");
+            ResponsiveTesting = value;
+        }
 
         public AdaptationCoordinator EnableAudioCoordination()
         {
@@ -521,6 +529,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             QueuePerformanceTelemetry("session_initialized");
             var sessionConfigurationFields = new List<TelemetryField>
             {
+                    TelemetryField.Boolean("responsive_testing", ResponsiveTesting),
                     TelemetryField.String(
                         "coordinator_configuration_id",
                         coordinatorConfiguration.ConfigurationId),
@@ -1050,6 +1059,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                     out var coordinatorError))
             {
                 return Fail(coordinatorError, out validationError);
+            }
+
+            if (ResponsiveTesting)
+            {
+                timing = ResponsiveTestingPreset.Apply(timing);
+                physiologyValidation = ResponsiveTestingPreset.Apply(physiologyValidation);
+                rewardConfiguration = ResponsiveTestingPreset.Apply(rewardConfiguration);
+                coordinatorConfiguration = ResponsiveTestingPreset.Apply(coordinatorConfiguration);
             }
 
             stabilizationSelector = new StabilizationStateSelector(

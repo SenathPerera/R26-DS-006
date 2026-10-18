@@ -151,6 +151,7 @@ namespace AdaptiveAudioVR.Integration
             var environment = visual != null ? visual.EnvironmentManager : null;
             result.available = visual != null && visual.IsInitialized && environment != null;
             result.mode = visual != null ? visual.StudyPolicyMode.ToString() : "unknown";
+            if (visual != null && visual.ResponsiveTesting) result.mode += "_Testing";
             result.state = coordinator != null ? coordinator.Phase.ToString() : "unknown";
             if (!result.available) return result;
             result.applied = Vector(environment.CurrentState);
@@ -224,6 +225,7 @@ namespace AdaptiveAudioVR.Integration
                 && audioBootstrap.RelaySessionId == relay.CurrentConfiguration.SessionId;
             if (!result.available) return result;
             result.mode = agent.CurrentPolicyMode.ToString();
+            if (agent.ResponsiveTesting) result.mode += "_Testing";
             result.state = !audioBootstrap.IsSessionRunning ? "Prepared"
                 : mixer.IsMuted ? "Muted" : mixer.IsMeditationPlaybackPaused ? "Paused"
                 : !mixer.IsMeditationPlaying ? "NotPlaying" : agent.CurrentSafetyMode.ToString();

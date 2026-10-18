@@ -26,9 +26,34 @@ internal static class CoordinationTests
         run("Visual policy reserves its turn and rejects cancelled reward updates", VisualPolicy);
         run("Visual exception releases its reservation", VisualException);
         run("Late visual completion cannot train or release a newer audio turn", LateVisualCompletion);
+        run("Responsive visual bandit admits lower quality and rewards small stress changes", ResponsiveVisual);
     }
 
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
+
+    private static void ResponsiveVisual()
+    {
+        var production = new VisualHarness(new AdaptationCoordinator());
+        production.AddWindow(100, 100, 0.4);
+        Check(production.Decide(100).ResultCode == PolicyDecisionCycleResultCode.SkippedPhysiologyUnavailable,
+            "Production visual quality gate was weakened");
+        var coordination = new AdaptationCoordinator();
+        var testing = new VisualHarness(coordination, responsiveTesting: true);
+        testing.AddWindow(100, 100, 0.4);
+        Check(testing.Decide(100).ResultCode == PolicyDecisionCycleResultCode.RewardWindowOpened,
+            "Testing visual input was rejected");
+        testing.AddWindow(160, 160, 0.4, 1.97);
+        Check(testing.Resolve(160).ResultCode == PolicyRewardCycleResultCode.Waiting,
+            "Testing visual reward accepted a settling-overlapping window");
+        testing.AddWindow(170, 170, 0.4, 1.97);
+        Check(testing.Resolve(170).ResultCode == PolicyRewardCycleResultCode.RewardApplied
+            && testing.Policy.CaptureState().ModelUpdateCount == 1 && coordination.Status.CompletedTurns == 1,
+            "Testing visual bandit failed to learn from a normalized 0.01 stress change");
+        var next = testing.Decide(176);
+        Check(next.ResultCode == PolicyDecisionCycleResultCode.TransitionStarted
+            && next.Validation.HasValue && next.Validation.Value.ExecutedAction != EnvironmentAction.NoChange,
+            "Real visual exploration did not select a safe control change after learning");
+    }
     private static long Acquire(AdaptationCoordinator c, AdaptationOwner owner, double end = 100, double now = 100)
     {
         Check(c.TryAcquire(owner, owner.ToString(), end - 60, end, now, now, 240, out var lease), "Reservation denied");
@@ -177,20 +202,23 @@ internal static class CoordinationTests
         private readonly PhysiologyStateBuffer buffer;
         private int sequence;
 
-        public VisualHarness(AdaptationCoordinator coordination)
+        public VisualHarness(AdaptationCoordinator coordination, bool responsiveTesting = false)
         {
             var features = new PolicyFeatureVectorBuilder();
+            var model = new LinUcbModelConfiguration("bandit", 1, features.FeatureSchemaVersion, features.FeatureCount, 1, .1);
+            if (responsiveTesting) model = ResponsiveTestingPreset.Apply(model);
             Check(StudyPolicyFactory.TryCreate(StudyPolicyMode.ContextualBandit,
                 new RuleBasedPolicyConfiguration("rules", 1, RuleActivationMode.WorseningStressTrend, 2, .1, .05),
-                new LinUcbModelConfiguration("bandit", 1, features.FeatureSchemaVersion, features.FeatureCount, 1, .1),
+                model,
                 features, out Policy, out _), "Cannot create visual bandit");
             var range = new NormalizedRange(.2f, .8f);
             var state = new EnvironmentState(.5f, .5f, .5f, .5f, .5f);
             var scene = new SceneEnvironmentProfile("test", "Test", state,
                 new EnvironmentStateLimits(range, range, range, range, range),
                 new EnvironmentActionStepConfiguration(.1f, .1f, .1f, .1f, .1f), 2, 0);
-            buffer = new PhysiologyStateBuffer(new PhysiologyValidationConfiguration("physiology", 1,
-                90, 1, 0, 0, .01, .8, .8, 8));
+            var validation = new PhysiologyValidationConfiguration("physiology", 1,
+                90, 1, 0, 0, .01, .8, .8, 8);
+            buffer = new PhysiologyStateBuffer(responsiveTesting ? ResponsiveTestingPreset.Apply(validation) : validation);
             var reward = new RewardPipelineConfiguration("reward", 1, BaselineStandardDeviationMethod.Population,
                 3, .01, 3, 3, 5, 240, 1, 0, 0, .1, 0, 1);
             Controller = new PolicyController(Policy, new ActionSafetyValidator(),
@@ -203,11 +231,11 @@ internal static class CoordinationTests
                 { Coordination = coordination };
         }
 
-        public void AddWindow(double end, double mono)
+        public void AddWindow(double end, double mono, double quality = .95, double stress = 2)
         {
             var window = new PhysiologyWindow(end, end - 60, end, 75, 35, 40,
                 new StressDecision(StressDecisionMode.Point, 2, null, null, "moderate", .9, false,
-                    new StressProbabilityVector(.1, .2, .6, .1), 2), .95);
+                    new StressProbabilityVector(.1, .2, .6, .1), stress), quality);
             Check(buffer.Ingest(window, end, mono).Accepted, "Physiology rejected");
         }
         public PolicyDecisionCycleResult Decide(double now) => Controller.ProcessDecisionAsync("visual-" + (++sequence),

@@ -269,11 +269,16 @@ function Show-RLConfiguration {
     $physiologyProfile = 'unity/Assets/Laminar VR/Configuration/Physiology/ComponentBPhysiologyValidationProfile.asset'
     $rewardProfile = 'unity/Assets/Laminar VR/Configuration/Rewards/AdaptiveVrRewardPipelineProfile.asset'
     $coordinatorProfile = 'unity/Assets/Laminar VR/Configuration/Application/AdaptiveVrProductionCoordinatorProfile.asset'
+    $testingPreset = 'unity/Assets/Laminar VR/Scripts/Core/Coordination/ResponsiveTestingPreset.cs'
     $script:AudioMinimumQuality = Get-SourceNumber $audioSource 'lowSignalQualityThreshold' -CSharp
     $script:AudioMinimumConfidence = Get-SourceNumber $audioSource 'lowConfidenceThreshold' -CSharp
     $script:VisualForwardInterval = Get-SourceNumber $coordinatorProfile 'expectedPhysiologyOutputIntervalSeconds'
     $script:VisualSettling = Get-SourceNumber $rewardProfile 'settlingSeconds'
     $script:VisualRewardTimeout = Get-SourceNumber $rewardProfile 'maximumAttributionWaitSeconds'
+    $script:TestingMinimumQuality = Get-SourceNumber $testingPreset 'MinimumQuality' -CSharp
+    $script:TestingMinimumConfidence = Get-SourceNumber $testingPreset 'MinimumAudioConfidence' -CSharp
+    $script:TestingForwardInterval = Get-SourceNumber $testingPreset 'ForwardIntervalSeconds' -CSharp
+    $script:TestingRewardTimeout = Get-SourceNumber $testingPreset 'RewardTimeoutSeconds' -CSharp
     Add-Line ''
     Add-Line '--- RL limits in this checkout ---'
     Add-Line '[INFO] These are source defaults/profile values. Inspector overrides and an older installed Unity build can differ.'
@@ -286,6 +291,9 @@ function Show-RLConfiguration {
         (Format-Value (Get-SourceNumber $physiologyProfile 'minimumRewardSignalQuality')),
         (Format-Value $script:VisualForwardInterval), (Format-Value $script:VisualSettling),
         (Format-Value $script:VisualRewardTimeout))
+    Add-Line ('[DATA] Optional responsive testing preset: quality={0}; audio confidence={1}; visual forward interval={2}s; visual reward timeout={3}s. Active only when Unity reports a _Testing policy mode.' -f
+        (Format-Value $script:TestingMinimumQuality), (Format-Value $script:TestingMinimumConfidence),
+        (Format-Value $script:TestingForwardInterval), (Format-Value $script:TestingRewardTimeout))
 }
 
 function Show-PredictionSnapshot {
@@ -301,25 +309,34 @@ function Show-PredictionSnapshot {
     $span = if ($null -ne $start -and $null -ne $end) { (Get-Number $end) - (Get-Number $start) } else { $null }
     $quality = Get-NestedValue $prediction @('signalQuality')
     $confidence = Get-NestedValue $prediction @('stress', 'confidence')
+    $audioTesting = [string](Get-NestedValue $Snapshot.Agent @('audio', 'mode')) -like '*_Testing'
+    $visualTesting = [string](Get-NestedValue $Snapshot.Agent @('visual', 'mode')) -like '*_Testing'
+    $audioQuality = if ($audioTesting) { $script:TestingMinimumQuality } else { $script:AudioMinimumQuality }
+    $audioConfidence = if ($audioTesting) { $script:TestingMinimumConfidence } else { $script:AudioMinimumConfidence }
+    $forwardInterval = if ($visualTesting) { $script:TestingForwardInterval } else { $script:VisualForwardInterval }
+    $rewardTimeout = if ($visualTesting) { $script:TestingRewardTimeout } else { $script:VisualRewardTimeout }
     Add-Line ('[DATA] Latest B prediction (process-wide): quality={0}; confidence margin={1}; stress mode={2}; window span={3}s; window age={4}' -f
         (Format-Value $quality), (Format-Value $confidence),
         (Format-Value (Get-NestedValue $prediction @('stress', 'mode'))),
         (Format-Value $span), (Format-Age $end))
     Add-Line '[INFO] Quality is the fraction of heartbeat intervals accepted before repair. Confidence is the model probability margin, not a clinical accuracy percentage.'
-    if ($null -ne $quality -and $null -ne $script:AudioMinimumQuality -and (Get-Number $quality) -lt $script:AudioMinimumQuality) {
+    if ($audioTesting -or $visualTesting) {
+        Add-Line '[INFO] Unity reports responsive testing. Comparison limits below use the testing preset from this checkout.'
+    }
+    if ($null -ne $quality -and $null -ne $audioQuality -and (Get-Number $quality) -lt $audioQuality) {
         Add-Check 'WARN' 'Latest B quality is below the audio source minimum. Inspect finger contact, movement and PPG acquisition; confirm the Unity runtime gate in the trace.'
     }
-    if ($null -ne $confidence -and $null -ne $script:AudioMinimumConfidence -and (Get-Number $confidence) -lt $script:AudioMinimumConfidence) {
+    if ($null -ne $confidence -and $null -ne $audioConfidence -and (Get-Number $confidence) -lt $audioConfidence) {
         Add-Check 'WARN' 'Latest B confidence is below the audio source minimum; that input cannot open an audio learning turn under those settings.'
     }
     if ($null -ne $span) {
         if ($span -lt 30 -or $span -gt 120) {
             Add-Check 'WARN' 'Latest B window is outside the audio production window duration range of 30-120 seconds.'
         }
-        if ($null -ne $script:VisualSettling -and $null -ne $script:VisualForwardInterval -and $null -ne $script:VisualRewardTimeout) {
-            $budget = $span + $script:VisualSettling + $script:VisualForwardInterval
-            Add-Line ('[DATA] Conservative visual post-window budget: {0:0.0}s (span + settling + up to one forwarding interval); configured timeout={1}s.' -f $budget, $script:VisualRewardTimeout)
-            if ($budget -gt $script:VisualRewardTimeout) {
+        if ($null -ne $script:VisualSettling -and $null -ne $forwardInterval -and $null -ne $rewardTimeout) {
+            $budget = $span + $script:VisualSettling + $forwardInterval
+            Add-Line ('[DATA] Conservative visual post-window budget: {0:0.0}s (span + settling + up to one forwarding interval); configured timeout={1}s.' -f $budget, $rewardTimeout)
+            if ($budget -gt $rewardTimeout) {
                 Add-Check 'WARN' 'A clean visual post-window may arrive after the reward deadline at this cadence. This is a timing risk; the trace is needed to confirm an actual timeout.'
             }
         }

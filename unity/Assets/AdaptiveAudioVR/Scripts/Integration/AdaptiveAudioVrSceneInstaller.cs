@@ -45,6 +45,10 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private bool requireGeneratedMeditationBeforeSession = true;
         [SerializeField] private AudioRLPolicyMode audioStudyCondition = AudioRLPolicyMode.PersonalizedBandit;
 
+        [Header("Testing")]
+        [Tooltip("Lower input gates and faster decision opportunities for both RL agents. Only active in the Editor or a Development Build. Select before starting a session.")]
+        [SerializeField] private bool responsiveTesting = false;
+
         [Header("StreamingAssets Files")]
         [SerializeField] private string preferenceConfigFileName = "sample_user_preferences.json";
         [SerializeField] private string importedPolicyFileName = "ppo_seed_37_unity_policy.json";
@@ -98,6 +102,14 @@ namespace AdaptiveAudioVR.Integration
 
             RLPersonalizationAgent rlPersonalizationAgent = GetOrAddComponent<RLPersonalizationAgent>(controllerSystem);
             AudioRLAgent audioRLAgent = GetOrAddComponent<AudioRLAgent>(controllerSystem);
+            bool useTesting = responsiveTesting && (Application.isEditor || Debug.isDebugBuild);
+            audioRLAgent.ConfigureResponsiveTesting(useTesting);
+            FindAnyObjectByType<ApplicationBootstrap>()?.ConfigureResponsiveTesting(useTesting);
+            FindAnyObjectByType<ProductionSessionCoordinator>()?.ConfigureResponsiveTesting(useTesting);
+            if (responsiveTesting && !useTesting)
+                Debug.LogWarning("[MindSync] Responsive testing requires the Editor or a Development Build.", this);
+            if (useTesting)
+                Debug.LogWarning("[MindSync] Responsive RL testing is active; test models and configuration are separate from pilot settings.", this);
             AudioRLTransitionLogger transitionLogger = GetOrAddComponent<AudioRLTransitionLogger>(controllerSystem);
             RLAdaptiveController rlAdaptiveController = GetOrAddComponent<RLAdaptiveController>(controllerSystem);
             LyriaPromptBuilder lyriaPromptBuilder = GetOrAddComponent<LyriaPromptBuilder>(controllerSystem);
