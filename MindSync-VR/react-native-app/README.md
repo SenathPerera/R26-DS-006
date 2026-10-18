@@ -39,6 +39,11 @@ npm install
 `npm install` also generates the local TypeScript environment module. The
 generated file and `.env` are ignored by Git.
 
+Copy `.env.example` to `.env` and set `PILOT_BACKEND_HOST` to the Windows
+PC's current hostname or LAN IPv4 address. Do not include a protocol or port.
+The app derives relay HTTP/WebSocket, Component B, and Component D endpoints
+from that one host so a physical phone never treats itself as the backend.
+
 Create `android/local.properties` if Android Studio has not created it:
 
 ```properties
@@ -64,6 +69,11 @@ Build an ARM64 APK with the JavaScript bundle embedded:
 ```bash
 npm run build:android:release
 ```
+
+The release build fails before Gradle starts if `PILOT_BACKEND_HOST` is absent
+or points at loopback. Internal LAN research builds use HTTP/WS and therefore
+require the phone and backend PC to share a network. Public distribution must
+replace this pilot transport with deployed HTTPS/WSS endpoints.
 
 Generated Gradle output:
 
@@ -290,11 +300,14 @@ Questionnaire templates support branching, session-linked responses, local compl
 
 The voice flow preserves the current branch's pre/environment/VR/post/report stages and checks Component D health through `src/services/api/componentDService.ts`. Native microphone recording and server voice-turn transport still need to be ported from the Kotlin `AudioRecord` implementation before voice inference is production-complete; the UI does not fabricate voice analysis results.
 
-For a USB-connected Android phone during local Component D development:
+Older builds used a phone-local `http://localhost:8010` URL and required:
 
 ```bash
 adb reverse tcp:8010 tcp:8010
 ```
+
+Current builds use `PILOT_BACKEND_HOST` for Component D as well, so this reverse
+rule is no longer required when the phone can reach the backend PC over Wi-Fi.
 
 ## Unity Integration
 

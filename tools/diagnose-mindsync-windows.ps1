@@ -557,6 +557,7 @@ Add-Line ''
 Add-Line '--- Source endpoint configuration ---'
 $configuredHosts = New-Object 'System.Collections.Generic.List[object]'
 $mobileEnvironment = Join-Path $RepoRoot 'MindSync-VR\react-native-app\src\config\environment.ts'
+$generatedMobileEnvironment = Join-Path $RepoRoot 'MindSync-VR\react-native-app\src\config\generatedEnvironment.ts'
 $unityProfile = Join-Path $RepoRoot 'unity\Assets\Laminar VR\Configuration\Networking\LocalDevelopmentNetworkProfile.asset'
 
 if (Test-Path -LiteralPath $mobileEnvironment) {
@@ -574,6 +575,27 @@ if (Test-Path -LiteralPath $mobileEnvironment) {
 }
 else {
     Add-Check 'WARN' 'Mobile environment source file was not found under the supplied repository root.'
+}
+
+if (Test-Path -LiteralPath $generatedMobileEnvironment) {
+    $generatedMobileText = Get-Content -LiteralPath $generatedMobileEnvironment -Raw
+    $pilotHostMatch = [regex]::Match(
+        $generatedMobileText,
+        '[''"]?pilotBackendHost[''"]?\s*:\s*[''"]([^''"]*)[''"]'
+    )
+    if ($pilotHostMatch.Success -and -not [string]::IsNullOrWhiteSpace($pilotHostMatch.Groups[1].Value)) {
+        [void]$configuredHosts.Add([pscustomobject]@{
+            Name = 'Mobile generated release config'
+            Host = $pilotHostMatch.Groups[1].Value
+        })
+        Add-Check 'PASS' 'PILOT_BACKEND_HOST is present in the generated mobile configuration.'
+    }
+    else {
+        Add-Check 'WARN' 'PILOT_BACKEND_HOST is missing from the generated mobile configuration; standalone release builds will fail closed.'
+    }
+}
+else {
+    Add-Check 'WARN' 'Generated mobile configuration is missing. Run npm run prepare:env in react-native-app.'
 }
 
 if (Test-Path -LiteralPath $unityProfile) {

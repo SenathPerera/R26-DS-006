@@ -21,6 +21,27 @@ def services(session=None):
 
 
 class FlowTests(unittest.TestCase):
+    def test_missing_mobile_release_backend_is_actionable(self):
+        collector = monitor.Collector()
+        collector.services = services()
+        collector.network = {
+            "configuredHosts": [],
+            "localAddresses": [],
+            "mobileReleaseBackendConfigured": False,
+        }
+        flow = collector.snapshot()
+        self.assertTrue(any(
+            alert["title"] == "Mobile release backend is not configured"
+            for alert in flow["alerts"]
+        ))
+
+        collector.network["mobileReleaseBackendConfigured"] = True
+        flow = collector.snapshot()
+        self.assertFalse(any(
+            alert["title"] == "Mobile release backend is not configured"
+            for alert in flow["alerts"]
+        ))
+
     def test_health_is_not_a_working_flow(self):
         flow = build_flow(services(), now=100)
         states = {s["id"]: s["status"] for s in flow["stages"]}

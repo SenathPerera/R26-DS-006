@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "prepare:env": "node scripts/generate-environment.mjs",
+    "prepare:env:release": "node scripts/generate-environment.mjs --require-pilot-backend",
     "postinstall": "npm run prepare:env",
     "preandroid": "npm run prepare:env",
     "android": "react-native run-android",
@@ -17,7 +18,7 @@
     "test": "jest",
     "pretypecheck": "npm run prepare:env",
     "typecheck": "tsc --noEmit",
-    "prebuild:android:release": "npm run prepare:env",
+    "prebuild:android:release": "npm run prepare:env:release",
     "build:android:release": "cd android && ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a"
   },
   "dependencies": {

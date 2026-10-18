@@ -69,7 +69,11 @@ def probe(spec):
 
 def network_configuration():
     entries = []
-    candidates = [(ROOT / "MindSync-VR/react-native-app/src/config/generatedEnvironment.ts", r'pilotBackendHost:\s*[\x27\"]([^\x27\"]+)'),
+    generated_config = ROOT / "MindSync-VR/react-native-app/src/config/generatedEnvironment.ts"
+    generated_text = generated_config.read_text(encoding="utf-8-sig") if generated_config.is_file() else ""
+    pilot_match = re.search(r'[\x27\"]?pilotBackendHost[\x27\"]?\s*:\s*[\x27\"]([^\x27\"]*)', generated_text)
+    pilot_backend_host = pilot_match.group(1) if pilot_match else ""
+    candidates = [(generated_config, r'[\x27\"]?pilotBackendHost[\x27\"]?\s*:\s*[\x27\"]([^\x27\"]+)'),
                   (ROOT / "MindSync-VR/react-native-app/src/config/environment.ts", r"developmentBackendHost\s*=\s*[\x27\"]([^\x27\"]+)")]
     candidates += [(p, r"(?:backendHost|serverHost|host):\s*(\S+)") for p in (ROOT / "unity/Assets").glob("**/*LocalDevelopmentNetwork*.asset")]
     for path, pattern in candidates:
@@ -81,11 +85,8 @@ def network_configuration():
         addresses = sorted({a[4][0] for a in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET)})
     except OSError:
         addresses = []
-    mobile_config = ROOT / "MindSync-VR/react-native-app/src/config/environment.ts"
-    mobile_text = mobile_config.read_text(encoding="utf-8") if mobile_config.is_file() else ""
     return {"configuredHosts": entries, "localAddresses": addresses,
-            "mobilePlaceholderEndpoints": ".invalid" in mobile_text,
-            "mobileLocalhostVoice": "http://localhost:8010" in mobile_text}
+            "mobileReleaseBackendConfigured": bool(pilot_backend_host)}
 
 
 class Collector:
@@ -113,12 +114,9 @@ class Collector:
         if len({h["host"] for h in hosts}) > 1:
             flow["alerts"].append({"severity": "warning", "title": "Backend hosts differ in source configuration",
                                    "detail": "Check the network panel. Source settings may not match installed app builds; no settings have been changed."})
-        if self.network.get("mobilePlaceholderEndpoints"):
-            flow["alerts"].append({"severity": "warning", "title": "Mobile release endpoints contain placeholders",
-                                   "detail": "environment.ts contains .invalid release URLs. Verify the installed APK's endpoint configuration before device testing."})
-        if self.network.get("mobileLocalhostVoice"):
-            flow["alerts"].append({"severity": "warning", "title": "Mobile voice endpoint points at localhost",
-                                   "detail": "On a physical phone localhost is the phone, not this PC, unless an explicit tunnel/reverse port is configured."})
+        if not self.network.get("mobileReleaseBackendConfigured"):
+            flow["alerts"].append({"severity": "warning", "title": "Mobile release backend is not configured",
+                                   "detail": "Set PILOT_BACKEND_HOST in react-native-app/.env, regenerate the environment, rebuild the APK, and restart this monitor."})
         addresses = self.network.get("localAddresses", [])
         if addresses and any(re.fullmatch(r"\d+\.\d+\.\d+\.\d+", h["host"]) and h["host"] not in addresses and h["host"] != "127.0.0.1" for h in hosts):
             flow["alerts"].append({"severity": "warning", "title": "Configured backend IP is not a current PC address",
