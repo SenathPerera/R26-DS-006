@@ -9,7 +9,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
     {
         private const string TemplePondPilotProfilePath =
             "Assets/Laminar VR/Configuration/Environment/"
-            + "TemplePondSceneParameterProfile.asset";
+            + "TemplePondSceneParameterProfile_VisualV3.asset";
 
         private const string ApprovedProfileJson = @"{
             ""sceneId"": ""temple-pond"",
@@ -102,7 +102,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
             Assert.That(
                 asset.ResearchConfigurationApproved,
                 Is.True,
-                "ADR-010 approves this profile for provisional pilot runtime use.");
+                "The ADR-017 visual amendment approves this engineering profile for runtime use.");
             Assert.That(
                 asset.TryCreateRuntimeProfile(
                     out var runtimeProfile,

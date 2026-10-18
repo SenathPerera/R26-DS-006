@@ -1001,6 +1001,7 @@ MonoBehaviour:
   aggregateParameterDeltaThreshold: 0.12
   minimumBufferedAudioSeconds: 0.35
   restoreCrossfadeSeconds: 1.25
+  generationPlaybackGuardSeconds: 2
   restorePreviousClipOnStop: 1
 --- !u!114 &419444992
 MonoBehaviour:
@@ -1082,8 +1083,6 @@ MonoBehaviour:
   meditationReverb: {fileID: 931826292}
   requireExplicitSessionStart: 1
   smoothingSpeed: 4
-  minPitch: 0.92
-  maxPitch: 1.08
   minLowPassCutoff: 1200
   maxLowPassCutoff: 18000
   dryReverbLevel: -7000
@@ -6217,7 +6216,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   sceneId: temple-pond
-  mappingProfile: {fileID: 11400000, guid: f9b377d5e6390bd4eb14480f45c342ca, type: 2}
+  mappingProfile: {fileID: 11400000, guid: 37a6408fea494672b7b5884e5159ec20, type: 2}
   mainDirectionalLight: {fileID: 856080612}
   pondWaterRenderer: {fileID: 633469378}
   globalColorVolume: {fileID: 1414086897}
@@ -6267,7 +6266,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   initializeOnStart: 0
-  sceneParameterProfile: {fileID: 11400000, guid: ca6dfc59d1ea84c468ea22c46f4619f5, type: 2}
+  sceneParameterProfile: {fileID: 11400000, guid: eddef3de87d342e6a0bc5c00aaf51833, type: 2}
   sceneAdapterComponent: {fileID: 1414086895}
   requireExplicitStudyPolicySelection: 1
   studyPolicyMode: 0
@@ -9400,6 +9399,7 @@ MonoBehaviour:
   autoCheckRealtimeCapabilityOnStart: 1
   requireGeneratedMeditationBeforeSession: 1
   audioStudyCondition: 1
+  responsiveTesting: 1
   preferenceConfigFileName: sample_user_preferences.json
   importedPolicyFileName: ppo_seed_37_unity_policy.json
 --- !u!4 &2147483202

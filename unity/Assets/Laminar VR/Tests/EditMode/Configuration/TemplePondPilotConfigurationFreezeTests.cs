@@ -39,10 +39,41 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 Is.EqualTo("mindsync-session-context-v1"));
         }
 
+        [Test]
+        public void PreviousVisualProfiles_RetainPilotV2Values()
+        {
+            var sceneAsset = Load<SceneParameterProfile>(
+                "Environment/TemplePondSceneParameterProfile.asset");
+            Assert.That(sceneAsset.TryCreateRuntimeProfile(
+                out var sceneProfile, out var sceneError), Is.True, sceneError);
+            Assert.That(sceneProfile.ActionSteps.Illumination,
+                Is.EqualTo(0.1d).Within(Tolerance));
+            Assert.That(sceneProfile.ActionSteps.Warmth,
+                Is.EqualTo(0.25d).Within(Tolerance));
+            Assert.That(sceneProfile.ActionSteps.AtmosphericSoftness,
+                Is.EqualTo(0.3d).Within(Tolerance));
+            Assert.That(sceneProfile.ActionSteps.ColorRichness,
+                Is.EqualTo(0.2d).Within(Tolerance));
+            Assert.That(sceneProfile.ActionSteps.AmbientMotion,
+                Is.EqualTo(0.2d).Within(Tolerance));
+            Assert.That(sceneProfile.TransitionDurationSeconds,
+                Is.EqualTo(4.12d).Within(Tolerance));
+
+            var mappingAsset = Load<TemplePondEnvironmentMappingProfile>(
+                "Environment/TemplePondEnvironmentMappingProfile.asset");
+            Assert.That(mappingAsset.TryCreateRuntimeMapping(
+                out var mapping, out var mappingError), Is.True, mappingError);
+            Assert.That(mapping.ConfigurationId,
+                Is.EqualTo("temple-pond-mapping-pilot-v3"));
+            Assert.That(mapping.ConfigurationVersion, Is.EqualTo(3));
+            AssertVector(mapping.SaturationRange, -20d, 20d);
+            AssertVector(mapping.WaterMotionRange, 0.2d, 0.45d);
+        }
+
         private static void AssertSceneProfile()
         {
             var asset = Load<SceneParameterProfile>(
-                "Environment/TemplePondSceneParameterProfile.asset");
+                "Environment/TemplePondSceneParameterProfile_VisualV3.asset");
             Assert.That(
                 asset.TryCreateRuntimeProfile(
                     out var profile,
@@ -64,22 +95,22 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
             AssertRange(profile.Limits.AmbientMotion, 0d, 1d);
             Assert.That(
                 profile.ActionSteps.Illumination,
-                Is.EqualTo(0.1d).Within(Tolerance));
+                Is.EqualTo(0.15d).Within(Tolerance));
             Assert.That(
                 profile.ActionSteps.Warmth,
-                Is.EqualTo(0.25d).Within(Tolerance));
+                Is.EqualTo(0.35d).Within(Tolerance));
             Assert.That(
                 profile.ActionSteps.AtmosphericSoftness,
-                Is.EqualTo(0.3d).Within(Tolerance));
+                Is.EqualTo(0.4d).Within(Tolerance));
             Assert.That(
                 profile.ActionSteps.ColorRichness,
-                Is.EqualTo(0.2d).Within(Tolerance));
+                Is.EqualTo(0.3d).Within(Tolerance));
             Assert.That(
                 profile.ActionSteps.AmbientMotion,
-                Is.EqualTo(0.2d).Within(Tolerance));
+                Is.EqualTo(0.3d).Within(Tolerance));
             Assert.That(
                 profile.TransitionDurationSeconds,
-                Is.EqualTo(4.12d).Within(Tolerance));
+                Is.EqualTo(6d).Within(Tolerance));
             Assert.That(
                 profile.MinimumSecondsBetweenActions,
                 Is.Zero.Within(Tolerance));
@@ -88,7 +119,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
         private static void AssertMappingProfile()
         {
             var asset = Load<TemplePondEnvironmentMappingProfile>(
-                "Environment/TemplePondEnvironmentMappingProfile.asset");
+                "Environment/TemplePondEnvironmentMappingProfile_v4.asset");
             Assert.That(
                 asset.TryCreateRuntimeMapping(
                     out var mapping,
@@ -97,8 +128,8 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 validationError);
             Assert.That(
                 mapping.ConfigurationId,
-                Is.EqualTo("temple-pond-mapping-pilot-v3"));
-            Assert.That(mapping.ConfigurationVersion, Is.EqualTo(3));
+                Is.EqualTo("temple-pond-mapping-pilot-v4"));
+            Assert.That(mapping.ConfigurationVersion, Is.EqualTo(4));
             AssertVector(mapping.DirectionalLightIntensityRange, 0.6d, 9d);
             AssertColor(
                 mapping.CoolDirectionalLightColor,
@@ -131,9 +162,9 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
                 0.74509805d,
                 0.77254903d,
                 1d);
-            AssertVector(mapping.SaturationRange, -20d, 20d);
+            AssertVector(mapping.SaturationRange, -30d, 30d);
             Assert.That(mapping.WaterMotionProperty, Is.EqualTo("_RippleMotion"));
-            AssertVector(mapping.WaterMotionRange, 0.2d, 0.45d);
+            AssertVector(mapping.WaterMotionRange, 0.1d, 0.6d);
         }
 
         private static void AssertPreferenceProfile()
