@@ -39,6 +39,23 @@ namespace AdaptiveAudioVR.Audio
         private int readIndex;
         private int bufferedSamples;
         private AudioClip streamingClip;
+        private readonly AudioPlaybackMarker playbackMarker = new AudioPlaybackMarker();
+        private long writeSequence;
+        private long readSequence;
+
+        public void TrackPlaybackRequest(string requestId, float guardSeconds)
+        {
+            lock (bufferLock) playbackMarker.Begin(requestId, (long)(Math.Max(0, guardSeconds) * sampleRate * channels));
+        }
+
+        public bool HasRenderedRequest(string requestId, out bool lost)
+        {
+            lock (bufferLock)
+            {
+                lost = playbackMarker.RequestId == requestId && playbackMarker.Lost;
+                return playbackMarker.RequestId == requestId && playbackMarker.Rendered && !lost;
+            }
+        }
 
         private void Awake()
         {
@@ -75,6 +92,8 @@ namespace AdaptiveAudioVR.Audio
                 writeIndex = 0;
                 readIndex = 0;
                 bufferedSamples = 0;
+                readSequence = writeSequence;
+                playbackMarker.Invalidate();
 
                 if (ringBuffer != null)
                 {
@@ -101,7 +120,7 @@ namespace AdaptiveAudioVR.Audio
             IsAttachedToMixer = false;
         }
 
-        public void EnqueuePcm16(byte[] pcmBytes)
+        public void EnqueuePcm16(byte[] pcmBytes, string requestId = null)
         {
             if (pcmBytes == null || pcmBytes.Length < 2)
             {
@@ -114,6 +133,7 @@ namespace AdaptiveAudioVR.Audio
             lock (bufferLock)
             {
                 int capacity = ringBuffer.Length;
+                playbackMarker.Enqueued(requestId, writeSequence);
                 for (int byteIndex = 0; byteIndex + 1 < pcmBytes.Length; byteIndex += 2)
                 {
                     short sample = (short)(pcmBytes[byteIndex] | (pcmBytes[byteIndex + 1] << 8));
@@ -121,6 +141,7 @@ namespace AdaptiveAudioVR.Audio
 
                     if (bufferedSamples >= capacity)
                     {
+                        playbackMarker.Dropped(readSequence++, 1);
                         readIndex = (readIndex + 1) % capacity;
                         bufferedSamples--;
                         DroppedSampleCount++;
@@ -129,6 +150,7 @@ namespace AdaptiveAudioVR.Audio
                     ringBuffer[writeIndex] = normalized;
                     writeIndex = (writeIndex + 1) % capacity;
                     bufferedSamples++;
+                    writeSequence++;
                 }
             }
 
@@ -147,6 +169,8 @@ namespace AdaptiveAudioVR.Audio
             writeIndex = 0;
             readIndex = 0;
             bufferedSamples = 0;
+            readSequence = writeSequence;
+            playbackMarker.Invalidate();
         }
 
         private void EnsureStreamingClip()
@@ -190,6 +214,8 @@ namespace AdaptiveAudioVR.Audio
 
             lock (bufferLock)
             {
+                long firstSample = readSequence;
+                int consumed = 0;
                 for (int i = 0; i < data.Length; i++)
                 {
                     if (bufferedSamples > 0)
@@ -197,6 +223,8 @@ namespace AdaptiveAudioVR.Audio
                         data[i] = ringBuffer[readIndex];
                         readIndex = (readIndex + 1) % ringBuffer.Length;
                         bufferedSamples--;
+                        readSequence++;
+                        consumed++;
                     }
                     else
                     {
@@ -204,6 +232,7 @@ namespace AdaptiveAudioVR.Audio
                         UnderflowSampleCount++;
                     }
                 }
+                playbackMarker.Read(firstSample, consumed);
             }
         }
 

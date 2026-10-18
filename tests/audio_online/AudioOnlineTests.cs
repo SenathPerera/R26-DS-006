@@ -53,6 +53,7 @@ internal static class AudioOnlineTests
             Run("Responsive test preset preserves window validation and action limits", ResponsivePreset);
             Run("Responsive audio admits lower reliability without changing production gates", ResponsiveAudio);
             Run("Responsive audio still waits for its coordinated clean reward window", ResponsiveAttribution);
+            GenerationPlaybackTests.Run(Run);
             Console.WriteLine("PASS: " + passed + " audio online-learning tests. Runtime tests use explicit Unity test doubles.");
             return 0;
         }

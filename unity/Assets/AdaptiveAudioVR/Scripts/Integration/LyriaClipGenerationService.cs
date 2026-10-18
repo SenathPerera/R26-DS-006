@@ -815,6 +815,8 @@ namespace AdaptiveAudioVR.Integration
             }
 
             UsingGeneratedMeditationClip = true;
+            audioMixerController.SetGeneratedControls(context.parameters);
+            bootstrap?.MonitorAgent?.ReconcileGeneratedPlayback(context.parameters);
             bootstrap?.CompleteContentChange(reservation);
             LastRequestUsedCache = usedCache;
             LastGeneratedPrompt = string.IsNullOrWhiteSpace(promptUsedOverride) ? context.prompt : promptUsedOverride;
@@ -941,6 +943,8 @@ namespace AdaptiveAudioVR.Integration
             }
 
             UsingGeneratedMeditationClip = true;
+            audioMixerController.SetGeneratedControls(context.parameters);
+            bootstrap?.MonitorAgent?.ReconcileGeneratedPlayback(context.parameters);
             bootstrap?.CompleteContentChange(reservation);
             LastRequestUsedCache = usedCache;
             LastGeneratedPrompt = promptUsed;

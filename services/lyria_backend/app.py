@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,6 +42,16 @@ SUPPORTED_REALTIME_MODELS = {"models/lyria-realtime-exp", "lyria-realtime-exp"}
 REALTIME_SAMPLE_RATE = 48000
 REALTIME_CHANNELS = 2
 REALTIME_FORMAT = "pcm_s16le"
+ACTION_PLAYBACK_PROTOCOL = "mindsync-audio-playback-v1"
+
+
+class LiveMusicStreamState:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.request_id = ""
+        self.bpm = None
+        self.scale = None
+
 
 app = FastAPI(title="Lyria Phase 1 Backend", version="0.1.0")
 monitor_metrics = ServiceMetrics("lyria")
@@ -280,16 +291,18 @@ async def live_music(websocket: WebSocket, model: str = DEFAULT_REALTIME_MODEL) 
                     "sampleRate": REALTIME_SAMPLE_RATE,
                     "channels": REALTIME_CHANNELS,
                     "format": REALTIME_FORMAT,
+                    "actionPlaybackProtocol": ACTION_PLAYBACK_PROTOCOL,
                     "message": "Lyria realtime session connected.",
                 },
             )
 
-            forward_task = asyncio.create_task(_forward_live_music_messages(session, websocket))
+            stream_state = LiveMusicStreamState()
+            forward_task = asyncio.create_task(_forward_live_music_messages(session, websocket, stream_state))
             try:
                 while True:
                     raw_message = await websocket.receive_text()
                     payload = json.loads(raw_message)
-                    await _handle_live_music_client_message(session, websocket, payload)
+                    await _handle_live_music_client_message(session, websocket, payload, stream_state)
             except WebSocketDisconnect:
                 pass
             finally:
@@ -305,8 +318,9 @@ async def live_music(websocket: WebSocket, model: str = DEFAULT_REALTIME_MODEL) 
             pass
 
 
-async def _forward_live_music_messages(session: Any, websocket: WebSocket) -> None:
+async def _forward_live_music_messages(session: Any, websocket: WebSocket, state: LiveMusicStreamState) -> None:
     async for message in session.receive():
+        revision_at_receive = state.request_id
         server_content = getattr(message, "server_content", None)
         if server_content is not None:
             audio_chunks = getattr(server_content, "audio_chunks", None) or []
@@ -315,16 +329,19 @@ async def _forward_live_music_messages(session: Any, websocket: WebSocket) -> No
                 if not chunk_bytes:
                     continue
 
-                await _send_ws_message(
-                    websocket,
-                    {
+                # Commands and audio use the same lock: an acknowledged revision
+                # always precedes chunks labelled with that revision on the wire.
+                async with state.lock:
+                    if revision_at_receive != state.request_id:
+                        continue
+                    await _send_ws_message(websocket, {
                         "type": "audio",
+                        "requestId": state.request_id,
                         "sampleRate": REALTIME_SAMPLE_RATE,
                         "channels": REALTIME_CHANNELS,
                         "format": REALTIME_FORMAT,
                         "data": base64.b64encode(chunk_bytes).decode("ascii"),
-                    },
-                )
+                    })
 
         filtered_prompt = getattr(message, "filtered_prompt", None)
         if filtered_prompt is not None:
@@ -345,8 +362,18 @@ async def _forward_live_music_messages(session: Any, websocket: WebSocket) -> No
             await _send_ws_message(websocket, {"type": "state", "state": "setup_complete", "message": "Realtime setup complete."})
 
 
-async def _handle_live_music_client_message(session: Any, websocket: WebSocket, payload: dict[str, Any]) -> None:
+async def _handle_live_music_client_message(session: Any, websocket: WebSocket, payload: dict[str, Any],
+                                          state: LiveMusicStreamState) -> None:
+    async with state.lock:
+        await _apply_live_music_client_message(session, websocket, payload, state)
+
+
+async def _apply_live_music_client_message(session: Any, websocket: WebSocket, payload: dict[str, Any],
+                                         state: LiveMusicStreamState) -> None:
     message_type = _safe_to_string(payload.get("type")).lower()
+    request_id = _safe_to_string(payload.get("requestId"))
+    if request_id and not re.fullmatch(r"[a-f0-9]{32}", request_id):
+        raise ValueError("Invalid realtime action request ID")
 
     if message_type == "ping":
         await _send_ws_message(websocket, {"type": "pong", "message": "ok"})
@@ -361,15 +388,21 @@ async def _handle_live_music_client_message(session: Any, websocket: WebSocket, 
     if message_type in {"sync", "config"}:
         config_payload = payload.get("config") or {}
         await session.set_music_generation_config(config=_parse_live_music_config(config_payload))
+        bpm, scale = config_payload.get("bpm"), config_payload.get("scale")
+        if ((state.bpm is not None and bpm != state.bpm)
+                or (state.scale is not None and scale != state.scale)):
+            await session.reset_context()
+        state.bpm, state.scale = bpm, scale
+        state.request_id = request_id
         if message_type == "config":
-            await _send_ws_message(websocket, {"type": "state", "state": "config_updated", "message": "Music generation config updated."})
+            await _send_ws_message(websocket, {"type": "state", "state": "config_updated", "requestId": request_id, "message": "Music generation config updated."})
 
     if message_type == "sync":
         if payload.get("autoPlay", True):
             await session.play()
-            await _send_ws_message(websocket, {"type": "state", "state": "playing", "message": "Realtime playback started."})
+            await _send_ws_message(websocket, {"type": "state", "state": "playing", "requestId": request_id, "message": "Realtime playback started."})
         else:
-            await _send_ws_message(websocket, {"type": "state", "state": "synced", "message": "Realtime prompts/config synced."})
+            await _send_ws_message(websocket, {"type": "state", "state": "synced", "requestId": request_id, "message": "Realtime prompts/config synced."})
         return
 
     if message_type == "play":

@@ -104,7 +104,11 @@ namespace AdaptiveAudioVR.Core
                 contentMayFinishAt = Time.realtimeSinceStartupAsDouble + Mathf.Max(0, pipelineDelaySeconds);
         }
 
-        public void InterruptAdaptation(string reason) => productionCoordinator?.InterruptCoordinatedAdaptation(reason);
+        public void InterruptAdaptation(string reason)
+        {
+            productionCoordinator?.InterruptCoordinatedAdaptation(reason);
+            audioRLAgent?.InvalidatePendingOutcome(reason);
+        }
         public void SetRealtimePlaybackReady(bool ready) => realtimePlaybackReady = ready;
         private bool applicationPaused;
         private bool applicationFocused = true;
@@ -234,6 +238,7 @@ namespace AdaptiveAudioVR.Core
                 sessionState.latestReward);
 
             audioMixerController.SetTargetParameters(sessionState.latestParameters);
+            audioMixerController.SetGeneratedControls(sessionState.latestParameters);
             audioMixerController.HoldSessionPlayback();
             IsPrepared = true;
 
@@ -475,6 +480,11 @@ namespace AdaptiveAudioVR.Core
                     canAdapt = canObserve = false;
                     reason = "Visual transition; audio learning attribution suspended";
                 }
+            }
+            if (!realtimePlaybackReady)
+            {
+                canAdapt = canObserve = false;
+                reason = "Realtime playback is not ready for attribution";
             }
             audioRLAgent.SetControlContext(canAdapt, canObserve, reason);
         }

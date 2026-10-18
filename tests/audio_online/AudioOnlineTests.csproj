@@ -10,6 +10,13 @@
     <Compile Include="../../unity/Assets/Laminar VR/Scripts/Core/**/*.cs" />
     <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/RL/Agent/*.cs" Exclude="../../unity/Assets/AdaptiveAudioVR/Scripts/RL/Agent/Ppo*.cs" />
     <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/AudioParameters.cs" />
+    <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/AudioPlaybackMarker.cs" />
+    <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Audio/AudioMixerController.cs" />
+    <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Audio/RealtimePcmAudioPlayer.cs" />
+    <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Integration/LyriaRealtimeStreamingService.cs" />
+    <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/LyriaControlFrame.cs" />
+    <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/LyriaGenerationConfig.cs" />
+    <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/PromptWeight.cs" />
     <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/SignalPacket.cs" />
     <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/AudioProfile.cs" />
     <Compile Include="../../unity/Assets/AdaptiveAudioVR/Scripts/Core/PersonalizationStrategy.cs" />

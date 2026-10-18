@@ -42,11 +42,14 @@ $testSources = Get-ChildItem (Join-Path $root 'tests/audio_online') -Filter '*.c
 $agentSources = Get-ChildItem (Join-Path $root 'unity/Assets/AdaptiveAudioVR/Scripts/RL/Agent') -Filter '*.cs' |
     Where-Object { $_.Name -notlike 'Ppo*' } | ForEach-Object FullName
 $testSources += $agentSources
-foreach ($name in @('AudioParameters', 'SignalPacket', 'AudioProfile', 'PersonalizationStrategy')) {
+foreach ($name in @('AudioParameters', 'AudioPlaybackMarker', 'LyriaControlFrame', 'LyriaGenerationConfig', 'PromptWeight', 'SignalPacket', 'AudioProfile', 'PersonalizationStrategy')) {
     $testSources += Join-Path $root "unity/Assets/AdaptiveAudioVR/Scripts/Core/$name.cs"
 }
 $testSources += Join-Path $root 'unity/Assets/AdaptiveAudioVR/Scripts/Core/UserPreferences.cs'
 $testSources += Join-Path $root 'unity/Assets/AdaptiveAudioVR/Scripts/Preference/AudioSessionPreferenceMapper.cs'
+$testSources += Join-Path $root 'unity/Assets/AdaptiveAudioVR/Scripts/Audio/AudioMixerController.cs'
+$testSources += Join-Path $root 'unity/Assets/AdaptiveAudioVR/Scripts/Audio/RealtimePcmAudioPlayer.cs'
+$testSources += Join-Path $root 'unity/Assets/AdaptiveAudioVR/Scripts/Integration/LyriaRealtimeStreamingService.cs'
 $framework = Join-Path $UnityEditorData 'MonoBleedingEdge/lib/mono/4.5'
 $testArgs = @('/nologo', '/noconfig', '/nostdlib+', '/langversion:9', '/target:exe', "/out:$output/AudioOnlineTests.exe")
 foreach ($name in @('mscorlib', 'System', 'System.Core', 'System.Web.Extensions')) { $testArgs += "/r:$framework/$name.dll" }

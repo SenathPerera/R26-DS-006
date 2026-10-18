@@ -1,6 +1,6 @@
 # Component E: Online Personalized Audio Control
 
-Updated: 2026-10-11. This is the current audio learning architecture in the shared
+Updated: 2026-10-18. This is the current audio learning architecture in the shared
 `R26-DS-006/unity` project. Earlier PPO residual descriptions are superseded.
 The separate original `ComponentE_AdaptiveAudioVR` checkout is not changed.
 
@@ -31,9 +31,10 @@ requires a new window collected after recovery and settling.
 
 Generated clips may be prepared while an agent measures an outcome; applying
 them is deferred into the existing standby queue. Crossfades reserve a content
-turn until playback finishes changing. Realtime steering also reserves a content
-turn until the server acknowledges the change and the already buffered audio
-has drained. A content change requires five seconds of settling before collecting
+turn until playback finishes changing. Initial/manual realtime syncs reserve a
+content turn until acknowledgement and a conservative playback-buffer delay.
+An RL-selected density/BPM update executes inside the **existing audio turn**,
+not a second content reservation. A content change requires five seconds of settling before collecting
 a clean pre-window. Further content changes wait for a completed agent turn or
 a 240-second recovery deadline, preventing repeated generation from starving
 learning. These timing values remain provisional and need headset validation.
@@ -99,7 +100,8 @@ The existing generated-meditation start gate remains active. The session must
 have its personalized Lyria meditation clip before playback begins. Preferences
 and the selected Japanese Temple Pond Garden inform content generation.
 The environment ambient clip is fixed and stays separate from generated music.
-Lyria content generation remains a separate service from audio-policy learning.
+Lyria remains a separate service, but live density/BPM steering is executed and
+attributed as part of the audio agent's selected action.
 
 The mobile app now saves structured long-term sound choices during onboarding
 and exposes them for later editing in Settings. Before each VR session it asks
@@ -146,6 +148,78 @@ Candidates that would be altered by the safety filter are masked before bandit
 selection. NoChange remains available. The final action still passes through
 the filter. A safety replacement is never credited to the proposed arm; an
 altered/non-catalogue execution cannot update this fixed-action bandit.
+
+## Local And Generated Controls
+
+| Control | Execution |
+| --- | --- |
+| Intensity and music/ambience balance | Local Unity source gains |
+| Brightness | Local music low-pass cutoff |
+| Fade | Local smoothing/crossfade behaviour and existing reverb mapping |
+| Density | Lyria generation `density`, not ambience playback pitch |
+| Tempo | Lyria generation `bpm`, not music playback pitch |
+
+Both source pitches remain 1.0, so the fixed ambience is not detuned. Tempo maps
+to `round(60 + 52 * normalizedTempo) + strategyOffset`, clamped to 60-200 BPM.
+Participant tempo preferences already inform the normalized initial parameters.
+Tempo actions that round to the same BPM are masked. Brightness/config/prompts
+unrelated to a selected generation action are held at the last synced baseline;
+raw stress fluctuations cannot independently trigger a new sync during a session.
+
+Density and tempo actions are masked while using cached clips, disconnected or
+paused streaming, disabled automatic steering, or a bridge without
+`mindsync-audio-playback-v1` support. Local actions and Hold remain available.
+The model configuration includes `audio-musical-controls-v2` and live generation
+capability, isolating weights learned under the old pitch mappings or a different
+execution capability. Density/tempo applied values only advance with playback
+confirmation; changing controller condition does not silently reset those controls.
+
+For a generation action, the audio reservation covers this sequence:
+
+1. Send the full last generation config with only selected density/BPM updated,
+   and an opaque action request ID. Revalidate the audio lease before sending.
+2. The bridge applies the config, resets context only if BPM/scale changed, and
+   echoes the ID in its acknowledgement and subsequent PCM envelopes.
+3. Wait for matching PCM to pass through the existing backlog, plus a two-second
+   PCM guard. Enqueueing or acknowledgement alone is not playback confirmation.
+4. After that queue position is read, allow a streaming-clip look-ahead plus DSP
+   buffer margin. Only then confirm the applied control and start normal settling.
+5. Learn only from a complete, reliable, non-overlapping post-settling window.
+
+Queue loss, playback gaps, pause, transport failures, and cancellation prevent
+learning. An already-sent cancelled action is reconciled at playback **without**
+a reward while both agents wait; a late callback cannot confirm a newer action.
+After a playback gap, the system needs stable buffering and clean physiology.
+An irrecoverable lost marker or failed command requires stopping and restarting
+realtime music, rather than guessing that the action was heard.
+
+The request ID identifies the bridge's accepted configuration revision. The
+provider does not attach that ID to generated audio; the guard and engine queue
+evidence are conservative attribution estimates, not acoustic verification of
+the exact moment a composition adopted a setting. Confirm buffer timing and
+audibility on Quest before using these timings as study evidence. Settings are
+generation targets, not measured musical density or measured BPM.
+
+### Deploy And Verify
+
+Restart `services/lyria_backend/app.py` on the Windows host and rebuild/redeploy
+Unity/Quest from this checkout. No firmware, mobile schema or mobile APK change
+is required for these two improvements. An older bridge keeps generation actions
+disabled and reports a compatibility warning rather than timing out silently.
+
+Run offline bridge tests from the repository root in the backend environment:
+
+```powershell
+python -m unittest services.lyria_backend.test_realtime -v
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-audio-online.ps1
+```
+
+The bridge tests use fake provider sessions and make no paid generation calls.
+The standalone tests exercise real agent/mixer/PCM-queue logic with explicit
+Unity test doubles; they do not establish actual speaker output. On the headset,
+check a selected density/tempo action stays Transitioning until PCM playback,
+then Measuring, with one policy update only after an eligible outcome. A real
+policy may select Hold or a local action; it does not force generation every turn.
 
 ## Context Features
 

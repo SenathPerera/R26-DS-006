@@ -204,26 +204,7 @@ namespace AdaptiveAudioVR.RL
 
         private static int ResolveBpm(AudioProfile profile, PersonalizationStrategy strategy, AudioParameters parameters)
         {
-            int baseBpm = 68;
-            if (profile != null)
-            {
-                switch (profile.tempo)
-                {
-                    case "fast":
-                        baseBpm = 108;
-                        break;
-                    case "medium":
-                        baseBpm = 86;
-                        break;
-                    default:
-                        baseBpm = 68;
-                        break;
-                }
-            }
-
-            int policyBpm = Mathf.RoundToInt(Mathf.Lerp(60f, 112f, parameters.tempo));
-            int profileAndPolicyBpm = Mathf.RoundToInt((baseBpm + policyBpm) * 0.5f);
-            return Mathf.Clamp(profileAndPolicyBpm + strategy.bpmOffset, 60, 200);
+            return AudioMusicalMapping.Bpm(parameters.tempo, strategy.bpmOffset);
         }
 
         private static float ResolveGuidance(AudioProfile profile, PersonalizationStrategy strategy)

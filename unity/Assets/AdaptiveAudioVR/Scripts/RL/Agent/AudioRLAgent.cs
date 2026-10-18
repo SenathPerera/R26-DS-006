@@ -95,6 +95,49 @@ namespace AdaptiveAudioVR.RL.Agent
         private long coordinationLease;
         public AdaptationCoordinator Coordination { get; private set; }
         public bool HasPendingOutcome => pending != null;
+        public bool GenerationPlaybackAvailable { get; private set; }
+
+        public void SetGenerationPlaybackAvailable(bool available)
+        {
+            if (available == GenerationPlaybackAvailable) return;
+            InvalidatePendingOutcome("Audio generation capability changed");
+            SaveModel();
+            productionDomain = null;
+            GenerationPlaybackAvailable = available;
+        }
+
+        public bool IsPendingGenerationAction(string requestId) => pending != null
+            && pending.generationRequired && pending.requestId == requestId
+            && (Coordination == null || Coordination.IsCurrent(coordinationLease));
+
+        public bool TryGetGenerationAction(out string requestId, out AudioParameters target)
+        {
+            requestId = pending?.requestId;
+            target = pending != null ? pending.target : default;
+            return GenerationPlaybackAvailable && IsPendingGenerationAction(requestId) && !pending.generationReady;
+        }
+
+        public bool ConfirmGenerationPlayback(string requestId)
+        {
+            if (!IsPendingGenerationAction(requestId) || pending.generationReady) return false;
+            pending.generationReady = true;
+            CurrentParameters = WithGeneratedControls(CurrentParameters, pending.target);
+            appliedPlayback = WithGeneratedControls(appliedPlayback, pending.target);
+            return true;
+        }
+
+        public void FailGenerationAction(string requestId, string reason)
+        {
+            if (IsPendingGenerationAction(requestId)) InvalidatePendingOutcome(reason);
+        }
+
+        public void ReconcileGeneratedPlayback(AudioParameters generated)
+        {
+            InvalidatePendingOutcome("Generated playback reconciled without reward");
+            CurrentParameters = WithGeneratedControls(CurrentParameters, generated);
+            CurrentTargetParameters = WithGeneratedControls(CurrentTargetParameters, generated);
+            appliedPlayback = WithGeneratedControls(appliedPlayback, generated);
+        }
         public bool ResponsiveTesting { get; private set; }
         public float MinimumInputQuality => ResponsiveTesting
             ? (float)ResponsiveTestingPreset.MinimumQuality : lowSignalQualityThreshold;
@@ -196,7 +239,7 @@ namespace AdaptiveAudioVR.RL.Agent
             conditionSegment++;
             noveltyCount = 0;
             CurrentRewardBreakdown = AudioRLRewardBreakdown.Zero;
-            CurrentTargetParameters = PersonalizedBaseline;
+            CurrentTargetParameters = WithGeneratedControls(PersonalizedBaseline, CurrentParameters);
             previousSafeAction = AudioRLAction.NoChange;
             CurrentProposedAction = CurrentRuleAction = CurrentFinalSafeAction = AudioRLAction.NoChange;
             CurrentActionName = "Returning to personalized baseline";
@@ -273,7 +316,8 @@ namespace AdaptiveAudioVR.RL.Agent
             {
                 if (now - pending.startedAt > outcomeTimeoutSeconds)
                     InvalidatePendingOutcome("No eligible outcome arrived before timeout");
-                else if (double.IsPositiveInfinity(pending.eligiblePostStartUtc) && AtTarget())
+                else if (double.IsPositiveInfinity(pending.eligiblePostStartUtc) && AtTarget()
+                    && (!pending.generationRequired || pending.generationReady))
                 {
                     pending.eligiblePostStartUtc = utcNow + (signal.hasPhysiologyWindow ? settlingSeconds : 0);
                     pending.settledAt = now + (signal.hasPhysiologyWindow ? settlingSeconds : 0);
@@ -308,8 +352,10 @@ namespace AdaptiveAudioVR.RL.Agent
                 // A denied reservation must be retried without waiting for another sensor publication.
                 Decide(BuildState(signal));
             }
+            var generated = CurrentParameters;
             CurrentParameters = AudioParameters.MoveTowards(CurrentParameters, CurrentTargetParameters,
                 outputSlewPerSecond * Mathf.Max(0, deltaTime));
+            CurrentParameters = WithGeneratedControls(CurrentParameters, generated);
             RefreshPolicyStatus();
             return CurrentParameters;
         }
@@ -323,6 +369,7 @@ namespace AdaptiveAudioVR.RL.Agent
             if (pending == null) return;
             LogOutcome(null, false, false, reason);
             InvalidOutcomeCount++;
+            CurrentTargetParameters = CurrentParameters;
             pending = null;
             Coordination?.Release(coordinationLease, now, utcNow > 0 ? utcNow : UtcSeconds(), reason);
             coordinationLease = 0;
@@ -352,6 +399,9 @@ namespace AdaptiveAudioVR.RL.Agent
             for (int arm = 1; arm < AudioActionCatalog.Count; arm++)
             {
                 var action = AudioActionCatalog.Action(arm, microActionDelta);
+                if ((action.deltaDensity != 0 || action.deltaTempo != 0) && !GenerationPlaybackAvailable) continue;
+                if (action.deltaTempo != 0 && AudioMusicalMapping.Bpm(state.currentParameters.tempo, ActiveStrategy.bpmOffset)
+                    == AudioMusicalMapping.Bpm(state.currentParameters.tempo + action.deltaTempo, ActiveStrategy.bpmOffset)) continue;
                 var filtered = safetyFilter.Apply(action, previousSafeAction, state, true, true);
                 if (!filtered.interventionApplied && AudioActionCatalog.Same(action, filtered.finalSafeAction)) eligible.Add(arm);
             }
@@ -374,13 +424,17 @@ namespace AdaptiveAudioVR.RL.Agent
                 proposedArm = selected.Arm, executedArm = executedArm, action = safe.finalSafeAction,
                 proposal = CurrentProposedAction, mode = policyMode, segment = conditionSegment,
                 safety = safe, selection = selected, startedAt = now,
+                requestId = Guid.NewGuid().ToString("N"), target = safe.safeTarget,
+                generationRequired = AudioMusicalMapping.RequiresGeneration(state.currentParameters, safe.safeTarget),
                 eligiblePostStartUtc = double.PositiveInfinity, settledAt = double.PositiveInfinity
             };
             if (safe.finalSafeAction.MaximumAbsoluteMagnitude > 0.00001f) noveltyCount++;
             previousSafeAction = safe.finalSafeAction;
             lastDecisionTime = now;
             DecisionCount++;
-            CurrentLearningStatus = "Awaiting transition completion and a fresh delayed outcome";
+            CurrentLearningStatus = pending.generationRequired
+                ? "Awaiting reserved Lyria action playback before settling and delayed outcome"
+                : "Awaiting transition completion and a fresh delayed outcome";
             LogOutcome(null, false, false, "Pending delayed outcome", "decision");
         }
 
@@ -462,6 +516,7 @@ namespace AdaptiveAudioVR.RL.Agent
             string configuration = JsonUtility.ToJson(rewardWeights) + "|" + string.Join("|", Array.ConvertAll(settings,
                 value => value.ToString("R", System.Globalization.CultureInfo.InvariantCulture)));
             if (Coordination != null) configuration += "|" + AdaptationCoordinator.SchemaVersion;
+            configuration += "|" + AudioMusicalMapping.Schema + "|generation=" + GenerationPlaybackAvailable;
             if (ResponsiveTesting) configuration += "|" + ResponsiveTestingPreset.Id;
             persistence = new AudioBanditPersistence(Path.Combine(Application.persistentDataPath, "AudioOnlineModels"),
                 ActiveProfile.userId, environmentId, !production, configuration);
@@ -490,6 +545,13 @@ namespace AdaptiveAudioVR.RL.Agent
         };
 
         private bool AtTarget() => AudioActionCatalog.Same(AudioRLAction.Between(CurrentParameters, CurrentTargetParameters), AudioRLAction.NoChange, 0.002f);
+
+        private static AudioParameters WithGeneratedControls(AudioParameters local, AudioParameters generated)
+        {
+            local.density = generated.density;
+            local.tempo = generated.tempo;
+            return local;
+        }
 
         private void Hold(string reason, AudioRLSafetyMode mode)
         {
@@ -547,6 +609,10 @@ namespace AdaptiveAudioVR.RL.Agent
             public double startedAt;
             public double eligiblePostStartUtc;
             public double settledAt;
+            public string requestId;
+            public AudioParameters target;
+            public bool generationRequired;
+            public bool generationReady;
         }
     }
 }

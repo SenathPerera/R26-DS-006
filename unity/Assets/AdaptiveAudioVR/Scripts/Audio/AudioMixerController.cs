@@ -17,8 +17,6 @@ namespace AdaptiveAudioVR.Audio
         [Header("Tuning")]
         [SerializeField] private bool requireExplicitSessionStart = true;
         [SerializeField] private float smoothingSpeed = 4f;
-        [SerializeField] private float minPitch = 0.92f;
-        [SerializeField] private float maxPitch = 1.08f;
         [SerializeField] private float minLowPassCutoff = 1200f;
         [SerializeField] private float maxLowPassCutoff = 18000f;
         [SerializeField] private float dryReverbLevel = -7000f;
@@ -51,6 +49,18 @@ namespace AdaptiveAudioVR.Audio
         private float transitionMeditationBlend;
         private float[] meditationScratchA;
         private float[] meditationScratchB;
+        private float generatedDensity;
+        private float generatedTempo;
+
+        public void SetGeneratedControls(AudioParameters generated)
+        {
+            generatedDensity = Mathf.Clamp01(generated.density);
+            generatedTempo = Mathf.Clamp01(generated.tempo);
+            var applied = CurrentAppliedParameters;
+            applied.density = generatedDensity;
+            applied.tempo = generatedTempo;
+            CurrentAppliedParameters = applied;
+        }
 
         private void Awake()
         {
@@ -110,6 +120,7 @@ namespace AdaptiveAudioVR.Audio
         {
             float fadeAwareSmoothing = Mathf.Lerp(smoothingSpeed * 1.75f, smoothingSpeed * 0.45f, targetParameters.fade);
             CurrentAppliedParameters = AudioParameters.Lerp(CurrentAppliedParameters, targetParameters, Time.deltaTime * fadeAwareSmoothing);
+            SetGeneratedControls(new AudioParameters { density = generatedDensity, tempo = generatedTempo });
             ApplyNow(CurrentAppliedParameters);
         }
 
@@ -277,18 +288,16 @@ namespace AdaptiveAudioVR.Audio
             float overallGain = Mathf.Lerp(0.45f, 1f, parameters.intensity);
             float meditationVolume = IsMuted ? 0f : Mathf.Clamp01(parameters.musicMix * overallGain);
             float ambientVolume = IsMuted ? 0f : Mathf.Clamp01(parameters.ambientMix * overallGain);
-            float meditationPitch = Mathf.Lerp(minPitch, maxPitch, parameters.tempo);
-            float ambientPitch = Mathf.Lerp(0.98f, 1.02f, parameters.density);
             float lowPassCutoff = Mathf.Lerp(minLowPassCutoff, maxLowPassCutoff, parameters.brightness);
             float reverbLevel = Mathf.Lerp(dryReverbLevel, wetReverbLevel, Mathf.Clamp01((parameters.intensity + parameters.fade) * 0.5f));
 
-            ApplyMeditationSource(currentMeditationSource, currentMeditationLowPass, currentMeditationReverb, meditationVolume * currentMeditationBlend, meditationPitch, lowPassCutoff, reverbLevel);
-            ApplyMeditationSource(transitionMeditationSource, transitionMeditationLowPass, transitionMeditationReverb, meditationVolume * transitionMeditationBlend, meditationPitch, lowPassCutoff, reverbLevel);
+            ApplyMeditationSource(currentMeditationSource, currentMeditationLowPass, currentMeditationReverb, meditationVolume * currentMeditationBlend, 1f, lowPassCutoff, reverbLevel);
+            ApplyMeditationSource(transitionMeditationSource, transitionMeditationLowPass, transitionMeditationReverb, meditationVolume * transitionMeditationBlend, 1f, lowPassCutoff, reverbLevel);
 
             if (ambientSource != null)
             {
                 ambientSource.volume = ambientVolume;
-                ambientSource.pitch = ambientPitch;
+                ambientSource.pitch = 1f;
             }
         }
 

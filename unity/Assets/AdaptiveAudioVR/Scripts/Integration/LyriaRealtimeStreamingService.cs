@@ -36,6 +36,7 @@ namespace AdaptiveAudioVR.Integration
         [Header("Playback")]
         [SerializeField] private float minimumBufferedAudioSeconds = 0.35f;
         [SerializeField] private float restoreCrossfadeSeconds = 1.25f;
+        [SerializeField, Min(0f)] private float generationPlaybackGuardSeconds = 2f;
         [SerializeField] private bool restorePreviousClipOnStop = true;
 
         public bool IsConnecting { get; private set; }
@@ -78,6 +79,22 @@ namespace AdaptiveAudioVR.Integration
         private bool pendingRealtimeStart;
         private bool pendingManualSync;
         private bool pendingManualAutoPlay;
+        private RealtimeClientMessage activeGenerationMessage;
+        private AudioParameters syncedParameters;
+        private double syncedPlaybackReadyAt = double.PositiveInfinity;
+        private AudioParameters fallbackParameters;
+        private AudioParameters generationTarget;
+        private string submittedGenerationId;
+        private string acceptedGenerationId;
+        private double generationReadyAt = double.PositiveInfinity;
+        private bool generationFaulted;
+        private bool backendTracksActionPlayback;
+        private bool orphanedGeneration;
+        private long observedUnderflows;
+        private long observedDrops;
+        private double playbackRecoveryUntil = -1;
+        private readonly HashSet<string> issuedGenerationRequests = new HashSet<string>();
+        private readonly HashSet<string> completedGenerationRequests = new HashSet<string>();
 
         private void Awake()
         {
@@ -102,10 +119,14 @@ namespace AdaptiveAudioVR.Integration
         {
             ProcessInboundMessages();
             TryStartBufferedPlayback();
+            UpdateGenerationPlayback();
 
             if (IsConnected && !IsConnecting && Time.unscaledTime >= nextSteeringTime)
             {
-                if (pendingRealtimeStart) _ = StartRealtimeStreamAsync();
+                if (autoSteerFromRl && bootstrap != null && bootstrap.IsSessionRunning
+                    && bootstrap.MonitorAgent != null && bootstrap.MonitorAgent.TryGetGenerationAction(out _, out _))
+                    _ = TrySendCoordinatedGeneration();
+                else if (pendingRealtimeStart) _ = StartRealtimeStreamAsync();
                 else if (pendingManualSync) _ = SendCurrentFrameSyncAsync(pendingManualAutoPlay);
                 else if (autoSteerFromRl) _ = TrySendRealtimeSteeringUpdate();
                 nextSteeringTime = Time.unscaledTime + Mathf.Max(0.25f, steeringUpdateIntervalSeconds);
@@ -205,6 +226,7 @@ namespace AdaptiveAudioVR.Integration
                 LastStatusMessage = "Realtime stream cannot start because the current Lyria frame is unavailable.";
                 return;
             }
+            AudioParameters syncParameters = bootstrap.CurrentParameters;
 
             if (!IsConnected)
             {
@@ -213,6 +235,14 @@ namespace AdaptiveAudioVR.Integration
                 LastErrorMessage = string.Empty;
 
                 fallbackMeditationClip = audioMixerController.CurrentMeditationClip;
+                fallbackParameters = audioMixerController.CurrentAppliedParameters;
+                generationFaulted = false;
+                backendTracksActionPlayback = false;
+                orphanedGeneration = false;
+                playbackRecoveryUntil = -1;
+                submittedGenerationId = acceptedGenerationId = null;
+                issuedGenerationRequests.Clear();
+                completedGenerationRequests.Clear();
                 SuppressClipGeneration(true);
                 pcmAudioPlayer.ClearBuffer();
                 pcmAudioPlayer.ConfigureFormat(48000, 2);
@@ -244,6 +274,8 @@ namespace AdaptiveAudioVR.Integration
             }
 
             if (!await SendClientMessageAsync(syncMessage)) { pendingRealtimeStart = true; return; }
+            activeGenerationMessage = syncMessage;
+            syncedParameters = syncParameters;
             pendingRealtimeStart = false;
             LastSentPromptSignature = promptSignature;
             lastObservedPromptSignature = promptSignature;
@@ -326,6 +358,11 @@ namespace AdaptiveAudioVR.Integration
 
             IsConnected = false;
             IsConnecting = false;
+            bootstrap?.MonitorAgent?.SetGenerationPlaybackAvailable(false);
+            activeGenerationMessage = null;
+            backendTracksActionPlayback = false;
+            submittedGenerationId = acceptedGenerationId = null;
+            syncedPlaybackReadyAt = double.PositiveInfinity;
 
             pcmAudioPlayer?.ClearBuffer();
             pcmAudioPlayer?.DetachFromMixer();
@@ -335,6 +372,8 @@ namespace AdaptiveAudioVR.Integration
             {
                 audioMixerController.SetMeditationPlaybackPaused(false);
                 audioMixerController.CrossfadeToMeditationClip(fallbackMeditationClip, restoreCrossfadeSeconds);
+                audioMixerController.SetGeneratedControls(fallbackParameters);
+                bootstrap?.MonitorAgent?.ReconcileGeneratedPlayback(fallbackParameters);
             }
 
             SuppressClipGeneration(false);
@@ -382,8 +421,12 @@ namespace AdaptiveAudioVR.Integration
             {
                 return;
             }
+            AudioParameters syncParameters = bootstrap.CurrentParameters;
 
             if (!await SendClientMessageAsync(syncMessage)) return;
+            activeGenerationMessage = syncMessage;
+            syncedParameters = syncParameters;
+            generationFaulted = false;
             pendingManualSync = false;
             LastSentPromptSignature = promptSignature;
             lastObservedPromptSignature = promptSignature;
@@ -400,6 +443,13 @@ namespace AdaptiveAudioVR.Integration
 
         private async Task TrySendRealtimeSteeringUpdate()
         {
+            // During a participant session only the reserved audio action may
+            // steer generation. Raw stress changes cannot create a second action.
+            if (bootstrap != null && bootstrap.IsSessionRunning && bootstrap.MonitorAgent != null)
+            {
+                await TrySendCoordinatedGeneration();
+                return;
+            }
             if (bootstrap == null || !TryBuildSyncMessage(autoPlay: false, out RealtimeClientMessage syncMessage, out string promptSignature))
             {
                 return;
@@ -432,12 +482,118 @@ namespace AdaptiveAudioVR.Integration
             }
 
             if (!await SendClientMessageAsync(syncMessage)) return;
+            activeGenerationMessage = syncMessage;
+            syncedParameters = currentParameters;
             LastSentPromptSignature = promptSignature;
             lastObservedPromptSignature = promptSignature;
             lastSentSignal = currentSignal;
             lastSentParameters = currentParameters;
             LastPromptSummary = bootstrap.CurrentPromptSummary;
             LastStatusMessage = "Realtime steering update sent.";
+        }
+
+        private async Task TrySendCoordinatedGeneration()
+        {
+            var agent = bootstrap?.MonitorAgent;
+            if (agent == null || activeGenerationMessage == null
+                || !agent.TryGetGenerationAction(out string requestId, out AudioParameters target)
+                || requestId == submittedGenerationId) return;
+            submittedGenerationId = requestId;
+            acceptedGenerationId = null;
+            orphanedGeneration = false;
+            generationTarget = target;
+            generationReadyAt = double.PositiveInfinity;
+            issuedGenerationRequests.Add(requestId);
+            pcmAudioPlayer.TrackPlaybackRequest(requestId, generationPlaybackGuardSeconds);
+            var message = JsonUtility.FromJson<RealtimeClientMessage>(JsonUtility.ToJson(activeGenerationMessage));
+            message.type = "config";
+            message.requestId = requestId;
+            message.autoPlay = false;
+            message.config.density = target.density;
+            message.config.bpm = AudioMusicalMapping.Bpm(target.tempo, agent.ActiveStrategy.bpmOffset);
+            if (!await SendClientMessageAsync(message, requestId))
+            {
+                agent.FailGenerationAction(requestId, "Reserved Lyria steering failed");
+                completedGenerationRequests.Add(requestId);
+                generationFaulted = true;
+                bootstrap.SetRealtimePlaybackReady(false);
+                LastStatusMessage = "Reserved steering failed; stop and restart realtime music before learning.";
+                return;
+            }
+            activeGenerationMessage = message;
+            LastStatusMessage = "Reserved audio action sent; waiting for acknowledged PCM playback.";
+        }
+
+        private void UpdateGenerationPlayback()
+        {
+            var agent = bootstrap?.MonitorAgent;
+            if (agent == null) return;
+            if (Time.realtimeSinceStartupAsDouble >= syncedPlaybackReadyAt)
+            {
+                syncedPlaybackReadyAt = double.PositiveInfinity;
+                audioMixerController.SetGeneratedControls(syncedParameters);
+                agent.ReconcileGeneratedPlayback(syncedParameters);
+            }
+            bool playing = HasBufferedPlaybackStarted && IsStreaming && !IsPaused
+                && audioMixerController != null && audioMixerController.IsMeditationPlaying;
+            if (playing && (UnderflowSampleCount > observedUnderflows || DroppedSampleCount > observedDrops))
+            {
+                bootstrap.InterruptAdaptation("Realtime playback gap or dropped PCM; outcome discarded");
+                bootstrap.SetRealtimePlaybackReady(false);
+                playbackRecoveryUntil = Time.realtimeSinceStartupAsDouble + 5;
+            }
+            observedUnderflows = UnderflowSampleCount;
+            observedDrops = DroppedSampleCount;
+            agent.SetGenerationPlaybackAvailable(autoSteerFromRl && IsConnected && IsStreaming && !IsPaused
+                && HasBufferedPlaybackStarted && backendTracksActionPlayback && activeGenerationMessage != null && !generationFaulted);
+            bool outstanding = !string.IsNullOrEmpty(submittedGenerationId)
+                && !completedGenerationRequests.Contains(submittedGenerationId);
+            if (outstanding && !agent.IsPendingGenerationAction(submittedGenerationId) && !orphanedGeneration)
+            {
+                orphanedGeneration = true;
+                bootstrap.InterruptAdaptation("Waiting for cancelled Lyria action to finish playback without reward");
+                bootstrap.SetRealtimePlaybackReady(false);
+            }
+            if (playbackRecoveryUntil >= 0 && Time.realtimeSinceStartupAsDouble >= playbackRecoveryUntil
+                && playing && BufferedSeconds >= minimumBufferedAudioSeconds && !generationFaulted && !orphanedGeneration)
+            {
+                playbackRecoveryUntil = -1;
+                bootstrap.InterruptAdaptation("Realtime playback recovered; waiting for clean physiology");
+                bootstrap.SetRealtimePlaybackReady(true);
+            }
+            if (!outstanding || acceptedGenerationId != submittedGenerationId || generationFaulted) return;
+            bool rendered = pcmAudioPlayer.HasRenderedRequest(submittedGenerationId, out bool lost);
+            if (lost)
+            {
+                generationFaulted = true;
+                bootstrap.InterruptAdaptation("Action PCM marker lost; stop and restart realtime music");
+                bootstrap.SetRealtimePlaybackReady(false);
+                return;
+            }
+            if (!rendered || audioMixerController == null || !audioMixerController.IsMeditationPlaying
+                || audioMixerController.IsMeditationPlaybackPaused || audioMixerController.IsMuted) return;
+            if (double.IsPositiveInfinity(generationReadyAt))
+            {
+                AudioSettings.GetDSPBufferSize(out int length, out int count);
+                // A streaming clip callback may fill ahead of the speaker cursor.
+                generationReadyAt = Time.realtimeSinceStartupAsDouble
+                    + (pcmAudioPlayer.StreamingClip != null ? pcmAudioPlayer.StreamingClip.length : 0)
+                    + Math.Max(0.1, (double)length * count / Math.Max(1, AudioSettings.outputSampleRate));
+            }
+            if (Time.realtimeSinceStartupAsDouble < generationReadyAt) return;
+            bool credited = agent.ConfirmGenerationPlayback(submittedGenerationId);
+            audioMixerController.SetGeneratedControls(generationTarget);
+            syncedParameters = generationTarget;
+            completedGenerationRequests.Add(submittedGenerationId);
+            if (!credited)
+            {
+                agent.ReconcileGeneratedPlayback(generationTarget);
+                bootstrap.InterruptAdaptation("Cancelled Lyria action reached playback; no reward assigned");
+                bootstrap.SetRealtimePlaybackReady(playbackRecoveryUntil < 0);
+            }
+            orphanedGeneration = false;
+            LastStatusMessage = credited ? "Reserved Lyria action reached playback; agent settling can begin."
+                : "Cancelled generation reconciled at playback without learning.";
         }
 
         private bool TryBuildSyncMessage(bool autoPlay, out RealtimeClientMessage message, out string promptSignature)
@@ -524,7 +680,7 @@ namespace AdaptiveAudioVR.Integration
             return builder.ToString();
         }
 
-        private async Task<bool> SendClientMessageAsync(RealtimeClientMessage message)
+        private async Task<bool> SendClientMessageAsync(RealtimeClientMessage message, string ownedAudioRequestId = null)
         {
             if (websocket == null || websocket.State != WebSocketState.Open)
             {
@@ -535,9 +691,11 @@ namespace AdaptiveAudioVR.Integration
             await sendLock.WaitAsync();
             try
             {
+                if (ownedAudioRequestId != null && !(bootstrap?.MonitorAgent?.IsPendingGenerationAction(ownedAudioRequestId) ?? false))
+                    return false;
                 bool changesContent = message.type == "sync" || message.type == "prompts"
                     || message.type == "config" || message.type == "play";
-                if (changesContent && bootstrap != null && bootstrap.IsSessionRunning && !(message.type == "play" && IsPaused))
+                if (ownedAudioRequestId == null && changesContent && bootstrap != null && bootstrap.IsSessionRunning && !(message.type == "play" && IsPaused))
                 {
                     if (contentReservation != 0 && bootstrap.SharedAdaptation != null
                         && bootstrap.SharedAdaptation.IsCurrent(contentReservation)) return false;
@@ -588,12 +746,12 @@ namespace AdaptiveAudioVR.Integration
                             try
                             {
                                 byte[] pcmBytes = Convert.FromBase64String(inbound.data);
-                                if (inbound.sampleRate > 0 && inbound.channels > 0)
+                                if (inbound.sampleRate != 48000 || inbound.channels != 2 || inbound.format != "pcm_s16le")
                                 {
-                                    pcmAudioPlayer.ConfigureFormat(inbound.sampleRate, inbound.channels);
+                                    throw new InvalidOperationException("Unsupported realtime PCM format.");
                                 }
 
-                                pcmAudioPlayer.EnqueuePcm16(pcmBytes);
+                                pcmAudioPlayer.EnqueuePcm16(pcmBytes, inbound.requestId);
                             }
                             catch (Exception ex)
                             {
@@ -695,6 +853,9 @@ namespace AdaptiveAudioVR.Integration
             switch ((inbound.type ?? string.Empty).ToLowerInvariant())
             {
                 case "connected":
+                    backendTracksActionPlayback = inbound.actionPlaybackProtocol == AudioPlaybackMarker.Protocol;
+                    if (!backendTracksActionPlayback)
+                        LastWarningMessage = "Bridge lacks action playback tracking; density/tempo actions disabled. Restart the updated backend.";
                     LastServerState = "connected";
                     LastStatusMessage = string.IsNullOrWhiteSpace(inbound.message) ? "Realtime bridge connected." : inbound.message;
                     SetCapabilityResult(true, "Realtime session opened successfully.", string.IsNullOrWhiteSpace(inbound.model) ? realtimeModel : inbound.model);
@@ -702,13 +863,26 @@ namespace AdaptiveAudioVR.Integration
                 case "state":
                     LastServerState = string.IsNullOrWhiteSpace(inbound.state) ? "state" : inbound.state;
                     LastStatusMessage = string.IsNullOrWhiteSpace(inbound.message) ? LastStatusMessage : inbound.message;
+                    if (!string.IsNullOrEmpty(inbound.requestId) && issuedGenerationRequests.Contains(inbound.requestId)
+                        && (inbound.state == "synced" || inbound.state == "config_updated"))
+                    {
+                        if (completedGenerationRequests.Contains(inbound.requestId)) break;
+                        if (inbound.requestId == submittedGenerationId)
+                            acceptedGenerationId = inbound.requestId;
+                        else
+                        {
+                            generationFaulted = true;
+                            bootstrap?.InterruptAdaptation("Late Lyria action acknowledgement after cancellation");
+                            bootstrap?.SetRealtimePlaybackReady(false);
+                        }
+                        break;
+                    }
                     if (string.Equals(inbound.state, "playing", StringComparison.OrdinalIgnoreCase))
                     {
                         bootstrap?.SetRealtimePlaybackReady(true);
                         if (HasBufferedPlaybackStarted)
                         {
-                            bootstrap?.CompleteContentChange(contentReservation, BufferedSeconds + 2f);
-                            contentReservation = 0;
+                            CompleteSyncedContentAtPlayback();
                         }
                         IsStreaming = true;
                         IsPaused = false;
@@ -762,9 +936,7 @@ namespace AdaptiveAudioVR.Integration
                             bootstrap.InterruptAdaptation("Realtime steering recovered after interruption");
                             bootstrap.SetRealtimePlaybackReady(true);
                         }
-                        // Audio already queued before the acknowledgement must leave the playback buffer first.
-                        bootstrap?.CompleteContentChange(contentReservation, BufferedSeconds + 2f);
-                        contentReservation = 0;
+                        CompleteSyncedContentAtPlayback();
                     }
                     break;
                 case "warning":
@@ -775,10 +947,14 @@ namespace AdaptiveAudioVR.Integration
                     }
                     break;
                 case "filtered_prompt":
+                    generationFaulted = true;
+                    bootstrap?.InterruptAdaptation("Lyria rejected the requested music prompt");
+                    bootstrap?.SetRealtimePlaybackReady(false);
                     LastWarningMessage = $"Filtered prompt: {inbound.filteredReason}";
                     LastStatusMessage = string.IsNullOrWhiteSpace(inbound.message) ? LastWarningMessage : inbound.message;
                     break;
                 case "error":
+                    generationFaulted = true;
                     bootstrap?.InterruptAdaptation("Realtime music error");
                     bootstrap?.SetRealtimePlaybackReady(false);
                     LastErrorMessage = inbound.message ?? "Unknown realtime error.";
@@ -809,12 +985,21 @@ namespace AdaptiveAudioVR.Integration
                 && !bootstrap.TryBeginContentChange("Realtime playback attachment", out contentReservation)) return;
 
             pcmAudioPlayer.AttachToMixer(audioMixerController, restartPlayback: true);
-            bootstrap?.CompleteContentChange(contentReservation, BufferedSeconds + 2f);
-            contentReservation = 0;
+            audioMixerController.SetGeneratedControls(syncedParameters);
+            CompleteSyncedContentAtPlayback();
             audioMixerController.SetMeditationPlaybackPaused(false);
             HasBufferedPlaybackStarted = true;
             pendingBufferedPlaybackStart = false;
             LastStatusMessage = $"Realtime audio playback started with {BufferedSeconds:F2}s buffer.";
+        }
+
+        private void CompleteSyncedContentAtPlayback()
+        {
+            float delay = BufferedSeconds + generationPlaybackGuardSeconds
+                + (pcmAudioPlayer.StreamingClip != null ? pcmAudioPlayer.StreamingClip.length : 0);
+            syncedPlaybackReadyAt = Time.realtimeSinceStartupAsDouble + delay;
+            bootstrap?.CompleteContentChange(contentReservation, delay);
+            contentReservation = 0;
         }
 
         private void SuppressClipGeneration(bool suppress)
@@ -951,6 +1136,7 @@ namespace AdaptiveAudioVR.Integration
         private class RealtimeClientMessage
         {
             public string type;
+            public string requestId;
             public bool autoPlay;
             public RealtimeWeightedPrompt[] weightedPrompts;
             public RealtimeMusicConfig config;
@@ -1012,6 +1198,8 @@ namespace AdaptiveAudioVR.Integration
             public int channels = 0;
             public string format = string.Empty;
             public string filteredReason = string.Empty;
+            public string requestId = string.Empty;
+            public string actionPlaybackProtocol = string.Empty;
         }
 
         [Serializable]
