@@ -24,6 +24,7 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private string websocketBaseUrl = string.Empty;
         [SerializeField] private string realtimeModel = "models/lyria-realtime-exp";
         [SerializeField] private bool autoStartOnPlay = false;
+        [SerializeField] private bool autoStartWithSession = true;
         [SerializeField] private bool autoCheckCapabilityOnStart = true;
 
         [Header("Steering")]
@@ -34,8 +35,10 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private float aggregateParameterDeltaThreshold = 0.12f;
 
         [Header("Playback")]
-        [SerializeField] private float minimumBufferedAudioSeconds = 0.35f;
-        [SerializeField] private float restoreCrossfadeSeconds = 1.25f;
+        [SerializeField] private float minimumBufferedAudioSeconds = 6f;
+        [SerializeField] private float streamCrossfadeSeconds = 8f;
+        [SerializeField] private float restoreCrossfadeSeconds = 2.5f;
+        [SerializeField] private float streamStallTimeoutSeconds = 20f;
         [SerializeField, Min(0f)] private float generationPlaybackGuardSeconds = 2f;
         [SerializeField] private bool restorePreviousClipOnStop = true;
 
@@ -95,6 +98,19 @@ namespace AdaptiveAudioVR.Integration
         private double playbackRecoveryUntil = -1;
         private readonly HashSet<string> issuedGenerationRequests = new HashSet<string>();
         private readonly HashSet<string> completedGenerationRequests = new HashSet<string>();
+        private bool disconnecting;
+        private bool shuttingDown;
+        private bool manuallyStopped;
+        private bool sessionWasRunning;
+        private string observedSessionId;
+        private int reconnectFailures;
+        private double nextAutomaticAttemptAt;
+        private double lastAudioReceivedAt;
+        private long observedReceivedSamples;
+        private long connectionVersion;
+        private long gapSamples;
+        private bool recoveryRequested;
+        private bool startOperationInFlight;
 
         private void Awake()
         {
@@ -118,6 +134,7 @@ namespace AdaptiveAudioVR.Integration
         private void Update()
         {
             ProcessInboundMessages();
+            UpdateAutomaticPlayback();
             TryStartBufferedPlayback();
             UpdateGenerationPlayback();
 
@@ -135,11 +152,71 @@ namespace AdaptiveAudioVR.Integration
 
         private async void OnDestroy()
         {
-            await DisconnectAsync(restoreClip: restorePreviousClipOnStop);
+            shuttingDown = true;
+            await DisconnectAsync(restoreClip: false);
+        }
+
+        private async void OnDisable()
+        {
+            await DisconnectAsync(restoreClip: false);
+        }
+
+        private void UpdateAutomaticPlayback()
+        {
+            double now = Time.realtimeSinceStartupAsDouble;
+            bool running = bootstrap != null && bootstrap.IsSessionRunning;
+            if (running && (!sessionWasRunning || observedSessionId != bootstrap.RelaySessionId))
+            {
+                manuallyStopped = false;
+                reconnectFailures = 0;
+                nextAutomaticAttemptAt = now;
+            }
+            if (!running || observedSessionId != bootstrap?.RelaySessionId)
+            {
+                if (sessionWasRunning && (IsRealtimeActive || websocket != null) && !disconnecting)
+                    _ = DisconnectAsync(restoreClip: false);
+            }
+            sessionWasRunning = running;
+            observedSessionId = bootstrap?.RelaySessionId;
+            if (shuttingDown || disconnecting || !running || !autoStartWithSession || manuallyStopped) return;
+            if (!bootstrap.CanPlayRealtimeMusic)
+            {
+                if (IsRealtimeActive || websocket != null) _ = DisconnectAsync(restoreClip: true);
+                return;
+            }
+            if (pcmAudioPlayer != null && pcmAudioPlayer.TotalReceivedSamples != observedReceivedSamples)
+            {
+                observedReceivedSamples = pcmAudioPlayer.TotalReceivedSamples;
+                lastAudioReceivedAt = now;
+            }
+            if (generationFaulted || recoveryRequested || (IsStreaming && now - lastAudioReceivedAt > Math.Max(5, streamStallTimeoutSeconds)))
+            {
+                _ = RecoverRealtimeAsync();
+                return;
+            }
+            if (!IsRealtimeActive && now >= nextAutomaticAttemptAt && bootstrap.IsPrepared)
+                _ = StartRealtimeStreamAsync();
+        }
+
+        private async Task RecoverRealtimeAsync()
+        {
+            if (disconnecting) return;
+            bootstrap?.InterruptAdaptation("Realtime stream interrupted; returning to cached music");
+            await DisconnectAsync(restoreClip: true);
+            ScheduleReconnect();
+            LastStatusMessage = "Cached music active; realtime reconnection scheduled.";
+        }
+
+        private void ScheduleReconnect()
+        {
+            reconnectFailures = Math.Min(reconnectFailures + 1, 5);
+            nextAutomaticAttemptAt = Time.realtimeSinceStartupAsDouble
+                + Math.Max(restoreCrossfadeSeconds + 0.5f, Math.Min(30, Math.Pow(2, reconnectFailures)));
         }
 
         public void StartRealtimeStream()
         {
+            manuallyStopped = false;
             if (IsCapabilityCheckRunning)
             {
                 LastStatusMessage = "Realtime capability check is still running.";
@@ -165,22 +242,27 @@ namespace AdaptiveAudioVR.Integration
 
         public void PauseRealtimeStream()
         {
+            manuallyStopped = true;
             _ = SendPlaybackControlAsync("pause");
         }
 
         public void ResumeRealtimeStream()
         {
-            _ = SendPlaybackControlAsync("play");
+            manuallyStopped = false;
+            if (IsConnected) _ = SendPlaybackControlAsync("play");
+            else _ = StartRealtimeStreamAsync();
         }
 
         public void StopRealtimeStream()
         {
+            manuallyStopped = true;
             _ = StopRealtimeStreamAsync();
         }
 
         public void StopForParticipantChange()
         {
-            if (IsRealtimeActive) _ = DisconnectAsync(restoreClip: false);
+            manuallyStopped = true;
+            if (IsRealtimeActive || websocket != null) _ = DisconnectAsync(restoreClip: false);
         }
 
         public void PushCurrentFrameToRealtime()
@@ -202,6 +284,14 @@ namespace AdaptiveAudioVR.Integration
 
         private async Task StartRealtimeStreamAsync()
         {
+            if (startOperationInFlight) return;
+            startOperationInFlight = true;
+            try { await StartRealtimeStreamCoreAsync(); }
+            finally { startOperationInFlight = false; }
+        }
+
+        private async Task StartRealtimeStreamCoreAsync()
+        {
             ResolveReferences();
             if (bootstrap == null || audioMixerController == null || pcmAudioPlayer == null)
             {
@@ -210,7 +300,7 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
-            if (IsConnecting)
+            if (IsConnecting || disconnecting || shuttingDown)
             {
                 return;
             }
@@ -231,15 +321,22 @@ namespace AdaptiveAudioVR.Integration
             if (!IsConnected)
             {
                 IsConnecting = true;
+                long version = ++connectionVersion;
+                lastAudioReceivedAt = Time.realtimeSinceStartupAsDouble;
                 LastStatusMessage = "Connecting to local Lyria realtime bridge...";
                 LastErrorMessage = string.Empty;
 
-                fallbackMeditationClip = audioMixerController.CurrentMeditationClip;
-                fallbackParameters = audioMixerController.CurrentAppliedParameters;
+                if (audioMixerController.CurrentMeditationClip != pcmAudioPlayer.StreamingClip && !audioMixerController.IsCrossfading)
+                {
+                    fallbackMeditationClip = audioMixerController.CurrentMeditationClip;
+                    fallbackParameters = audioMixerController.CurrentAppliedParameters;
+                }
                 generationFaulted = false;
                 backendTracksActionPlayback = false;
                 orphanedGeneration = false;
                 playbackRecoveryUntil = -1;
+                recoveryRequested = false;
+                gapSamples = 0;
                 submittedGenerationId = acceptedGenerationId = null;
                 issuedGenerationRequests.Clear();
                 completedGenerationRequests.Clear();
@@ -254,14 +351,18 @@ namespace AdaptiveAudioVR.Integration
 
                 try
                 {
+                    socketCancellation.CancelAfter(TimeSpan.FromSeconds(15));
                     await websocket.ConnectAsync(BuildRealtimeUri(), socketCancellation.Token);
+                    if (version != connectionVersion || shuttingDown) return;
+                    socketCancellation.CancelAfter(Timeout.Infinite);
                     IsConnected = true;
                     IsConnecting = false;
                     LastStatusMessage = "Connected to local realtime bridge.";
-                    receiveLoopTask = ReceiveLoopAsync(websocket, socketCancellation.Token);
+                    receiveLoopTask = ReceiveLoopAsync(websocket, socketCancellation.Token, version);
                 }
                 catch (Exception ex)
                 {
+                    if (version != connectionVersion || shuttingDown) return;
                     LastErrorMessage = ex.Message;
                     LastStatusMessage = $"Realtime connect failed: {ex.Message}";
                     SetCapabilityResult(false, $"Local realtime bridge connect failed: {ex.Message}", realtimeModel);
@@ -269,11 +370,16 @@ namespace AdaptiveAudioVR.Integration
                     IsConnected = false;
                     pendingRealtimeStart = false;
                     SuppressClipGeneration(false);
+                    await DisconnectAsync(restoreClip: true);
+                    ScheduleReconnect();
                     return;
                 }
             }
 
-            if (!await SendClientMessageAsync(syncMessage)) { pendingRealtimeStart = true; return; }
+            long sendVersion = connectionVersion;
+            bool synced = await SendClientMessageAsync(syncMessage);
+            if (sendVersion != connectionVersion || disconnecting || shuttingDown) return;
+            if (!synced) { pendingRealtimeStart = true; return; }
             activeGenerationMessage = syncMessage;
             syncedParameters = syncParameters;
             pendingRealtimeStart = false;
@@ -296,6 +402,12 @@ namespace AdaptiveAudioVR.Integration
 
         private async Task DisconnectAsync(bool restoreClip)
         {
+            if (disconnecting) return;
+            disconnecting = true;
+            ++connectionVersion;
+            IsConnected = false;
+            IsConnecting = false;
+            socketCancellation?.Cancel();
             pendingRealtimeStart = pendingManualSync = false;
             pendingBufferedPlaybackStart = false;
             HasBufferedPlaybackStarted = false;
@@ -307,10 +419,7 @@ namespace AdaptiveAudioVR.Integration
             {
                 try
                 {
-                    if (websocket.State == WebSocketState.Open)
-                    {
-                        await websocket.CloseAsync(WebSocketCloseStatus.NormalClosure, "closing", CancellationToken.None);
-                    }
+                    websocket.Abort();
                 }
                 catch
                 {
@@ -361,10 +470,12 @@ namespace AdaptiveAudioVR.Integration
             bootstrap?.MonitorAgent?.SetGenerationPlaybackAvailable(false);
             activeGenerationMessage = null;
             backendTracksActionPlayback = false;
+            generationFaulted = recoveryRequested = false;
             submittedGenerationId = acceptedGenerationId = null;
             syncedPlaybackReadyAt = double.PositiveInfinity;
 
-            pcmAudioPlayer?.ClearBuffer();
+            lock (inboundLock) inboundMessages.Clear();
+            if (!restoreClip) pcmAudioPlayer?.ClearBuffer();
             pcmAudioPlayer?.DetachFromMixer();
             bootstrap?.InterruptAdaptation("Realtime stream disconnected");
 
@@ -379,6 +490,9 @@ namespace AdaptiveAudioVR.Integration
             SuppressClipGeneration(false);
             bootstrap?.SetRealtimePlaybackReady(true);
             LastStatusMessage = restoreClip ? "Realtime stream stopped." : "Realtime stream disconnected.";
+            disconnecting = false;
+            nextAutomaticAttemptAt = Math.Max(nextAutomaticAttemptAt,
+                Time.realtimeSinceStartupAsDouble + restoreCrossfadeSeconds + 0.5f);
         }
 
         private async Task SendPlaybackControlAsync(string controlType)
@@ -538,6 +652,8 @@ namespace AdaptiveAudioVR.Integration
                 && audioMixerController != null && audioMixerController.IsMeditationPlaying;
             if (playing && (UnderflowSampleCount > observedUnderflows || DroppedSampleCount > observedDrops))
             {
+                gapSamples += Math.Max(0, UnderflowSampleCount - observedUnderflows);
+                if (gapSamples >= 48000 || DroppedSampleCount > observedDrops) recoveryRequested = true;
                 bootstrap.InterruptAdaptation("Realtime playback gap or dropped PCM; outcome discarded");
                 bootstrap.SetRealtimePlaybackReady(false);
                 playbackRecoveryUntil = Time.realtimeSinceStartupAsDouble + 5;
@@ -558,6 +674,7 @@ namespace AdaptiveAudioVR.Integration
                 && playing && BufferedSeconds >= minimumBufferedAudioSeconds && !generationFaulted && !orphanedGeneration)
             {
                 playbackRecoveryUntil = -1;
+                gapSamples = 0;
                 bootstrap.InterruptAdaptation("Realtime playback recovered; waiting for clean physiology");
                 bootstrap.SetRealtimePlaybackReady(true);
             }
@@ -714,6 +831,7 @@ namespace AdaptiveAudioVR.Integration
             catch (Exception ex)
             {
                 LastErrorMessage = ex.Message;
+                generationFaulted = true;
                 bootstrap?.InterruptAdaptation("Realtime command failed");
                 bootstrap?.SetRealtimePlaybackReady(false);
                 return false;
@@ -721,7 +839,7 @@ namespace AdaptiveAudioVR.Integration
             finally { sendLock.Release(); }
         }
 
-        private async Task ReceiveLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken)
+        private async Task ReceiveLoopAsync(ClientWebSocket socket, CancellationToken cancellationToken, long version)
         {
             try
             {
@@ -738,6 +856,8 @@ namespace AdaptiveAudioVR.Integration
                     {
                         continue;
                     }
+                    if (version != Interlocked.Read(ref connectionVersion)) return;
+                    inbound.connectionVersion = version;
 
                     if (string.Equals(inbound.type, "audio", StringComparison.OrdinalIgnoreCase))
                     {
@@ -758,6 +878,7 @@ namespace AdaptiveAudioVR.Integration
                                 EnqueueInbound(new RealtimeInboundMessage
                                 {
                                     type = "error",
+                                    connectionVersion = version,
                                     message = $"Failed to decode realtime audio chunk: {ex.Message}",
                                 });
                             }
@@ -778,6 +899,7 @@ namespace AdaptiveAudioVR.Integration
                 EnqueueInbound(new RealtimeInboundMessage
                 {
                     type = "error",
+                    connectionVersion = version,
                     message = $"Realtime receive loop failed: {ex.Message}",
                 });
             }
@@ -786,6 +908,7 @@ namespace AdaptiveAudioVR.Integration
                 EnqueueInbound(new RealtimeInboundMessage
                 {
                     type = "state",
+                    connectionVersion = version,
                     state = "closed",
                     message = "Realtime websocket closed.",
                 });
@@ -839,7 +962,7 @@ namespace AdaptiveAudioVR.Integration
                     inbound = inboundMessages.Dequeue();
                 }
 
-                HandleInboundMessage(inbound);
+                if (inbound.connectionVersion == Interlocked.Read(ref connectionVersion)) HandleInboundMessage(inbound);
             }
         }
 
@@ -926,7 +1049,7 @@ namespace AdaptiveAudioVR.Integration
                         IsPaused = false;
                         pendingBufferedPlaybackStart = false;
                         HasBufferedPlaybackStarted = false;
-                        SuppressClipGeneration(false);
+                        recoveryRequested = true;
                     }
                     else if (inbound.state == "synced" || inbound.state == "config_updated" || inbound.state == "prompts_updated")
                     {
@@ -974,7 +1097,7 @@ namespace AdaptiveAudioVR.Integration
                 return;
             }
 
-            if (BufferedSeconds < Mathf.Max(0.05f, minimumBufferedAudioSeconds))
+            if (BufferedSeconds < Mathf.Max(3f, minimumBufferedAudioSeconds))
             {
                 return;
             }
@@ -984,11 +1107,14 @@ namespace AdaptiveAudioVR.Integration
                     || !bootstrap.SharedAdaptation.IsCurrent(contentReservation))
                 && !bootstrap.TryBeginContentChange("Realtime playback attachment", out contentReservation)) return;
 
-            pcmAudioPlayer.AttachToMixer(audioMixerController, restartPlayback: true);
+            pcmAudioPlayer.AttachToMixer(audioMixerController, restartPlayback: true, crossfadeSeconds: streamCrossfadeSeconds);
             audioMixerController.SetGeneratedControls(syncedParameters);
             CompleteSyncedContentAtPlayback();
             audioMixerController.SetMeditationPlaybackPaused(false);
             HasBufferedPlaybackStarted = true;
+            reconnectFailures = 0;
+            observedUnderflows = UnderflowSampleCount;
+            observedDrops = DroppedSampleCount;
             pendingBufferedPlaybackStart = false;
             LastStatusMessage = $"Realtime audio playback started with {BufferedSeconds:F2}s buffer.";
         }
@@ -996,7 +1122,8 @@ namespace AdaptiveAudioVR.Integration
         private void CompleteSyncedContentAtPlayback()
         {
             float delay = BufferedSeconds + generationPlaybackGuardSeconds
-                + (pcmAudioPlayer.StreamingClip != null ? pcmAudioPlayer.StreamingClip.length : 0);
+                + (pcmAudioPlayer.StreamingClip != null ? pcmAudioPlayer.StreamingClip.length : 0)
+                + (audioMixerController.IsCrossfading ? streamCrossfadeSeconds : 0);
             syncedPlaybackReadyAt = Time.realtimeSinceStartupAsDouble + delay;
             bootstrap?.CompleteContentChange(contentReservation, delay);
             contentReservation = 0;
@@ -1200,6 +1327,7 @@ namespace AdaptiveAudioVR.Integration
             public string filteredReason = string.Empty;
             public string requestId = string.Empty;
             public string actionPlaybackProtocol = string.Empty;
+            [NonSerialized] public long connectionVersion;
         }
 
         [Serializable]

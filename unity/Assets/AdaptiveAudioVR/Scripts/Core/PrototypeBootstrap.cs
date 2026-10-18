@@ -112,6 +112,12 @@ namespace AdaptiveAudioVR.Core
         public void SetRealtimePlaybackReady(bool ready) => realtimePlaybackReady = ready;
         private bool applicationPaused;
         private bool applicationFocused = true;
+        public bool CanPlayRealtimeMusic => IsSessionRunning && applicationFocused && !applicationPaused
+            && (safetyManager == null || !safetyManager.EmergencyMute)
+            && (productionCoordinator == null || !productionCoordinator.IsInitialized || (!productionCoordinator.IsHeadsetLifecycleSuspended
+                && productionCoordinator.IsNetworkConnected
+                && (productionCoordinator.Phase == VrSessionPhase.Acclimatization
+                    || productionCoordinator.Phase == VrSessionPhase.Adaptive)));
 
         public void SetRuleOnlyMode()
         {

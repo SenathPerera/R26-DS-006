@@ -101,6 +101,10 @@ namespace UnityEngine
     }
     public static class Mathf
     {
+        public const float PI = (float)Math.PI;
+        public static float Cos(float value) => (float)Math.Cos(value);
+        public static float Sin(float value) => (float)Math.Sin(value);
+        public static float Atan2(float y, float x) => (float)Math.Atan2(y, x);
         public static float Abs(float value) => Math.Abs(value);
         public static float Clamp(float value, float min, float max) => Math.Max(min, Math.Min(max, value));
         public static int Clamp(int value, int min, int max) => Math.Max(min, Math.Min(max, value));
@@ -122,6 +126,8 @@ namespace AdaptiveAudioVR.Core
     public sealed class PrototypeBootstrap
     {
         public bool IsSessionRunning = true, IsPrepared = true, PlaybackReady = true;
+        public bool CanPlayRealtimeMusic = true;
+        public string RelaySessionId = "test-session";
         public AdaptiveAudioVR.RL.Agent.AudioRLAgent MonitorAgent;
         public LaminarVR.AdaptiveMeditation.Coordination.AdaptationCoordinator SharedAdaptation => MonitorAgent.Coordination;
         public SignalPacket CurrentSignal => MonitorAgent.CurrentSignal;

@@ -191,7 +191,11 @@ namespace AdaptiveAudioVR.Audio
 
             if (currentMeditationSource.clip == clip)
             {
-                return false;
+                if (crossfadeRoutine == null) return false;
+                StopCoroutine(crossfadeRoutine);
+                crossfadeRoutine = StartCoroutine(ReturnToCurrentClipCoroutine(
+                    durationSeconds > 0 ? durationSeconds : defaultMeditationCrossfadeSeconds));
+                return true;
             }
 
             float adaptiveFadeSeconds = Mathf.Lerp(1.25f, 6f, CurrentAppliedParameters.fade);
@@ -251,8 +255,8 @@ namespace AdaptiveAudioVR.Audio
             {
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / durationSeconds);
-                currentMeditationBlend = 1f - t;
-                transitionMeditationBlend = t;
+                currentMeditationBlend = Mathf.Cos(t * Mathf.PI * 0.5f);
+                transitionMeditationBlend = Mathf.Sin(t * Mathf.PI * 0.5f);
                 ApplyNow(CurrentAppliedParameters);
                 yield return null;
             }
@@ -279,6 +283,27 @@ namespace AdaptiveAudioVR.Audio
                 transitionMeditationSource.volume = 0f;
             }
 
+            ApplyNow(CurrentAppliedParameters);
+            crossfadeRoutine = null;
+        }
+
+        private IEnumerator ReturnToCurrentClipCoroutine(float durationSeconds)
+        {
+            float startAngle = Mathf.Atan2(transitionMeditationBlend, currentMeditationBlend);
+            float elapsed = 0;
+            while (elapsed < durationSeconds)
+            {
+                elapsed += Time.deltaTime;
+                float angle = Mathf.Lerp(startAngle, 0, elapsed / Mathf.Max(0.01f, durationSeconds));
+                currentMeditationBlend = Mathf.Cos(angle);
+                transitionMeditationBlend = Mathf.Sin(angle);
+                ApplyNow(CurrentAppliedParameters);
+                yield return null;
+            }
+            currentMeditationBlend = 1;
+            transitionMeditationBlend = 0;
+            transitionMeditationSource.Stop();
+            transitionMeditationSource.clip = null;
             ApplyNow(CurrentAppliedParameters);
             crossfadeRoutine = null;
         }

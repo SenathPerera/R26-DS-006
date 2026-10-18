@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -297,25 +298,38 @@ async def live_music(websocket: WebSocket, model: str = DEFAULT_REALTIME_MODEL) 
             )
 
             stream_state = LiveMusicStreamState()
+            monitor_metrics.count("realtimeConnections")
             forward_task = asyncio.create_task(_forward_live_music_messages(session, websocket, stream_state))
+            command_task = asyncio.create_task(_receive_live_music_commands(session, websocket, stream_state))
             try:
-                while True:
-                    raw_message = await websocket.receive_text()
-                    payload = json.loads(raw_message)
-                    await _handle_live_music_client_message(session, websocket, payload, stream_state)
+                done, _ = await asyncio.wait({forward_task, command_task}, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
             except WebSocketDisconnect:
                 pass
             finally:
                 forward_task.cancel()
-                await asyncio.gather(forward_task, return_exceptions=True)
+                command_task.cancel()
+                await asyncio.gather(forward_task, command_task, return_exceptions=True)
     except Exception as exc:  # pragma: no cover - depends on remote API
-        await _send_ws_message(websocket, {"type": "error", "message": str(exc)})
+        monitor_metrics.count("realtimeFailures")
+        try:
+            await _send_ws_message(websocket, {"type": "error", "message": _redact_api_key(str(exc))})
+        except (RuntimeError, WebSocketDisconnect):
+            pass
     finally:
         await client.aio.aclose()
         try:
             await websocket.close()
         except Exception:
             pass
+
+
+async def _receive_live_music_commands(session: Any, websocket: WebSocket, state: LiveMusicStreamState) -> None:
+    while True:
+        raw_message = await websocket.receive_text()
+        payload = json.loads(raw_message)
+        await _handle_live_music_client_message(session, websocket, payload, state)
 
 
 async def _forward_live_music_messages(session: Any, websocket: WebSocket, state: LiveMusicStreamState) -> None:
@@ -342,6 +356,9 @@ async def _forward_live_music_messages(session: Any, websocket: WebSocket, state
                         "format": REALTIME_FORMAT,
                         "data": base64.b64encode(chunk_bytes).decode("ascii"),
                     })
+                    monitor_metrics.count("realtimeAudioChunks")
+                    monitor_metrics.count("realtimeAudioBytes", len(chunk_bytes))
+                    monitor_metrics.set(lastRealtimeAudioAt=time.time())
 
         filtered_prompt = getattr(message, "filtered_prompt", None)
         if filtered_prompt is not None:
@@ -500,7 +517,7 @@ async def _open_and_close_realtime_session(client: Any, model: str) -> None:
 
 
 def _summarize_realtime_probe_error(exc: Exception) -> str:
-    message = _safe_to_string(exc).strip() or exc.__class__.__name__
+    message = _redact_api_key(_safe_to_string(exc).strip()) or exc.__class__.__name__
     lowered = message.lower()
 
     if "http 404" in lowered or "status code 404" in lowered:
@@ -519,6 +536,11 @@ def _summarize_realtime_probe_error(exc: Exception) -> str:
         return "The realtime capability probe timed out before Google opened the session."
 
     return message
+
+
+def _redact_api_key(message: str) -> str:
+    key = os.getenv("GEMINI_API_KEY", "")
+    return message.replace(key, "[REDACTED]") if key else message
 
 
 def _normalize_realtime_model(model: str) -> str:

@@ -26,6 +26,13 @@ internal static class GenerationPlaybackTests
         run("Realtime PCM gaps cancel pending audio rewards", RealtimeGap);
         run("Lost realtime PCM markers freeze learning rather than guessing playback", RealtimeLoss);
         run("Older realtime bridges keep generation-only actions disabled", RealtimeCompatibility);
+        run("Generation PCM blends stereo tails once without prematurely confirming playback", GenerationBlend);
+        run("Equal-power source crossfade overlaps without a midpoint power dip", EqualPowerFade);
+        run("Realtime automatic lifecycle respects readiness, manual stop and session changes", AutomaticLifecycle);
+        run("Realtime retry delay is bounded and includes fallback crossfade time", RetryDelay);
+        run("Stale socket callbacks cannot affect a new realtime connection", StaleConnection);
+        run("Realtime waits for startup buffering before acquiring playback ownership", StartupBuffer);
+        run("Failed stream attachment can fade back to the still-playing original clip", ReverseCrossfade);
     }
 
     private static void Check(bool condition, string message) { if (!condition) throw new Exception(message); }
@@ -266,5 +273,108 @@ internal static class GenerationPlaybackTests
         Receive(f, type: "connected"); Update(f, 120);
         Check(!f.Agent.GenerationPlaybackAvailable && f.Service.LastWarningMessage.Contains("density/tempo actions disabled"),
             "Old bridge admitted unconfirmable generation action");
+    }
+
+    private static byte[] PcmBytes(int samples, short value)
+    {
+        var data = new byte[samples * 2];
+        for (int i = 0; i < samples; i++) { data[i * 2] = (byte)value; data[i * 2 + 1] = (byte)(value >> 8); }
+        return data;
+    }
+
+    private static void GenerationBlend()
+    {
+        var pcm = new RealtimePcmAudioPlayer(); Invoke(pcm, "Awake");
+        pcm.EnqueuePcm16(PcmBytes(384000, 3276));
+        pcm.TrackPlaybackRequest("next", 2);
+        pcm.EnqueuePcm16(PcmBytes(192000, 13107), "next");
+        Check(pcm.BlendedSampleCount == 96000, "Did not blend one second of future stereo PCM");
+        Near(pcm.BufferedSeconds, 5);
+        var read = typeof(RealtimePcmAudioPlayer).GetMethod("OnAudioRead", Private);
+        var output = new float[480000]; read.Invoke(pcm, new object[] { output });
+        Check(output[336000] > 0.35f && output[336000] < 0.36f, "Crossfade midpoint not equal-power");
+        Near(output[336000], output[336001]);
+        Check(!pcm.HasRenderedRequest("next", out _), "Blend skipped the post-blend playback guard");
+        pcm.EnqueuePcm16(PcmBytes(192000, 13107), "next");
+        Check(pcm.BlendedSampleCount == 96000, "Every chunk repeated the transition");
+        read.Invoke(pcm, new object[] { new float[2] });
+        Check(pcm.HasRenderedRequest("next", out _), "Consumed blended request never confirmed");
+    }
+
+    private static void EqualPowerFade()
+    {
+        var mixer = new AudioMixerController();
+        Set(mixer, "currentMeditationSource", new AudioSource { clip = new AudioClip(), isPlaying = true });
+        Set(mixer, "transitionMeditationSource", new AudioSource());
+        var routine = (System.Collections.IEnumerator)typeof(AudioMixerController).GetMethod("CrossfadeMeditationCoroutine", Private)
+            .Invoke(mixer, new object[] { new AudioClip(), 8f, true });
+        Time.deltaTime = 4; routine.MoveNext();
+        float a = (float)typeof(AudioMixerController).GetField("currentMeditationBlend", Private).GetValue(mixer);
+        float b = (float)typeof(AudioMixerController).GetField("transitionMeditationBlend", Private).GetValue(mixer);
+        Near(a * a + b * b, 1); Check(a > 0.7f && b > 0.7f, "Linear midpoint fade remained");
+    }
+
+    private static void AutomaticLifecycle()
+    {
+        var f = Stream();
+        Set(f.Service, "sessionWasRunning", true); Set(f.Service, "observedSessionId", "test-session");
+        Set(f.Service, "manuallyStopped", true);
+        Invoke(f.Service, "UpdateAutomaticPlayback");
+        Check(f.Service.IsConnected, "Manual stop triggered unexpected automatic work");
+        f.Bootstrap.CanPlayRealtimeMusic = false; Set(f.Service, "manuallyStopped", false);
+        Invoke(f.Service, "UpdateAutomaticPlayback");
+        Check(!f.Service.IsConnected && !f.Agent.HasPendingOutcome, "Session pause did not stop streaming and reward attribution");
+        Set(f.Service, "manuallyStopped", true); f.Bootstrap.IsPrepared = false;
+        f.Bootstrap.CanPlayRealtimeMusic = true; f.Bootstrap.RelaySessionId = "new-session";
+        Invoke(f.Service, "UpdateAutomaticPlayback");
+        Check(!(bool)typeof(LyriaRealtimeStreamingService).GetField("manuallyStopped", Private).GetValue(f.Service),
+            "Prior participant's manual stop suppressed a new session");
+    }
+
+    private static void RetryDelay()
+    {
+        var f = Stream(); Time.realtimeSinceStartupAsDouble = 120;
+        for (int i = 0; i < 10; i++) Invoke(f.Service, "ScheduleReconnect");
+        double retry = (double)typeof(LyriaRealtimeStreamingService).GetField("nextAutomaticAttemptAt", Private).GetValue(f.Service);
+        Check(retry == 150, "Unbounded reconnect delay");
+        Set(f.Service, "reconnectFailures", 0); Invoke(f.Service, "ScheduleReconnect");
+        retry = (double)typeof(LyriaRealtimeStreamingService).GetField("nextAutomaticAttemptAt", Private).GetValue(f.Service);
+        Check(retry >= 123, "Retry clears outgoing PCM before fallback crossfade finishes");
+    }
+
+    private static void StaleConnection()
+    {
+        var f = Stream(); Set(f.Service, "connectionVersion", 2L);
+        var dto = typeof(LyriaRealtimeStreamingService).GetNestedType("RealtimeInboundMessage", BindingFlags.NonPublic);
+        var message = Activator.CreateInstance(dto, true);
+        dto.GetField("type").SetValue(message, "error"); dto.GetField("connectionVersion").SetValue(message, 1L);
+        typeof(LyriaRealtimeStreamingService).GetMethod("EnqueueInbound", Private).Invoke(f.Service, new[] { message });
+        Invoke(f.Service, "ProcessInboundMessages");
+        Check(f.Service.IsConnected && f.Agent.HasPendingOutcome, "Old socket interrupted the current connection");
+    }
+
+    private static void StartupBuffer()
+    {
+        var f = Stream(); Set(f.Service, "<HasBufferedPlaybackStarted>k__BackingField", false);
+        Set(f.Service, "pendingBufferedPlaybackStart", true);
+        Invoke(f.Service, "TryStartBufferedPlayback");
+        Check(!f.Service.HasBufferedPlaybackStarted && f.Agent.Coordination.Status.Owner == AdaptationOwner.Audio,
+            "Small buffer interrupted the active RL reservation");
+    }
+
+    private static void ReverseCrossfade()
+    {
+        var mixer = new AudioMixerController(); var fallback = new AudioClip();
+        var current = new AudioSource { clip = fallback, isPlaying = true };
+        var transition = new AudioSource { clip = new AudioClip(), isPlaying = true };
+        Set(mixer, "currentMeditationSource", current); Set(mixer, "transitionMeditationSource", transition);
+        Set(mixer, "currentMeditationBlend", 0.8f); Set(mixer, "transitionMeditationBlend", 0.6f);
+        Set(mixer, "crossfadeRoutine", new Coroutine());
+        Check(mixer.CrossfadeToMeditationClip(fallback, 2.5f), "Fallback to current clip was incorrectly ignored");
+        var routine = (System.Collections.IEnumerator)typeof(AudioMixerController).GetMethod("ReturnToCurrentClipCoroutine", Private)
+            .Invoke(mixer, new object[] { 2.5f });
+        Time.deltaTime = 2.5f; routine.MoveNext(); routine.MoveNext();
+        Check(current.clip == fallback && current.isPlaying && !transition.isPlaying && !mixer.IsCrossfading,
+            "Interrupted crossfade ended on the failed stream");
     }
 }

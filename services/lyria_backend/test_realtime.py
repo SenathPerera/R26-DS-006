@@ -3,8 +3,11 @@ import asyncio
 import base64
 import json
 import unittest
+import os
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from unittest.mock import patch
+from fastapi import WebSocketDisconnect
 
 from services.lyria_backend import app as bridge
 
@@ -12,6 +15,20 @@ from services.lyria_backend import app as bridge
 class FakeSocket:
     def __init__(self):
         self.messages = []
+        self.commands = asyncio.Queue()
+        self.closed = False
+
+    async def accept(self):
+        pass
+
+    async def close(self, code=1000):
+        self.closed = True
+
+    async def receive_text(self):
+        item = await self.commands.get()
+        if item is None:
+            raise WebSocketDisconnect()
+        return json.dumps(item)
 
     async def send_text(self, text):
         self.messages.append(json.loads(text))
@@ -135,6 +152,49 @@ class RealtimeProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([name for name, _ in self.session.calls], ["prompts", "config", "play"])
         self.assertEqual(self.socket.messages[-1]["state"], "playing")
         self.assertEqual(self.socket.messages[-1]["requestId"], "")
+
+    async def run_route(self, failure=False):
+        closed = asyncio.Event()
+        session = self.session
+
+        @asynccontextmanager
+        async def connect(**kwargs):
+            yield session
+
+        async def close():
+            closed.set()
+
+        client = SimpleNamespace(aio=SimpleNamespace(live=SimpleNamespace(music=SimpleNamespace(connect=connect)), aclose=close))
+        if failure:
+            async def receive():
+                raise RuntimeError("fixture-secret upstream failed")
+                yield
+            session.receive = receive
+        with patch.object(bridge, "genai", SimpleNamespace(Client=lambda **kwargs: client)), \
+                patch.dict(os.environ, {"GEMINI_API_KEY": "fixture-secret"}):
+            await asyncio.wait_for(bridge.live_music(self.socket), 2)
+        self.assertTrue(closed.is_set())
+        self.assertTrue(self.socket.closed)
+
+    async def test_provider_end_closes_bridge_instead_of_hanging_on_commands(self):
+        await self.session.chunks.put(None)
+        await self.run_route()
+        self.assertEqual(self.socket.messages[0]["actionPlaybackProtocol"], bridge.ACTION_PLAYBACK_PROTOCOL)
+
+    async def test_provider_failure_is_forwarded_without_leaking_credentials(self):
+        await self.run_route(failure=True)
+        self.assertEqual(self.socket.messages[-1]["type"], "error")
+        self.assertNotIn("fixture-secret", self.socket.messages[-1]["message"])
+
+    async def test_client_disconnect_releases_provider_session(self):
+        await self.socket.commands.put(None)
+        await self.run_route()
+
+    async def test_route_forwards_audio_until_client_finishes(self):
+        await self.session.chunks.put(audio())
+        await self.session.chunks.put(None)
+        await self.run_route()
+        self.assertTrue(any(m["type"] == "audio" for m in self.socket.messages))
 
 
 if __name__ == "__main__":

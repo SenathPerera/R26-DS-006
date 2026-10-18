@@ -39,6 +39,7 @@ namespace AdaptiveAudioVR.Integration
         [SerializeField] private bool installOnAwake = true;
         [SerializeField] private bool includeValidationDashboard = true;
         [SerializeField] private bool includeRealtimeBridge = true;
+        [SerializeField] private bool preferRealtimeMusic = true;
         [SerializeField] private bool autoGenerateMeditationClipOnStart = false;
         [SerializeField] private bool autoGenerateOnActionChange = false;
         [SerializeField] private bool autoCheckRealtimeCapabilityOnStart = true;
@@ -172,6 +173,7 @@ namespace AdaptiveAudioVR.Integration
                     "websocketBaseUrl",
                     resolvedRealtimeWebsocketBaseUrl);
                 SetPrivateField(realtimeStreamingService, "autoCheckCapabilityOnStart", autoCheckRealtimeCapabilityOnStart);
+                SetPrivateField(realtimeStreamingService, "autoStartWithSession", preferRealtimeMusic);
             }
 
             if (dashboardInstaller != null)

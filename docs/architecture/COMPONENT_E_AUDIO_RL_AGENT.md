@@ -190,8 +190,9 @@ Queue loss, playback gaps, pause, transport failures, and cancellation prevent
 learning. An already-sent cancelled action is reconciled at playback **without**
 a reward while both agents wait; a late callback cannot confirm a newer action.
 After a playback gap, the system needs stable buffering and clean physiology.
-An irrecoverable lost marker or failed command requires stopping and restarting
-realtime music, rather than guessing that the action was heard.
+An irrecoverable lost marker or failed command triggers automatic fallback and
+reconnection in the normal session flow, rather than guessing that the action
+was heard. Manual-mode streams can be stopped/restarted explicitly.
 
 The request ID identifies the bridge's accepted configuration revision. The
 provider does not attach that ID to generated audio; the guard and engine queue
@@ -201,6 +202,16 @@ audibility on Quest before using these timings as study evidence. Settings are
 generation targets, not measured musical density or measured BPM.
 
 ### Deploy And Verify
+
+Realtime is now the default active-session music path (`Prefer Realtime Music`
+on the installer). The initial personalized clip remains the start gate and
+fallback. Six seconds of PCM are buffered before an eight-second equal-power
+source crossfade. Automatic reconnect uses cached music while respecting session
+lifecycle and manual Stop/Pause. Revision changes can blend one second of future
+queued PCM without discarding the two-second reserve; reward settling still
+starts only after the marked revision reaches the playback confirmation gate.
+See `services/lyria_backend/README.md` for live smoke/20-minute soak commands and
+the remaining limits of buffering, musical continuity, and headset validation.
 
 Restart `services/lyria_backend/app.py` on the Windows host and rebuild/redeploy
 Unity/Quest from this checkout. No firmware, mobile schema or mobile APK change

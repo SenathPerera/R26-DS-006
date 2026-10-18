@@ -30,6 +30,7 @@ namespace AdaptiveAudioVR.Audio
         public long TotalReceivedSamples { get; private set; }
         public long UnderflowSampleCount { get; private set; }
         public long DroppedSampleCount { get; private set; }
+        public long BlendedSampleCount { get; private set; }
         public bool IsAttachedToMixer { get; private set; }
         public AudioClip StreamingClip => streamingClip;
 
@@ -42,10 +43,15 @@ namespace AdaptiveAudioVR.Audio
         private readonly AudioPlaybackMarker playbackMarker = new AudioPlaybackMarker();
         private long writeSequence;
         private long readSequence;
+        private string pendingBlendRequestId;
 
         public void TrackPlaybackRequest(string requestId, float guardSeconds)
         {
-            lock (bufferLock) playbackMarker.Begin(requestId, (long)(Math.Max(0, guardSeconds) * sampleRate * channels));
+            lock (bufferLock)
+            {
+                playbackMarker.Begin(requestId, (long)(Math.Max(0, guardSeconds) * sampleRate * channels));
+                pendingBlendRequestId = requestId;
+            }
         }
 
         public bool HasRenderedRequest(string requestId, out bool lost)
@@ -94,6 +100,7 @@ namespace AdaptiveAudioVR.Audio
                 bufferedSamples = 0;
                 readSequence = writeSequence;
                 playbackMarker.Invalidate();
+                pendingBlendRequestId = null;
 
                 if (ringBuffer != null)
                 {
@@ -102,7 +109,7 @@ namespace AdaptiveAudioVR.Audio
             }
         }
 
-        public void AttachToMixer(AudioMixerController mixerController, bool restartPlayback = true)
+        public void AttachToMixer(AudioMixerController mixerController, bool restartPlayback = true, float crossfadeSeconds = 0)
         {
             if (mixerController == null)
             {
@@ -111,7 +118,8 @@ namespace AdaptiveAudioVR.Audio
 
             EnsureStreamingClip();
             mixerController.SetMeditationPlaybackPaused(false);
-            mixerController.ReplaceMeditationClip(streamingClip, restartPlayback);
+            if (crossfadeSeconds <= 0 || !mixerController.CrossfadeToMeditationClip(streamingClip, crossfadeSeconds, restartPlayback))
+                mixerController.ReplaceMeditationClip(streamingClip, restartPlayback);
             IsAttachedToMixer = true;
         }
 
@@ -133,8 +141,26 @@ namespace AdaptiveAudioVR.Audio
             lock (bufferLock)
             {
                 int capacity = ringBuffer.Length;
-                playbackMarker.Enqueued(requestId, writeSequence);
-                for (int byteIndex = 0; byteIndex + 1 < pcmBytes.Length; byteIndex += 2)
+                int overlap = 0;
+                if (pendingBlendRequestId != null && pendingBlendRequestId == requestId)
+                {
+                    // Blend only future queue samples, keeping two seconds of playback reserve.
+                    overlap = Math.Min(sampleCount, Math.Min(sampleRate * channels,
+                        Math.Max(0, bufferedSamples - sampleRate * channels * 2)));
+                    overlap -= overlap % channels;
+                    pendingBlendRequestId = null;
+                    for (int i = 0; i < overlap; i++)
+                    {
+                        int index = (writeIndex - overlap + i + capacity) % capacity;
+                        short sample = (short)(pcmBytes[i * 2] | (pcmBytes[i * 2 + 1] << 8));
+                        double t = (double)(i / channels + 1) / (overlap / channels + 1);
+                        ringBuffer[index] = Mathf.Clamp((float)(ringBuffer[index] * Math.Cos(t * Math.PI / 2)
+                            + sample / 32768f * Math.Sin(t * Math.PI / 2)), -1f, 1f);
+                    }
+                    BlendedSampleCount += overlap;
+                }
+                playbackMarker.Enqueued(requestId, writeSequence - overlap);
+                for (int byteIndex = overlap * 2; byteIndex + 1 < pcmBytes.Length; byteIndex += 2)
                 {
                     short sample = (short)(pcmBytes[byteIndex] | (pcmBytes[byteIndex + 1] << 8));
                     float normalized = Mathf.Clamp(sample / 32768f, -1f, 1f);
