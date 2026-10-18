@@ -31,6 +31,10 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
         [SerializeField]
         private Volume globalColorVolume = null;
 
+        [Header("Optional Scenic Motion")]
+        [SerializeField]
+        private TemplePondSkyMotion skyMotion = null;
+
         private TemplePondEnvironmentMapping mapping;
         private ColorAdjustments colorAdjustments;
         private MaterialPropertyBlock waterPropertyBlock;
@@ -239,6 +243,11 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Environment
                     mapping.WaterMotionRange.y,
                     state.AmbientMotion));
             pondWaterRenderer.SetPropertyBlock(waterPropertyBlock);
+
+            if (skyMotion != null)
+            {
+                skyMotion.ApplyAmbientMotion(state.AmbientMotion);
+            }
 
             LastAppliedState = state;
             HasAppliedState = true;
