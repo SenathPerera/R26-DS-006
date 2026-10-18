@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
-    [ValidateRange(0, 120)]
+    [ValidateRange(0, 600)]
     [int]$ObserveSeconds = 20,
+
+    [ValidateRange(1, 60)]
+    [int]$SampleIntervalSeconds = 10,
 
     [string]$RepoRoot = ''
 )
@@ -204,9 +207,18 @@ function Select-RelaySession {
 }
 
 function Get-DiagnosticsSnapshot {
+    param([string]$SessionLabel = '')
+
     $componentBProbe = Invoke-JsonProbe -Uri 'http://127.0.0.1:8000/monitor/status'
+    $predictionProbe = Invoke-JsonProbe -Uri 'http://127.0.0.1:8000/stress/latest'
     $relayProbe = Invoke-JsonProbe -Uri 'http://127.0.0.1:8080/monitor/status'
     $session = if ($relayProbe.Ok) { Select-RelaySession -RelayMonitor $relayProbe.Data } else { $null }
+    if ($relayProbe.Ok -and $SessionLabel) {
+        $sessions = @(Get-NestedValue $relayProbe.Data @('details', 'sessions') -Default @())
+        $session = $sessions | Where-Object {
+            (Get-NestedValue $_ @('label')) -eq $SessionLabel
+        } | Select-Object -First 1
+    }
     $agentProbe = $null
 
     if ($null -ne $session) {
@@ -228,11 +240,89 @@ function Get-DiagnosticsSnapshot {
     return [pscustomobject]@{
         ComponentBProbe = $componentBProbe
         ComponentB = if ($componentBProbe.Ok) { $componentBProbe.Data } else { $null }
+        Prediction = if ($predictionProbe.Ok) { $predictionProbe.Data } else { $null }
         RelayProbe = $relayProbe
         Relay = if ($relayProbe.Ok) { $relayProbe.Data } else { $null }
         Session = $session
         AgentProbe = $agentProbe
         Agent = $agentSample
+    }
+}
+
+function Get-SourceNumber {
+    param([string]$RelativePath, [string]$Name, [switch]$CSharp)
+
+    $path = Join-Path $RepoRoot $RelativePath
+    if (-not (Test-Path -LiteralPath $path)) { return $null }
+    $pattern = if ($CSharp) {
+        '\b' + [regex]::Escape($Name) + '\s*=\s*([0-9]+(?:\.[0-9]+)?)f?\s*;'
+    } else {
+        '(?m)^\s*' + [regex]::Escape($Name) + ':\s*([0-9]+(?:\.[0-9]+)?)\s*$'
+    }
+    $match = [regex]::Match((Get-Content -LiteralPath $path -Raw), $pattern)
+    if ($match.Success) { return Get-Number $match.Groups[1].Value }
+    return $null
+}
+
+function Show-RLConfiguration {
+    $audioSource = 'unity/Assets/AdaptiveAudioVR/Scripts/RL/Agent/AudioRLAgent.cs'
+    $physiologyProfile = 'unity/Assets/Laminar VR/Configuration/Physiology/ComponentBPhysiologyValidationProfile.asset'
+    $rewardProfile = 'unity/Assets/Laminar VR/Configuration/Rewards/AdaptiveVrRewardPipelineProfile.asset'
+    $coordinatorProfile = 'unity/Assets/Laminar VR/Configuration/Application/AdaptiveVrProductionCoordinatorProfile.asset'
+    $script:AudioMinimumQuality = Get-SourceNumber $audioSource 'lowSignalQualityThreshold' -CSharp
+    $script:AudioMinimumConfidence = Get-SourceNumber $audioSource 'lowConfidenceThreshold' -CSharp
+    $script:VisualForwardInterval = Get-SourceNumber $coordinatorProfile 'expectedPhysiologyOutputIntervalSeconds'
+    $script:VisualSettling = Get-SourceNumber $rewardProfile 'settlingSeconds'
+    $script:VisualRewardTimeout = Get-SourceNumber $rewardProfile 'maximumAttributionWaitSeconds'
+    Add-Line ''
+    Add-Line '--- RL limits in this checkout ---'
+    Add-Line '[INFO] These are source defaults/profile values. Inspector overrides and an older installed Unity build can differ.'
+    Add-Line ('[DATA] Audio source defaults: minimum quality={0}; minimum confidence={1}; decision interval={2}s; outcome timeout={3}s' -f
+        (Format-Value $script:AudioMinimumQuality), (Format-Value $script:AudioMinimumConfidence),
+        (Format-Value (Get-SourceNumber $audioSource 'productionMinimumDecisionIntervalSeconds' -CSharp)),
+        (Format-Value (Get-SourceNumber $audioSource 'outcomeTimeoutSeconds' -CSharp)))
+    Add-Line ('[DATA] Visual profiles: minimum decision quality={0}; minimum reward quality={1}; forward interval={2}s; settling={3}s; reward timeout={4}s' -f
+        (Format-Value (Get-SourceNumber $physiologyProfile 'minimumDecisionSignalQuality')),
+        (Format-Value (Get-SourceNumber $physiologyProfile 'minimumRewardSignalQuality')),
+        (Format-Value $script:VisualForwardInterval), (Format-Value $script:VisualSettling),
+        (Format-Value $script:VisualRewardTimeout))
+}
+
+function Show-PredictionSnapshot {
+    param([AllowNull()]$Snapshot)
+
+    $prediction = $Snapshot.Prediction
+    if ($null -eq $prediction) {
+        Add-Check 'WARN' 'Component B has no readable /stress/latest prediction yet.'
+        return
+    }
+    $start = Get-NestedValue $prediction @('windowStart')
+    $end = Get-NestedValue $prediction @('windowEnd')
+    $span = if ($null -ne $start -and $null -ne $end) { (Get-Number $end) - (Get-Number $start) } else { $null }
+    $quality = Get-NestedValue $prediction @('signalQuality')
+    $confidence = Get-NestedValue $prediction @('stress', 'confidence')
+    Add-Line ('[DATA] Latest B prediction (process-wide): quality={0}; confidence margin={1}; stress mode={2}; window span={3}s; window age={4}' -f
+        (Format-Value $quality), (Format-Value $confidence),
+        (Format-Value (Get-NestedValue $prediction @('stress', 'mode'))),
+        (Format-Value $span), (Format-Age $end))
+    Add-Line '[INFO] Quality is the fraction of heartbeat intervals accepted before repair. Confidence is the model probability margin, not a clinical accuracy percentage.'
+    if ($null -ne $quality -and $null -ne $script:AudioMinimumQuality -and (Get-Number $quality) -lt $script:AudioMinimumQuality) {
+        Add-Check 'WARN' 'Latest B quality is below the audio source minimum. Inspect finger contact, movement and PPG acquisition; confirm the Unity runtime gate in the trace.'
+    }
+    if ($null -ne $confidence -and $null -ne $script:AudioMinimumConfidence -and (Get-Number $confidence) -lt $script:AudioMinimumConfidence) {
+        Add-Check 'WARN' 'Latest B confidence is below the audio source minimum; that input cannot open an audio learning turn under those settings.'
+    }
+    if ($null -ne $span) {
+        if ($span -lt 30 -or $span -gt 120) {
+            Add-Check 'WARN' 'Latest B window is outside the audio production window duration range of 30-120 seconds.'
+        }
+        if ($null -ne $script:VisualSettling -and $null -ne $script:VisualForwardInterval -and $null -ne $script:VisualRewardTimeout) {
+            $budget = $span + $script:VisualSettling + $script:VisualForwardInterval
+            Add-Line ('[DATA] Conservative visual post-window budget: {0:0.0}s (span + settling + up to one forwarding interval); configured timeout={1}s.' -f $budget, $script:VisualRewardTimeout)
+            if ($budget -gt $script:VisualRewardTimeout) {
+                Add-Check 'WARN' 'A clean visual post-window may arrive after the reward deadline at this cadence. This is a timing risk; the trace is needed to confirm an actual timeout.'
+            }
+        }
     }
 }
 
@@ -435,6 +525,9 @@ function Show-AgentSnapshot {
         $inputValue = Get-NestedValue $value @('input')
         $decision = Get-NestedValue $value @('decision')
         $reward = Get-NestedValue $value @('reward')
+        $rewardTotal = if (Get-NestedValue $reward @('valid') -Default $false) {
+            Format-Value (Get-NestedValue $reward @('total'))
+        } else { 'not attributed' }
         Add-Line ('[DATA] {0} agent: available={1}; mode={2}; state={3}; transitioning={4}; updates={5}; input={6}/{7}; input age={8}s' -f
             $entry.Name,
             (Format-Bool (Get-NestedValue $value @('available'))),
@@ -449,6 +542,11 @@ function Show-AgentSnapshot {
             $entry.Name,
             (Format-Vector (Get-NestedValue $value @('applied'))),
             (Format-Vector (Get-NestedValue $value @('target'))))
+        Add-Line ('[DATA] {0} input: stress={1}; confidence={2}; quality={3}' -f
+            $entry.Name,
+            (Format-Value (Get-NestedValue $inputValue @('stress'))),
+            (Format-Value (Get-NestedValue $inputValue @('confidence'))),
+            (Format-Value (Get-NestedValue $inputValue @('quality'))))
         Add-Line ('[DATA] {0} decision: available={1}; sequence={2}; proposed={3}; executed={4}; safety={5}; result={6}; reward={7}/{8}' -f
             $entry.Name,
             (Format-Bool (Get-NestedValue $decision @('available'))),
@@ -458,7 +556,19 @@ function Show-AgentSnapshot {
             (Format-Value (Get-NestedValue $decision @('safety'))),
             (Format-Value (Get-NestedValue $decision @('result'))),
             (Format-Value (Get-NestedValue $reward @('status'))),
-            (Format-Value (Get-NestedValue $reward @('total'))))
+            $rewardTotal)
+        if ((Get-NestedValue $reward @('available') -Default $false) -and
+            -not (Get-NestedValue $reward @('valid') -Default $false)) {
+            Add-Check 'WARN' "$($entry.Name) last reward was invalid; it did not train the policy. See the coordinator trace for the next measurement/cancellation."
+        }
+        if ([string](Get-NestedValue $value @('state')) -in @('SignalQualityFreeze', 'ConfidenceFreeze')) {
+            Add-Check 'WARN' "$($entry.Name) runtime is holding adaptation because its input reliability gate failed."
+        }
+        if ((Get-NestedValue $decision @('available') -Default $false) -and
+            (Get-Number (Get-NestedValue $value @('updates'))) -eq 0 -and
+            [string](Get-NestedValue $decision @('executed')) -in @('NoChange', 'Hold stable')) {
+            Add-Check 'INFO' "$($entry.Name) selected hold with zero policy updates. Cold-start score ties prefer hold; invalid rewards leave those scores unchanged."
+        }
     }
 
     if ([string]$state -eq 'live') {
@@ -469,10 +579,48 @@ function Show-AgentSnapshot {
     }
 }
 
+function Add-AgentTrace {
+    param([AllowNull()]$Snapshot, [double]$ElapsedSeconds)
+
+    $agent = $Snapshot.Agent
+    $prefix = '[TRACE +{0:0}s]' -f $ElapsedSeconds
+    if ($null -eq $agent) {
+        Add-Line "$prefix No agent snapshot for the selected session."
+        return
+    }
+    $coordination = Get-NestedValue $agent @('coordination')
+    Add-Line ('{0} owner={1}; stage={2}; completed={3}; cancelled={4}; remaining={5}s; reason={6}' -f
+        $prefix, (Format-Value (Get-NestedValue $coordination @('owner'))),
+        (Format-Value (Get-NestedValue $coordination @('stage'))),
+        (Format-Value (Get-NestedValue $coordination @('completedTurns'))),
+        (Format-Value (Get-NestedValue $coordination @('cancelledTurns'))),
+        (Format-Value (Get-NestedValue $coordination @('remainingSeconds'))),
+        (Format-Value (Get-NestedValue $coordination @('reason'))))
+    foreach ($name in @('visual', 'audio')) {
+        $value = Get-NestedValue $agent @($name)
+        Add-Line ('{0} {1}: report age={2}; state={3}; stress={4}; confidence={5}; quality={6}; input age={7}s; updates={8}; action={9}; reward={10}' -f
+            $prefix, $name, (Format-Age (Get-NestedValue $agent @('receivedAt'))),
+            (Format-Value (Get-NestedValue $value @('state'))),
+            (Format-Value (Get-NestedValue $value @('input', 'stress'))),
+            (Format-Value (Get-NestedValue $value @('input', 'confidence'))),
+            (Format-Value (Get-NestedValue $value @('input', 'quality'))),
+            (Format-Value (Get-NestedValue $value @('input', 'ageSeconds'))),
+            (Format-Value (Get-NestedValue $value @('updates'))),
+            (Format-Value (Get-NestedValue $value @('decision', 'executed'))),
+            (Format-Value (Get-NestedValue $value @('reward', 'status'))))
+    }
+    $eligible = Get-Number (Get-NestedValue $coordination @('eligiblePostStartUtc'))
+    $windowStart = Get-NestedValue $Snapshot.Prediction @('windowStart')
+    if ($eligible -gt 0 -and $null -ne $windowStart) {
+        Add-Line ('{0} latest B window starts {1:0.0}s before eligible post start (positive means it still overlaps transition/settling).' -f
+            $prefix, ($eligible - (Get-Number $windowStart)))
+    }
+}
+
 function Get-SnapshotMetric {
     param(
         [AllowNull()]$Snapshot,
-        [ValidateSet('Accepted', 'Predictions', 'MobileAccepted', 'UnityWindows', 'VisualForwarded', 'VisualUpdates', 'AudioUpdates', 'CompletedTurns')]
+        [ValidateSet('Accepted', 'Predictions', 'MobileAccepted', 'UnityWindows', 'VisualForwarded', 'VisualUpdates', 'AudioUpdates', 'CompletedTurns', 'CancelledTurns')]
         [string]$Metric
     )
 
@@ -485,6 +633,7 @@ function Get-SnapshotMetric {
         'VisualUpdates' { return Get-Number (Get-NestedValue $Snapshot.Agent @('visual', 'updates')) }
         'AudioUpdates' { return Get-Number (Get-NestedValue $Snapshot.Agent @('audio', 'updates')) }
         'CompletedTurns' { return Get-Number (Get-NestedValue $Snapshot.Agent @('coordination', 'completedTurns')) }
+        'CancelledTurns' { return Get-Number (Get-NestedValue $Snapshot.Agent @('coordination', 'cancelledTurns')) }
     }
 }
 
@@ -664,10 +813,12 @@ foreach ($port in @(8000, 8080)) {
     Add-Line "[DATA] TCP $port established client connections=$($connections.Count)"
 }
 
+Show-RLConfiguration
 Add-Line ''
 Add-Line '--- Runtime pipeline snapshot ---'
 $first = Get-DiagnosticsSnapshot
 Show-ComponentBSnapshot -Snapshot $first
+Show-PredictionSnapshot -Snapshot $first
 Show-RelaySnapshot -Snapshot $first
 Show-AgentSnapshot -Snapshot $first
 
@@ -675,8 +826,19 @@ if ($ObserveSeconds -gt 0 -and ($first.ComponentBProbe.Ok -or $first.RelayProbe.
     Add-Line ''
     Add-Line "--- Counter movement over $ObserveSeconds seconds ---"
     Add-Line '[INFO] Keep the wearable connected, mobile session active, and Unity in the running session during this observation.'
-    Start-Sleep -Seconds $ObserveSeconds
-    $second = Get-DiagnosticsSnapshot
+    $sessionLabel = [string](Get-NestedValue $first.Session @('label'))
+    Add-Line '[INFO] Following the same relay session throughout. Trace rows are samples; fast events between samples may be missed.'
+    Add-AgentTrace -Snapshot $first -ElapsedSeconds 0
+    $observationClock = [Diagnostics.Stopwatch]::StartNew()
+    $second = $first
+    while ($observationClock.Elapsed.TotalSeconds -lt $ObserveSeconds) {
+        $waitSeconds = [Math]::Min($SampleIntervalSeconds, $ObserveSeconds - $observationClock.Elapsed.TotalSeconds)
+        Start-Sleep -Milliseconds ([int][Math]::Ceiling($waitSeconds * 1000))
+        $second = Get-DiagnosticsSnapshot -SessionLabel $sessionLabel
+        if (-not $sessionLabel) { $sessionLabel = [string](Get-NestedValue $second.Session @('label')) }
+        Add-AgentTrace -Snapshot $second -ElapsedSeconds $observationClock.Elapsed.TotalSeconds
+    }
+    $observationClock.Stop()
 
     $acceptedDelta = (Get-SnapshotMetric $second 'Accepted') - (Get-SnapshotMetric $first 'Accepted')
     $predictionDelta = (Get-SnapshotMetric $second 'Predictions') - (Get-SnapshotMetric $first 'Predictions')
@@ -686,8 +848,12 @@ if ($ObserveSeconds -gt 0 -and ($first.ComponentBProbe.Ok -or $first.RelayProbe.
     $visualUpdatesDelta = (Get-SnapshotMetric $second 'VisualUpdates') - (Get-SnapshotMetric $first 'VisualUpdates')
     $audioUpdatesDelta = (Get-SnapshotMetric $second 'AudioUpdates') - (Get-SnapshotMetric $first 'AudioUpdates')
     $turnDelta = (Get-SnapshotMetric $second 'CompletedTurns') - (Get-SnapshotMetric $first 'CompletedTurns')
+    $cancelDelta = (Get-SnapshotMetric $second 'CancelledTurns') - (Get-SnapshotMetric $first 'CancelledTurns')
 
-    Add-Line "[DATA] Deltas: B accepted=$acceptedDelta; mobile acknowledgements=$mobileAcceptedDelta; B predictions=$predictionDelta; Unity windows=$unityDelta; visual forwards=$visualForwardedDelta; visual updates=$visualUpdatesDelta; audio updates=$audioUpdatesDelta; coordinated turns=$turnDelta"
+    Add-Line "[DATA] Deltas: B accepted=$acceptedDelta; mobile acknowledgements=$mobileAcceptedDelta; B predictions=$predictionDelta; Unity windows=$unityDelta; visual forwards=$visualForwardedDelta; visual updates=$visualUpdatesDelta; audio updates=$audioUpdatesDelta; coordinated turns=$turnDelta; cancelled turns=$cancelDelta"
+    if ($cancelDelta -gt 0) {
+        Add-Check 'WARN' 'Coordinated measurements were cancelled during observation. Compare the owner, reason and input quality before/after each cancellation in the trace.'
+    }
 
     if ($acceptedDelta -gt 0 -and $mobileAcceptedDelta -gt 0) {
         Add-Check 'PASS' 'Phone-to-Component-B frame delivery and acknowledgements are advancing.'
@@ -723,12 +889,13 @@ if ($ObserveSeconds -gt 0 -and ($first.ComponentBProbe.Ok -or $first.RelayProbe.
         Add-Check 'INFO' "No visual forward in $ObserveSeconds seconds can be normal; the visual bridge is rate-limited to roughly one window per minute."
     }
     if ($visualUpdatesDelta -eq 0 -and $audioUpdatesDelta -eq 0 -and $turnDelta -eq 0) {
-        Add-Check 'INFO' 'No agent update in this short interval can be normal; inspect the coordinator owner/stage/reason above and observe through a full 75+ second decision period.'
+        Add-Check 'INFO' 'No agent update can be normal during warmup or a pending measurement. A decision needs 75+ seconds and a reward needs a complete clean post-window; inspect the quality and cancellation trace.'
     }
 
     Add-Line ''
     Add-Line '--- Latest state after observation ---'
     Show-ComponentBSnapshot -Snapshot $second
+    Show-PredictionSnapshot -Snapshot $second
     Show-RelaySnapshot -Snapshot $second
     Show-AgentSnapshot -Snapshot $second
 }
@@ -737,7 +904,7 @@ Add-Line ''
 Add-Line '============================================================'
 Add-Line "Summary: PASS=$script:PassCount WARN=$script:WarnCount FAIL=$script:FailCount"
 if ($script:FailCount -eq 0) {
-    Add-Line '[RESULT] No hard connectivity failure was found. Use coordinator reason/stage and the 75+ second schedule to explain delayed actions.'
+    Add-Line '[RESULT] No hard connectivity failure was found. WARN entries can still explain blocked learning; inspect quality gates, invalid rewards and coordinator trace.'
 }
 else {
     Add-Line '[RESULT] One or more hard failures were found. Fix the earliest failing stage before testing RL actions again.'

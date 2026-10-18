@@ -98,6 +98,21 @@ samples, input older than 90 seconds (3 seconds for simulation), or disconnected
 clients are marked explicitly; plotted lines break across report gaps over 15s.
 The last observed decision may predate the plotted range.
 
+When controls stay unchanged, capture three minutes from the Windows repository
+root while the wearable and Unity session remain running:
+
+```powershell
+.\tools\diagnose-mindsync-windows.ps1 -ObserveSeconds 180 -SampleIntervalSeconds 5 |
+  Tee-Object -FilePath .\mindsync-rl-diagnostics.txt
+```
+
+The report includes input confidence/quality, held actions, invalid rewards,
+coordinator cancellations and post-window timing. It follows the same relay
+session throughout. Source limits can differ from Inspector overrides or an
+older installed Unity player. A `NoChange`/`Hold stable` action is valid; a
+rejected reward does not train either policy. Improve the incoming signal and
+inspect the cancellation trace before changing learning or quality settings.
+
 On macOS/Linux, from the repository root:
 
 ```sh
@@ -146,6 +161,12 @@ Agent-specific checks (use your Python environment's executable):
 python -m unittest services.project_monitor.test_agents
 node --test services/project_monitor/test_agents.cjs
 node services/project_monitor/test_agents_browser.cjs # requires Playwright + Chromium and a running monitor
+```
+
+Diagnostic-script checks run without live services, Windows modules or Pester:
+
+```powershell
+powershell -NoProfile -File tests\windows_diagnostics\diagnostics.tests.ps1
 ```
 
 Check mobile TypeScript with `node_modules\.bin\tsc.cmd --noEmit` from the app
