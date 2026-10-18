@@ -2,11 +2,16 @@
 
 ## Status
 
-Accepted for the Temple Pond engineering pilot on 2026-10-11.
+Accepted for the Temple Pond engineering pilot on 2026-10-11. Amended on
+2026-10-18 for the Quest visual-strength calibration described below. The
+telemetry decision remains in effect.
 
-This decision creates the active configuration bundle:
+The original telemetry decision created the configuration bundle:
 
 `temple-pond-pilot-freeze-v2`
+
+This was the active bundle until the visual-strength amendment below created
+`temple-pond-pilot-freeze-v3`.
 
 It inherits every research setting from `temple-pond-pilot-freeze-v1` except
 the telemetry profile and event-schema versions identified below.
@@ -31,7 +36,7 @@ Use the following active telemetry identities:
 
 | Concern | Active identity |
 |---|---|
-| Pilot bundle | `temple-pond-pilot-freeze-v2` |
+| Pilot bundle at the telemetry decision | `temple-pond-pilot-freeze-v2` |
 | Telemetry configuration | `adaptive-vr-telemetry-pilot-v3` / `3` |
 | Event schema | `adaptive-vr-telemetry` / `1.1-pilot` |
 | Ordinary-event flush batch | 8 events |
@@ -107,3 +112,71 @@ relay transfer.
   sequence continuity, terminal summary, and absence of direct identifiers.
 - Profile a full session on a physical Quest 2; Editor timing is not evidence
   of headset performance.
+
+## 2026-10-18 visual-strength amendment
+
+This creates `temple-pond-pilot-freeze-v3` as the active **engineering** bundle.
+It supersedes the visual values in ADR-010 while preserving this ADR's
+telemetry settings and all other frozen study settings.
+
+TODO(RESEARCH_DECISION): Confirm perceptibility, comfort, and Quest 2 frame
+timing at all five dimensions' extrema and during individual transitions before
+using these values for participant data collection. These are calibration
+candidates, not participant-validated safety thresholds.
+
+Quest telemetry from the 2026-10-17 and 2026-10-18 engineering sessions showed
+14 executed `NoChange` actions and only three executed visual changes across 21
+session files. In the longest recent adaptive test, ambient motion moved from
+0.9125 to 1.0, while illumination moved from 0.319 to 0.419 and then back to
+0.319. Most dimensions therefore had no executed action. All five normalized
+ranges already allow `[0, 1]`; weak visual effects cannot be attributed to
+those limits.
+
+The user requested stronger *executed* visual actions while retaining the
+contextual-bandit selection behavior. This amendment changes only the Temple
+Pond scene profile and its scene-specific mapping. `NoChange`, the action
+space, safety validator, total-variation budget, decision schedule, and
+physiological/reward logic are unchanged.
+
+Larger normalized steps consume more of the unchanged total-variation budget,
+so later non-`NoChange` candidates can become ineligible sooner. That effect
+must be counted during Quest validation; this amendment does not promise more
+frequent visual changes.
+
+| Setting | Previous | Engineering calibration |
+|---|---:|---:|
+| Illumination normalized action step | 0.10 | 0.15 |
+| Warmth normalized action step | 0.25 | 0.35 |
+| Atmospheric-softness normalized action step | 0.30 | 0.40 |
+| Color-richness normalized action step | 0.20 | 0.30 |
+| Ambient-motion normalized action step | 0.20 | 0.30 |
+| Transition duration | 4.12 s | 6 s |
+| Saturation range | -20 to +20 | -30 to +30 |
+| Water `_RippleMotion` range | 0.20 to 0.45 | 0.10 to 0.60 |
+
+The calibrated profiles are separate Unity assets:
+`TemplePondSceneParameterProfile_VisualV3.asset` and
+`TemplePondEnvironmentMappingProfile_v4.asset`. The scene references these new
+assets; the previous profiles and their `.meta` identities remain intact for
+the historical bundle. The raw Temple mapping identity advances from
+`temple-pond-mapping-pilot-v3` / `3` to
+`temple-pond-mapping-pilot-v4` / `4`. The normalized scene profile retains its
+`temple-pond` scene identity and is tracked as part of the new bundle. Its safe
+defaults and full normalized bounds remain unchanged.
+
+Directional-light intensity stays at 0.6 to 9.0, and fog density stays at 0
+to 0.015. Their action steps increase without raising already broad endpoints.
+Warmth color anchors and sky/bird speed extrema remain unchanged. The longer
+transition limits the rate of the larger normalized steps.
+
+The configuration-freeze EditMode test checks the revised serialized values.
+On Quest 2, exercise each positive and negative action from a state with room
+to move in both directions, then check the full transition and both extrema
+for comfort, visual legibility, and frame timing. The bandit may select
+`NoChange`, so a normal adaptive session cannot validate all five visual
+dimensions. Action frequency is an independent policy behavior outside this
+amendment.
+
+The frozen research-evaluation loader still uses the historical scene profile.
+Its existing simulation results describe the previous visual bundle; rerun and
+version that evaluation before making comparative claims about this calibration.
