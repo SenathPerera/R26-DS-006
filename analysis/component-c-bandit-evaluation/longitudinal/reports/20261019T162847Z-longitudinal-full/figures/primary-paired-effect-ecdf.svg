@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="480" viewBox="0 0 800 480" role="img">
+<title>SIMULATED paired seed-index effect ECDF</title>
+<style>text{font-family:Arial,sans-serif;fill:#202124}</style>
+<text x="400.0" y="29" text-anchor="middle" font-size="19" font-weight="bold">SIMULATED: Carry − Reset paired effect distribution</text>
+<line x1="90" y1="410" x2="755" y2="410" stroke="#202124"/>
+<line x1="90" y1="410" x2="90" y2="55" stroke="#202124"/>
+<line x1="703.04" y1="410" x2="703.04" y2="55" stroke="#555" stroke-dasharray="5,4"/>
+<polyline points="90.00,410.00 145.73,410.00 145.73,398.17 152.45,398.17 152.45,386.33 173.72,386.33 173.72,374.50 197.01,374.50 197.01,362.67 205.73,362.67 205.73,350.83 214.52,350.83 214.52,339.00 248.05,339.00 248.05,327.17 257.51,327.17 257.51,315.33 266.09,315.33 266.09,303.50 267.75,303.50 267.75,291.67 288.25,291.67 288.25,279.83 289.77,279.83 289.77,268.00 291.77,268.00 291.77,256.17 310.88,256.17 310.88,244.33 311.65,244.33 311.65,232.50 366.16,232.50 366.16,220.67 390.40,220.67 390.40,208.83 395.02,208.83 395.02,197.00 409.15,197.00 409.15,185.17 435.64,185.17 435.64,173.33 463.11,173.33 463.11,161.50 489.52,161.50 489.52,149.67 494.43,149.67 494.43,137.83 521.40,137.83 521.40,126.00 558.18,126.00 558.18,114.17 595.87,114.17 595.87,102.33 604.56,102.33 604.56,90.50 613.53,90.50 613.53,78.67 636.81,78.67 636.81,66.83 665.38,66.83 665.38,55.00" fill="none" stroke="#2274A5" stroke-width="2.8"/>
+<text x="90.00" y="431" text-anchor="middle" font-size="12">-0.27</text>
+<text x="78" y="414.00" text-anchor="end" font-size="12">0.00</text>
+<text x="256.25" y="431" text-anchor="middle" font-size="12">-0.20</text>
+<text x="78" y="325.25" text-anchor="end" font-size="12">0.25</text>
+<text x="422.50" y="431" text-anchor="middle" font-size="12">-0.12</text>
+<text x="78" y="236.50" text-anchor="end" font-size="12">0.50</text>
+<text x="588.75" y="431" text-anchor="middle" font-size="12">-0.05</text>
+<text x="78" y="147.75" text-anchor="end" font-size="12">0.75</text>
+<text x="755.00" y="431" text-anchor="middle" font-size="12">0.02</text>
+<text x="78" y="59.00" text-anchor="end" font-size="12">1.00</text>
+<text x="422.5" y="459" text-anchor="middle" font-size="14">Carry − Reset probe pseudo-regret after session 20 (lower favors Carry)</text>
+<text transform="translate(23 232.5) rotate(-90)" text-anchor="middle" font-size="14">Empirical cumulative fraction</text>
+<text x="90" y="475" font-size="11">30 equally archetype-weighted synthetic seed-index contrasts</text>
+</svg>

@@ -138,3 +138,18 @@ run with `cancelled` status; it cannot enter the analysis. The runner uses the
 production decision, safety, transition, validation, and reward pipeline, but
 model persistence is evaluation-only. It does not require a Quest headset or
 change the deployed policy.
+
+After validating a completed full v1.0 run, generate the descriptive Study A
+report, tables, SVG figures, and a local ZIP archive of raw data and source:
+
+```powershell
+python analysis/component-c-bandit-evaluation/scripts/report_longitudinal_v1.py `
+  $run.FullName --archive
+```
+
+The report is written under `longitudinal/reports/<run-id>/`. The ZIP and its
+SHA-256 sidecar are written under ignored `longitudinal/archives/`; copy them
+to an independent backup location for durable preservation. The report script
+revalidates the raw full run and reads the frozen primary result unchanged. It
+labels all secondary comparisons descriptive and records outcomes unavailable
+from the current CSV telemetry rather than treating them as zero.

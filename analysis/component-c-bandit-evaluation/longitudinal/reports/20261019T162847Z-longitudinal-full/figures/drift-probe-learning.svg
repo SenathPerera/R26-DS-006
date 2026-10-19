@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="590" viewBox="0 0 980 590" role="img">
+<title>SIMULATED: between-session drift challenge</title>
+<style>text{font-family:Arial,sans-serif;fill:#202124}.title{font-size:19px;font-weight:bold}.axis{font-size:14px}.tick{font-size:12px}.note{font-size:11px;fill:#555}</style>
+<text class="title" x="490.0" y="33" text-anchor="middle">SIMULATED: between-session drift challenge</text>
+<line x1="92" y1="510.00" x2="938" y2="510.00" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="514.00" text-anchor="end">0.00</text>
+<line x1="92" y1="423.60" x2="938" y2="423.60" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="427.60" text-anchor="end">0.10</text>
+<line x1="92" y1="337.20" x2="938" y2="337.20" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="341.20" text-anchor="end">0.21</text>
+<line x1="92" y1="250.80" x2="938" y2="250.80" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="254.80" text-anchor="end">0.31</text>
+<line x1="92" y1="164.40" x2="938" y2="164.40" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="168.40" text-anchor="end">0.42</text>
+<line x1="92" y1="78.00" x2="938" y2="78.00" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="82.00" text-anchor="end">0.52</text>
+<line x1="92.00" y1="510" x2="92.00" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="92.00" y="532" text-anchor="middle">0</text>
+<line x1="303.50" y1="510" x2="303.50" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="303.50" y="532" text-anchor="middle">5</text>
+<line x1="515.00" y1="510" x2="515.00" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="515.00" y="532" text-anchor="middle">10</text>
+<line x1="726.50" y1="510" x2="726.50" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="726.50" y="532" text-anchor="middle">15</text>
+<line x1="938.00" y1="510" x2="938.00" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="938.00" y="532" text-anchor="middle">20</text>
+<line x1="92" y1="510" x2="938" y2="510" stroke="#202124"/>
+<line x1="92" y1="510" x2="92" y2="78" stroke="#202124"/>
+<line x1="536.15" y1="510" x2="536.15" y2="78" stroke="#555" stroke-dasharray="5,4"/>
+<text class="tick" x="543.15" y="92">response switch: session 11</text>
+<polygon points="92.00,190.95 134.30,166.52 176.60,124.29 218.90,172.21 261.20,160.95 303.50,135.09 345.80,192.57 388.10,188.93 430.40,177.76 472.70,202.78 515.00,207.12 557.30,188.38 599.60,191.03 641.90,191.73 684.20,196.77 726.50,194.25 768.80,198.78 811.10,198.43 853.40,196.68 895.70,200.63 938.00,197.98 938.00,320.00 895.70,315.62 853.40,315.14 811.10,308.75 768.80,298.96 726.50,298.03 684.20,294.23 641.90,291.15 599.60,289.17 557.30,287.21 515.00,330.63 472.70,317.97 430.40,317.46 388.10,309.04 345.80,294.02 303.50,285.02 261.20,285.00 218.90,275.21 176.60,262.43 134.30,251.86 92.00,215.64" fill="#2274A5" fill-opacity="0.11" stroke="none"/>
+<polyline points="92.00,203.30 134.30,209.19 176.60,193.36 218.90,223.71 261.20,222.97 303.50,210.05 345.80,243.30 388.10,248.98 430.40,247.61 472.70,260.37 515.00,268.87 557.30,237.80 599.60,240.10 641.90,241.44 684.20,245.50 726.50,246.14 768.80,248.87 811.10,253.59 853.40,255.91 895.70,258.13 938.00,258.99" fill="none" stroke="#2274A5" stroke-width="2.6"/>
+<polygon points="92.00,190.95 134.30,166.52 176.60,153.09 218.90,172.21 261.20,155.24 303.50,154.94 345.80,157.72 388.10,172.98 430.40,160.55 472.70,167.53 515.00,168.58 557.30,175.34 599.60,187.17 641.90,174.56 684.20,163.90 726.50,189.35 768.80,180.96 811.10,175.21 853.40,172.75 895.70,182.02 938.00,178.75 938.00,257.27 895.70,240.93 853.40,255.10 811.10,251.90 768.80,241.83 726.50,249.45 684.20,262.24 641.90,255.79 599.60,250.37 557.30,252.84 515.00,243.19 472.70,249.58 430.40,246.28 388.10,239.77 345.80,246.96 303.50,249.88 261.20,243.43 218.90,243.03 176.60,243.23 134.30,251.86 92.00,215.64" fill="#D95D39" fill-opacity="0.11" stroke="none"/>
+<polyline points="92.00,203.30 134.30,209.19 176.60,198.16 218.90,207.62 261.20,199.34 303.50,202.41 345.80,202.34 388.10,206.37 430.40,203.42 472.70,208.55 515.00,205.89 557.30,214.09 599.60,218.77 641.90,215.18 684.20,213.07 726.50,219.40 768.80,211.39 811.10,213.56 853.40,213.93 895.70,211.48 938.00,218.01" fill="none" stroke="#D95D39" stroke-width="2.6"/>
+<line x1="102" y1="58" x2="130" y2="58" stroke="#2274A5" stroke-width="3"/>
+<text class="tick" x="137" y="62">Carry</text>
+<line x1="287" y1="58" x2="315" y2="58" stroke="#D95D39" stroke-width="3"/>
+<text class="tick" x="322" y="62">Reset</text>
+<text class="axis" x="515.0" y="556" text-anchor="middle">Session checkpoint</text>
+<text class="axis" transform="translate(24 294.0) rotate(-90)" text-anchor="middle">Probe pseudo-regret (lower is better)</text>
+<text class="note" x="92" y="578">Bands: ±1 SD across synthetic profiles (descriptive, not confidence intervals).</text>
+</svg>

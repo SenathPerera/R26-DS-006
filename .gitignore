@@ -109,6 +109,8 @@ Thumbs.db
 /analysis/component-c-bandit-evaluation/results/invariant-cases/*.jsonl
 !/analysis/component-c-bandit-evaluation/results/invariant-cases/.gitkeep
 /analysis/component-c-bandit-evaluation/longitudinal/runs/
+/analysis/component-c-bandit-evaluation/longitudinal/archives/
+!/analysis/component-c-bandit-evaluation/longitudinal/reports/*/report.md
 
 # Raw Quest device-validation captures contain generated logs, local paths,
 # and device/network identifiers. Keep per-run output directories local.

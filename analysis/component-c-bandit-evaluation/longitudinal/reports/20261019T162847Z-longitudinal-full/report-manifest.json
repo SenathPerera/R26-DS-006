@@ -1,0 +1,40 @@
+{
+  "primary_analysis_unchanged": true,
+  "protocol_id": "laminar-vr-longitudinal-simulation-v1.0",
+  "report_output_sha256": {
+    "figures/drift-probe-learning.svg": "4ae004fd7e5da084a5fe48f82baa5316ea2123f85005b1dacb475ceb9acd9c5c",
+    "figures/loss-probe-learning.svg": "4c806cf58ecabd4ed7dbfe187c7e80ef3065e3bfd2cdae8e61dface2a27c2f26",
+    "figures/nonresponder-probe-learning.svg": "dff225eb5c97674a109a66826a8d2f5acb1988060965d3c1da47abc41ef55e09",
+    "figures/primary-01-probe-learning.svg": "56265cbbbeec10a974eee9de1700be959af00e2eea6cae2a823e3d47e7bee209",
+    "figures/primary-02-probe-learning.svg": "04653bef7596a292d63f01f99ac69151d794227af27db5ebfefd0f89116ad9b3",
+    "figures/primary-03-probe-learning.svg": "a3b1ca704e846fd1d68531e064c095a387ef854ea20835252e0f936e450b6d8b",
+    "figures/primary-04-probe-learning.svg": "76d2495ce76a84956148bf1668cf5857039db5f86f82c2db621e428ea8efda3d",
+    "figures/primary-05-probe-learning.svg": "5616fabdd6b4b6649df0f99f7bc80bd005a1a3284c6e5a6a09f06050c2dcdc0a",
+    "figures/primary-06-probe-learning.svg": "0b4ba5265b21e30764624450894062017e0abd7f14169d7aeed6ecf5d27ae397",
+    "figures/primary-07-probe-learning.svg": "c2c43c46640970602f002ae65c0f3956ebbd5e459578f449798add7b02d54293",
+    "figures/primary-feedback-exposure.svg": "cab3f167260afd3417291de7bde7d85c948b96e4e389d80c5f23146d7f2446ac",
+    "figures/primary-paired-effect-ecdf.svg": "9c881ad511157a1b9ceec7d4c60960783e1a1f1f208039403bef75421d6a96b9",
+    "figures/primary-probe-learning.svg": "825c9ffbbd26ca9ac88e0ff91116c765e586e4246bbd0906136cb2e86beac18f",
+    "period-summary.csv": "4aee80ec4484eabfec326bc4faeaee2a89c57669336a423204e5ee173be3cb3e",
+    "physiology-summary.csv": "a016c97230f847d4cf8407de6a3f6a0501beffca54897fa43f285c49cccd9f7b",
+    "primary-archetype.csv": "1c3f662bc305693931732fa78eafbdfe4d57dd71f56336504946a57be85f0b4b",
+    "probe-curve.csv": "aa3eab37349bff29c38a4fec7ca9528c219534b8e8f6ea9a798f5f94a3f0aa4d",
+    "report.md": "39d335d7e48fadaec031fc9e8391e6a6f4a305d451e4aa95831cfb2a3e4c0ec9",
+    "safety-summary.csv": "585275466bd862c806182e695638ce86918180620834645007f75c495094db96",
+    "session-curve.csv": "50d79132862a13af8210402999f4c2e154ff1831e5a9ecbf59858a7f25c2302d"
+  },
+  "report_script_sha256": "15aa10d8938fbafa6a6a2aa431dba36e6ec6404bba3e29c2a570af0d780e72d0",
+  "run_id": "20261019T162847Z-longitudinal-full",
+  "run_source_sha256": {
+    "analysis.json": "02de85ab857066813a36ff426001df2e7bd37c41d73a5c1a1621b99fb64f2fce",
+    "decisions.csv": "2808e3fde116f29fee10a2dc3ee187726da7bcb2994311f9c789aebdeeff5f9d",
+    "manifest.json": "bbc7ff7cee74b20469f556b5731f6094c15c330a7105b0addf377f5c334faff0",
+    "paired-index-effects.csv": "0194c84bd96ee1f72b6eaefeca770ad87f695acdc7b604a1bce88eda9e74f70a",
+    "physiology.csv": "056f3d6b74bcf095d4af712795f3e3ca50dcdad0ca52a6e1bdff46550cee5839",
+    "probes.csv": "5ae64768eec98ecdb41d054d65c6e761b5a97aa33c6a712c94fd2ea3f183fc43",
+    "rewards.csv": "53026e29f3eae72efe76c8d04cc86e816f2f142f56f7484879a434c829053fcb",
+    "sessions.csv": "2f20f28d51d99b9b613cbb07a4770d3d5c36cb12fbd75810071909e47d802751"
+  },
+  "source_git_commit": "4886f73b34c3589cf35b7b6f7f83dceacc6eca71",
+  "source_git_dirty": false
+}
