@@ -1,12 +1,3 @@
-"""Layer 4: cross-modal validation - voice stress vs HRV (Component B).
-
-Two independent signals agreeing is far stronger evidence than either
-alone. Rule-based by design: the agreement logic is explainable, and no
-labelled dataset of voice-vs-HRV mismatches exists to train on.
-
-Component boundary: Component B PRODUCES the HRV values (RMSSD); this
-layer CONSUMES them. All cross-modal logic belongs to Component D.
-"""
 
 
 class HRVProvider:
@@ -17,11 +8,6 @@ class HRVProvider:
 
 
 class StoredHRVProvider(HRVProvider):
-    """Production provider: Component B pushes values through the API
-    endpoint /session-update; this class stores and serves them. B may send
-    either its ORDINAL stress level (preferred - its own WESAD prediction) or
-    raw RMSSD; both are stored per (session_id, phase)."""
-
     def __init__(self):
         self.store: dict[tuple[str, str], float] = {}      # raw RMSSD
         self.levels: dict[tuple[str, str], str] = {}       # B's ordinal level
@@ -68,16 +54,10 @@ def hrv_stress_score(rmssd: float) -> float:
 # Voice and body stress levels within this distance (0-10 scale) agree.
 LEVEL_TOLERANCE = 3.0
 
-# Below this EFFECTIVE confidence (min of voice + body at the compared point), a
-# voice/body disagreement is NOT asserted as a genuine cognitive-physiological
-# mismatch - it is reported as unresolved and DEFERRED to Component B (HRV), the
-# more reliable arousal signal. This stops Component D's known arousal-collapse
-# uncertainty (low |valence|) from masquerading as a research finding.
+
 CONF_MIN = 0.4
 
-# Component B (WESAD) names its lowest level "relaxed"; Component D calls the same
-# state "no". Normalise B's class names to D's so cross-modal compares like with
-# like - and so an unmapped label never silently becomes the 5.0 fallback.
+
 _LEVEL_ALIASES = {"relaxed": "no", "relax": "no", "none": "no"}
 
 

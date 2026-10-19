@@ -1,37 +1,18 @@
-"""Central configuration for Component D.
-
-Every module imports settings from here. Change a threshold or a model
-in ONE place and the whole system follows.
-"""
-
 import os
 from pathlib import Path
 
-# ---------------------------------------------------------------- paths
-# This file lives at <repo>/src/componentd/config.py, so the repo root is
-# three parents up. Paths are anchored to the root, not the cwd, so the
-# server/scripts/tests all resolve data + checkpoints identically.
 ROOT = Path(__file__).resolve().parents[2]
-DATA_DIR = ROOT / "data"                    # datasets (gitignored, never pushed)
-MODELS_DIR = ROOT / "artifacts" / "models"  # trained checkpoints (gitignored)
+DATA_DIR = ROOT / "data"                    
+MODELS_DIR = ROOT / "artifacts" / "models"  
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-# ---------------------------------------------------------------- audio
-# Every clip is resampled to this before touching any model.
+
 SAMPLE_RATE = 16000
 MIN_DURATION_SEC = 1.0          # shorter clips are rejected by Layer 1
 MAX_DURATION_SEC = 35.0         # longer clips are trimmed
 
-# --------------------------------------------- layer 1: quality gate
-# Two DIFFERENT checks, not one reused function: the ambient step expects
-# near-silence, the pre/post voice steps expect real speech. Using the
-# same pass/fail logic for both was the root cause of a genuinely noisy
-# room passing the ambient check - a same-clip "loud frames vs quiet
-# frames" ratio measures the noise's own fluctuation when there is no
-# speech to compare against, and real ambient noise (fans, traffic,
-# chatter) is usually tonal/structured rather than flat white noise, so
-# a flatness threshold tuned for hiss let it through undetected.
+
 QUALITY = {
     # sanity checks shared by both (independent of VAD)
     "max_clip_ratio": 0.01,     # >1% samples at digital ceiling = distortion
@@ -44,18 +25,9 @@ QUALITY = {
     "speech_min_fraction": 0.25,     # >=25% of the clip must be VAD speech
 }
 
-# Ambient (Layer 1) — real acoustic analysis, replacing the single whole-clip
-# mean-RMS check that never fired on device (an UNPROCESSED phone mic under-gains,
-# so a noisy room and a quiet one both land near 0.003–0.012 whole-clip RMS; the
-# steady FLOOR and the SPECTRAL shape are what actually separate them, not the mean).
-# check_ambient() reads these; the old QUALITY["ambient_*"] keys stay for the
-# web client / existing callers. UNCALIBRATED starting guesses — run
-# scripts/calibrate_ambient.py on real Galaxy-A9 clips before trusting them.
+
 AMBIENT = {
-    # Steady background noise is graded in THREE states, not pass/fail: a fan or
-    # AC (which raises the floor but doesn't contaminate the voice, and is
-    # compensated for at Layer 2) must NOT block a session — only a genuinely
-    # loud room does. Human speech + clipping stay hard fails (see check_ambient).
+
     "floor_good_max":       -45.0,  # at/below this the room reads as "quiet/good"
     "floor_too_noisy":      -30.0,  # ABOVE this we block; between = "usable"
     "floor_dbfs_max":       -42.0,  # legacy scoring target (web client / _ambient_score)
@@ -66,15 +38,10 @@ AMBIENT = {
     "low_freq_ratio_max":    0.70,  # tonal hum (fan/AC/motor) warning
     "high_freq_ratio_max":   0.40,  # electrical hiss / fluorescent buzz
     "dynamic_range_max_db":  26.0,  # wide spread = an unstable, event-filled room
-    "transient_floor_mult":   6.0,  # a frame this far above the floor = a transient
+    "transient_floor_mult":   6.0,  
 }
 
-# Silero VAD: a small (~1.8MB), fast, pretrained voice-activity detector.
-# Used because arbitrary real-world noise (fans, traffic, background
-# chatter, hums) cannot be reliably distinguished from speech by hand-
-# tuned spectral thresholds - this is exactly the kind of narrow,
-# well-solved sub-problem a frozen pretrained model is the right tool
-# for, the same principle as Layer 2's frozen emotion encoder.
+
 VAD_THRESHOLD = 0.5   # Silero's own speech-probability decision boundary
 
 # --------------------------------------------- layer 2: stress model
@@ -104,11 +71,7 @@ TRAINING = {
     "early_stop_patience": 10,  # stop when validation CCC stops improving
 }
 
-# ------------------------------- emotion -> valence/arousal targets
-# Public datasets label emotions, not stress. We map each emotion to
-# coordinates on Russell's circumplex (valence = pleasant<->unpleasant,
-# arousal = calm<->activated), both in [-1, 1]. The model learns to
-# predict these two numbers; stress is derived from them below.
+
 EMOTION_VA = {
     "neutral":   {"valence":  0.0, "arousal":  0.0},
     "joy":       {"valence":  0.7, "arousal":  0.5},
@@ -121,16 +84,10 @@ EMOTION_VA = {
     "calm":      {"valence":  0.4, "arousal": -0.5},
 }
 
-# Emotions with an unambiguous stressed/calm reading, used ONLY for
-# binary evaluation metrics (surprise/disgust/sadness are excluded).
+
 STRESSED_EMOTIONS = {"anger", "fear"}
 CALM_EMOTIONS = {"neutral", "joy", "happiness", "calm"}
 
-# Self-reported intensity scaling for collected data where the speaker
-# graded their own take (e.g. "low stress" vs "high stress"). Scales the
-# EMOTION_VA anchor toward neutral (0,0) rather than introducing separate
-# magic numbers per level, so "high" still lands on the same point other
-# datasets already use for that emotion (e.g. high stress ~= EMOTION_VA["fear"]).
 INTENSITY_SCALE = {"low": 0.5, "mild": 0.75, "high": 1.0}
 
 
@@ -142,10 +99,6 @@ def scale_va_by_intensity(emotion: str, intensity: str) -> dict:
             "arousal": round(base["arousal"] * scale, 4)}
 
 
-# Stress amplification when arousal is clearly POSITIVE (activated stress).
-# 0.0 = pure valence-driven magnitude (the default we ship). Arousal never
-# SUBTRACTS here: negative arousal on a stressed voice is the collapse artefact
-# (Phase-0 evidence), not evidence of calm, so it must not pull the score down.
 AROUSAL_GAIN = 0.0
 
 
@@ -194,19 +147,7 @@ def confidence_from_va(valence: float, arousal: float) -> float:
     return min(1.0, abs(float(valence)))
 
 
-# --------------------------------------------- faint-recording guard
-# A clip quieter than this RAW rms (measured before conditioning) is FAINT:
-# loudness normalisation (conditioning.TARGET_RMS = 0.05) then amplifies it - and
-# its noise floor - by TARGET_RMS/rms (5x at rms 0.01), which can turn a quiet,
-# out-of-distribution voice into a CONFIDENT wrong reading. This is the exact
-# Phase-3 failure mode: a ~0.01-rms calm clip scored 9.13/10 at confidence 0.91,
-# sailing past Layer 4's 0.4 defer gate (see docs/ABLATION_STUDY.md Phase 3).
-#
-# The clip is still ABOVE the speech_min_rms reject floor, so we keep it - but we
-# DOWN-WEIGHT its confidence in proportion to how faint it is. That single lever
-# is load-bearing: Layer 3 widens its noise band when confidence drops, and Layer
-# 4 defers to Component B below CONF_MIN - so a faint recording stops over-asserting
-# on its own. A user-facing "faint_recording" warning also invites a re-record.
+
 FAINT_INPUT_RMS = 0.02
 
 
@@ -226,11 +167,7 @@ def faint_confidence_penalty(raw_rms: float) -> float:
 STRESS_LEVELS = ["no", "mild", "moderate", "high"]
 
 
-# --------------------------------------------- Component B integration
-# B streams HRV stress continuously and exposes its latest reading at
-# GET {COMPONENT_B_URL}/stress/latest. Component D POLLS that endpoint at each
-# episodic check-in (the ~30s pre and post speech moments) and feeds the result
-# into Layer 4. B defaults to :8000 (D is :8010); override for a remote host.
+
 COMPONENT_B_URL = os.environ.get("COMPONENT_B_URL", "http://127.0.0.1:8000")
 
 # How long to wait on B before giving up and falling back to voice-only (seconds).

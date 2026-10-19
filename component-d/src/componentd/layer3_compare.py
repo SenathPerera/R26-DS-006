@@ -1,9 +1,3 @@
-"""Layer 3: pre/post session comparison.
-
-Statistics, no ML. The design principle is HONESTY: a wellness app must
-not celebrate a 0.2-point "improvement" that is really measurement
-noise. Changes smaller than the noise band report as no_reliable_change.
-"""
 
 # Score changes (0-10 scale) below this are treated as measurement noise.
 NOISE_FLOOR = 0.75

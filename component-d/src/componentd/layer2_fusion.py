@@ -1,14 +1,3 @@
-"""Layer 2b: the trained fusion model - the core contribution of PP2.
-
-Fuses two views of the same voice:
-  - emotion embedding (from the frozen pretrained encoder): WHAT emotion
-  - prosody vector (from layer2_prosody): HOW the voice is behaving
-
-A learned gate decides, per input, how much to trust each view, and a
-small MLP head regresses valence + arousal. Every parameter in this file
-is trained by us - this replaces PP1's hand-written lookup table.
-"""
-
 import torch
 import torch.nn as nn
 
