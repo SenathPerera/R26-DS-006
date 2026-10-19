@@ -5,6 +5,7 @@ using System.Threading.Tasks;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy;
+using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Rewards;
 using LaminarVR.AdaptiveMeditation.Safety;
 using LaminarVR.AdaptiveMeditation.Session;
@@ -51,9 +52,27 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                     + (++nextTelemetryId).ToString("D5"));
             var stabilizationSelector = new StabilizationStateSelector(
                 bundle.Stabilization);
-            var policy = new EvaluationObservationRecorderPolicy(
-                request.CreatePolicy());
+            var innerPolicy = request.CreatePolicy();
+            var policy = new EvaluationObservationRecorderPolicy(innerPolicy);
             policy.Reset(new PolicyResetContext(PolicyResetReason.NewSession));
+            if (request.PriorModelSnapshot != null)
+            {
+                var bandit = innerPolicy as ContextualBanditPolicy;
+                if (bandit == null)
+                {
+                    throw new InvalidOperationException(
+                        "Snapshot restore requires the contextual-bandit policy.");
+                }
+                var restore = bandit.TryRestoreModelSnapshot(
+                    request.PriorModelSnapshot,
+                    request.ParticipantPseudonym);
+                if (!restore.Restored)
+                {
+                    throw new InvalidOperationException(
+                        "Longitudinal model restore failed: "
+                        + restore.Code);
+                }
+            }
             request.PhysiologyModel.Initialize(
                 new SyntheticPhysiologySessionContext(
                     request.SessionId,
@@ -404,9 +423,21 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             }
 
             await telemetry.FlushAsync(cancellationToken).ConfigureAwait(false);
+            LinUcbModelSnapshot modelSnapshot = null;
+            if (request.ProtocolId != EvaluationRuntimeBundle.ProtocolId
+                && innerPolicy is ContextualBanditPolicy trainedBandit)
+            {
+                modelSnapshot = trainedBandit.CaptureModelSnapshot(
+                    request.SessionId + "-final-model",
+                    request.ParticipantPseudonym,
+                    request.PriorModelSnapshot?.CreatedUtcUnixSeconds
+                        ?? request.BaseUtcUnixSeconds,
+                    request.BaseUtcUnixSeconds + sessionEnd,
+                    "longitudinal-simulation");
+            }
             return new EvaluationSessionResult(
-                EvaluationRuntimeBundle.ProtocolId,
-                EvaluationRuntimeBundle.PilotBundleId,
+                request.ProtocolId,
+                request.ProfileBundleId,
                 request.PhysiologyModel.ModelId,
                 initialState,
                 environmentManager.CurrentState,
@@ -418,7 +449,8 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 rewards.ToArray(),
                 telemetrySink.CopyEvents(),
                 adapter.CopyAppliedStates(),
-                adapter.AllAppliedStatesSafe);
+                adapter.AllAppliedStatesSafe,
+                modelSnapshot);
         }
 
         private static double FindNextEventTime(

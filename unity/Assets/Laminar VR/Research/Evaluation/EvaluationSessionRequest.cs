@@ -1,6 +1,7 @@
 using System;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Policy;
+using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 
 namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
 {
@@ -37,7 +38,10 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             ISyntheticPhysiologyModel physiologyModel,
             double baseUtcUnixSeconds,
             IEvaluationNetworkSchedule networkSchedule = null,
-            Pcg32 randomSafeActionStream = null)
+            Pcg32 randomSafeActionStream = null,
+            LinUcbModelSnapshot priorModelSnapshot = null,
+            string protocolId = null,
+            string profileBundleId = null)
         {
             Bundle = bundle ?? throw new ArgumentNullException(nameof(bundle));
             SessionId = RequireText(sessionId, nameof(sessionId));
@@ -58,6 +62,14 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 throw new ArgumentNullException(
                     nameof(randomSafeActionStream),
                     "Random Safe requires its dedicated PRNG stream.");
+            }
+
+            if (priorModelSnapshot != null
+                && policyCondition != EvaluationPolicyCondition.ContextualBandit)
+            {
+                throw new ArgumentException(
+                    "Only LinUCB sessions can restore a model snapshot.",
+                    nameof(priorModelSnapshot));
             }
 
             if (!preferredEnvironment.IsNormalized)
@@ -83,6 +95,10 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             NetworkSchedule = networkSchedule
                 ?? AlwaysConnectedEvaluationNetworkSchedule.Instance;
             RandomSafeActionStream = randomSafeActionStream;
+            PriorModelSnapshot = priorModelSnapshot;
+            ProtocolId = protocolId ?? EvaluationRuntimeBundle.ProtocolId;
+            ProfileBundleId = profileBundleId
+                ?? EvaluationRuntimeBundle.PilotBundleId;
         }
 
         public EvaluationRuntimeBundle Bundle { get; }
@@ -102,6 +118,12 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
         public IEvaluationNetworkSchedule NetworkSchedule { get; }
 
         public Pcg32 RandomSafeActionStream { get; }
+
+        public LinUcbModelSnapshot PriorModelSnapshot { get; }
+
+        public string ProtocolId { get; }
+
+        public string ProfileBundleId { get; }
 
         public IEnvironmentPolicy CreatePolicy()
         {

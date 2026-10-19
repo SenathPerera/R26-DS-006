@@ -68,7 +68,7 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
 
         private readonly SyntheticArchetypeDefinition archetype;
         private readonly LaminarVR.AdaptiveMeditation.Environment.EnvironmentState
-            preference;
+            responsePreference;
         private readonly SyntheticSessionParameters parameters;
         private readonly Pcg32 physiologyNoise;
         private readonly double noiseMultiplier;
@@ -83,7 +83,9 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             LaminarVR.AdaptiveMeditation.Environment.EnvironmentState preference,
             SyntheticSessionParameters parameters,
             Pcg32 physiologyNoise,
-            double noiseMultiplier = 1d)
+            double noiseMultiplier = 1d,
+            LaminarVR.AdaptiveMeditation.Environment.EnvironmentState?
+                responsePreference = null)
         {
             this.archetype = archetype ?? throw new ArgumentNullException(
                 nameof(archetype));
@@ -94,7 +96,13 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                     nameof(preference));
             }
 
-            this.preference = preference;
+            this.responsePreference = responsePreference ?? preference;
+            if (!this.responsePreference.IsNormalized)
+            {
+                throw new ArgumentException(
+                    "The synthetic response optimum must be normalized.",
+                    nameof(responsePreference));
+            }
             this.parameters = parameters ?? throw new ArgumentNullException(
                 nameof(parameters));
             this.physiologyNoise = physiologyNoise
@@ -120,7 +128,7 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             double sessionElapsedSeconds)
         {
             return archetype.CalculateUtility(
-                preference,
+                responsePreference,
                 environment,
                 sessionElapsedSeconds);
         }
@@ -248,11 +256,11 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
 
             var exposure = request.EligibleActionExposure.Value;
             var before = archetype.CalculateUtility(
-                preference,
+                responsePreference,
                 exposure.EnvironmentBefore,
                 request.EmissionMonotonicTimeSeconds);
             var after = archetype.CalculateUtility(
-                preference,
+                responsePreference,
                 exposure.EnvironmentAfter,
                 request.EmissionMonotonicTimeSeconds);
             return after - before;

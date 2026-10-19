@@ -2,6 +2,7 @@ using System;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy;
+using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Rewards;
 using LaminarVR.AdaptiveMeditation.Telemetry;
 
@@ -80,7 +81,8 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             EvaluationRewardRecord[] rewards,
             TelemetryEvent[] telemetryEvents,
             EnvironmentState[] appliedStates,
-            bool allAppliedStatesSafe)
+            bool allAppliedStatesSafe,
+            LinUcbModelSnapshot modelSnapshot = null)
         {
             ProtocolId = protocolId;
             ProfileBundleId = profileBundleId;
@@ -96,6 +98,7 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             TelemetryEvents = telemetryEvents ?? Array.Empty<TelemetryEvent>();
             AppliedStates = appliedStates ?? Array.Empty<EnvironmentState>();
             AllAppliedStatesSafe = allAppliedStatesSafe;
+            ModelSnapshot = modelSnapshot;
         }
 
         public string ProtocolId { get; }
@@ -112,6 +115,8 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
         public TelemetryEvent[] TelemetryEvents { get; }
         public EnvironmentState[] AppliedStates { get; }
         public bool AllAppliedStatesSafe { get; }
+
+        public LinUcbModelSnapshot ModelSnapshot { get; }
 
         public int RewardAppliedCount
         {

@@ -8,7 +8,8 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
         PhysiologyNoise = 2UL,
         MissingWindowSchedule = 3UL,
         RandomSafeActionSelection = 4UL,
-        StochasticFaultSchedule = 5UL
+        StochasticFaultSchedule = 5UL,
+        LongitudinalProbeContexts = 6UL
     }
 
     public static class EvaluationRandomStreams

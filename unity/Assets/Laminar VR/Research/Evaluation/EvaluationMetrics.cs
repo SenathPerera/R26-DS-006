@@ -192,7 +192,8 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
             EvaluationPolicyCondition policyCondition,
             int seed,
             EvaluationRuntimeBundle bundle,
-            EvaluationSessionResult result)
+            EvaluationSessionResult result,
+            long priorModelUpdateCount = 0L)
         {
             if (bundle == null)
             {
@@ -312,7 +313,8 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                     == EvaluationPolicyCondition.ContextualBandit
                 ? (int)Math.Max(
                     0L,
-                    result.PolicyState.ModelUpdateCount - rewardCount)
+                    result.PolicyState.ModelUpdateCount
+                        - priorModelUpdateCount - rewardCount)
                 : 0;
             var sceneViolations = 0;
             for (var index = 0; index < result.AppliedStates.Length; index++)
@@ -348,7 +350,7 @@ namespace LaminarVR.AdaptiveMeditation.ResearchEvaluation
                 rmssdChange,
                 executedChanges,
                 rewardCount,
-                result.PolicyState.ModelUpdateCount,
+                result.PolicyState.ModelUpdateCount - priorModelUpdateCount,
                 noChangeCount,
                 CalculateEntropy(actionCounts, oracleRecords.Count),
                 totalVariation,

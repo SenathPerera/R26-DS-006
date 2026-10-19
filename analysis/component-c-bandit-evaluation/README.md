@@ -75,3 +75,66 @@ The figure generator uses only Python’s standard library and produces an ECDF,
 confirmatory-effect plot, convergence plot, and a source/output checksum
 manifest. Figures are always derived from CSV outputs rather than manually
 transcribed values.
+
+## Frozen longitudinal Study A v1.0 (Temple Pond visual v3)
+
+This is a separate, investigator-frozen 20-session-per-profile simulation. The
+historical single-session commands above still use their frozen v2 environment.
+Read the [v1.0 longitudinal protocol](../../docs/research/LAMINAR_VR_LONGITUDINAL_SIMULATION_PROTOCOL_v1.0.md)
+and [freeze record](../../docs/research/LAMINAR_VR_LONGITUDINAL_STUDY_A_FREEZE_RECORD_v1.0.md)
+before the full run. Supervisor/team sign-off remains unrecorded.
+
+From the repository root, verify the stronger v3 scene and v4 mapping:
+
+```powershell
+python analysis/component-c-bandit-evaluation/scripts/validate_longitudinal_visual_profile_v1.py
+```
+
+Open `unity/` in Unity `6000.0.82f1` and wait for scripts to compile. In the
+Editor choose `Tools > Adaptive Meditation > Research > Longitudinal Study A >
+Run Smoke (68 sessions)`. The smoke covers every condition and challenge with
+one profile, two sessions, and four probes per checkpoint. Inspect Console for
+the output directory and run the analyzer below. Its development seeds
+`510000` and `520000` are separate from the full-study seeds.
+
+```powershell
+$run = Get-ChildItem 'analysis/component-c-bandit-evaluation/longitudinal/runs' `
+  -Directory -Filter '*-longitudinal-smoke' |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+python analysis/component-c-bandit-evaluation/scripts/analyze_longitudinal_v1.py $run.FullName
+```
+
+The analysis command verifies status, checksums, row counts, and complete
+trajectories, then writes `analysis.json` and `learning-curve.csv` in that run
+directory. It omits primary inference for smoke runs.
+
+The completed v0.2 smoke run from before the freeze must be analyzed with
+`analyze_longitudinal.py`; the v1.0 analyzer accepts only v1.0 manifests. For a
+new v1.0 smoke run, use the v1.0 analyzer above.
+
+Choose `Run Frozen Full Study (20,400 sessions)` from the same menu. Then run:
+
+```powershell
+$run = Get-ChildItem 'analysis/component-c-bandit-evaluation/longitudinal/runs' `
+  -Directory -Filter '*-longitudinal-full' |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 1
+python analysis/component-c-bandit-evaluation/scripts/analyze_longitudinal_v1.py $run.FullName
+```
+
+The full frozen matrix contains 7 archetypes × 30 seeds × 4 conditions × 20
+sessions, plus 3 challenge scenarios × 30 seeds × 2 conditions × 20 sessions.
+Each trajectory has 32 fixed held-out probes at baseline and after every
+session. The full analysis reports the paired Carry−Reset endpoint,
+its bootstrap interval, and a sign-flip p-value in `analysis.json`, with the
+30 seed-index contrasts in `paired-index-effects.csv`. A v1.0 run is labelled
+`investigator_frozen`; v0.2 runs remain `proposed_not_frozen`.
+
+Generated runs live under `longitudinal/runs/` and are ignored by Git. Each
+contains a manifest and session, probe, decision, reward, and synthetic
+physiology CSV traces. Cancel the Editor progress dialog to retain a partial
+run with `cancelled` status; it cannot enter the analysis. The runner uses the
+production decision, safety, transition, validation, and reward pipeline, but
+model persistence is evaluation-only. It does not require a Quest headset or
+change the deployed policy.
