@@ -1,14 +1,3 @@
-"""Layer 1: audio quality gate.
-
-Two DIFFERENT checks, not one reused function - see the QUALITY comment
-in config.py for why. Voice-activity detection (Silero VAD, a small
-frozen pretrained model) is the core signal for both; it answers "is
-there a human voice here" robustly across arbitrary real-world noise
-(fans, traffic, chatter, hums) in a way hand-tuned spectral thresholds
-cannot generalise to. Simple DSP checks (RMS floor, clipping) catch the
-cases VAD does not: silence, a muted mic, or mic overload.
-"""
-
 import sys
 from pathlib import Path
 
@@ -175,9 +164,7 @@ def check_ambient(audio: np.ndarray, sr: int = SAMPLE_RATE,
 
     noise_type = _classify_noise(metrics)
 
-    # Per-check results. severity "fail" gates the room; "warn" is advisory and
-    # never blocks on its own. reasons[] keeps the original substrings so callers
-    # and tests that match on them keep working.
+   
     checks: list[dict] = []
     reasons: list[str] = []
 
@@ -188,9 +175,7 @@ def check_ambient(audio: np.ndarray, sr: int = SAMPLE_RATE,
         if not ok and reason:
             reasons.append(reason)
 
-    # Steady background noise only BLOCKS when it's genuinely loud (above
-    # floor_too_noisy); a fan/AC in the "usable" band passes and is compensated
-    # for at Layer 2. Human speech + clipping below remain hard fails.
+
     floor_ok = floor_dbfs <= AMBIENT["floor_too_noisy"]
     add("noise_floor", "Background noise", floor_dbfs, "dBFS",
         floor_ok, "fail",
