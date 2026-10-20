@@ -80,13 +80,6 @@ export function WearableDetailScreen({navigation}: any) {
         <Text style={uiStyles.label}>Latest phone receipt: {t ? new Date(t.receivedAt).toLocaleTimeString() : '--'}</Text>
       </Card>
       <Card>
-        <Text style={uiStyles.value}>Derived measurements</Text>
-        <Text style={uiStyles.body}>Heart rate: {t?.heartRateBpm ?? 'Unavailable'}</Text>
-        <Text style={uiStyles.body}>RR interval: {t?.rrIntervalMs ?? 'Unavailable'}</Text>
-        <Text style={uiStyles.body}>SpO2: {t?.spo2 ?? 'Unavailable'}</Text>
-        <Text style={uiStyles.body}>Battery: {t?.batteryPercent ?? 'Unavailable'}</Text>
-      </Card>
-      <Card>
         <View style={uiStyles.rowBetween}>
           <Text style={uiStyles.value}>Component B relay</Text>
           <StatusPill label={componentB.connectionState.replace('-', ' ')} tone={componentBTone} />
