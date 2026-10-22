@@ -39,24 +39,63 @@ def _idx(name: str) -> int:
     return B_CLASS_NAMES.index(name)
 
 
+def _synth_probs(peaks: list[int]) -> dict:
+    """A plausible 4-class distribution with mass on the peak level(s), so the
+    fake mirrors B's `probabilities` field. D ignores it, but a faithful
+    stand-in carries it."""
+    base = 0.04
+    p = {name: base for name in B_CLASS_NAMES}
+    lead = (1.0 - base * len(B_CLASS_NAMES)) / len(peaks)
+    for i in peaks:
+        p[B_CLASS_NAMES[i]] = round(p[B_CLASS_NAMES[i]] + lead, 3)
+    return p
+
+
+def _continuous(probs: dict) -> float:
+    """Expected level under the distribution, sum(i * p_i) - B's derived field."""
+    return round(sum(i * probs[name] for i, name in enumerate(B_CLASS_NAMES)), 2)
+
+
+def _physiology(rep_level: int) -> tuple[float, float, float]:
+    """Synthetic HR/RMSSD/SDNN that move the right way with stress (higher
+    stress -> lower HRV, higher HR). Fake numbers for demo, not measured."""
+    rmssd = round(55.0 - 12.0 * rep_level, 1)   # 55, 43, 31, 19
+    hr = round(66.0 + 6.0 * rep_level, 1)       # 66, 72, 78, 84
+    sdnn = round(rmssd + 8.0, 1)
+    return hr, rmssd, sdnn
+
+
+def _stress_block() -> dict:
+    """The gated decision, nested exactly like B's StressBlock."""
+    common = lambda probs: {"confidence": _state["confidence"],
+                            "probabilities": probs,
+                            "continuous_score": _continuous(probs)}
+    if _state["mode"] == "point":
+        lvl = _state["level"]
+        probs = _synth_probs([lvl])
+        return {"mode": "point", "level": lvl, "label": B_CLASS_NAMES[lvl],
+                "adjacent": False, **common(probs)}
+    lo, hi = _state["level_low"], _state["level_high"]
+    probs = _synth_probs([lo, hi])
+    return {"mode": "band", "level_low": lo, "level_high": hi,
+            "label": f"{B_CLASS_NAMES[lo]}-to-{B_CLASS_NAMES[hi]}",
+            "adjacent": hi - lo == 1, **common(probs)}
+
+
 @app.get("/stress/latest")
 def latest(response: Response):
     if not _state["ready"]:
         # Exactly like real B before its first ~45s window.
         raise HTTPException(503, "no full window yet")
     now = time.time()
-    if _state["mode"] == "point":
-        lvl = _state["level"]
-        return {"timestamp": now, "mode": "point", "level": lvl,
-                "label": B_CLASS_NAMES[lvl], "confidence": _state["confidence"],
-                "deviation": {"rmssd": -1.0, "sdnn": -0.8, "hr": 1.1},
-                "baseline_maturity": "personal"}
-    lo, hi = _state["level_low"], _state["level_high"]
-    return {"timestamp": now, "mode": "band", "level_low": lo, "level_high": hi,
-            "label": f"{B_CLASS_NAMES[lo]}-to-{B_CLASS_NAMES[hi]}",
-            "confidence": _state["confidence"], "adjacent": hi - lo == 1,
-            "deviation": {"rmssd": -0.3, "sdnn": -0.2, "hr": 0.4},
-            "baseline_maturity": "converging"}
+    block = _stress_block()
+    # The representative level drives synthetic physiology (band -> the higher).
+    rep = block["level"] if block["mode"] == "point" else block["level_high"]
+    hr, rmssd, sdnn = _physiology(rep)
+    # B's real envelope: the decision NESTED under "stress", physiology on top.
+    return {"timestamp": now, "heartRate": hr, "rmssd": rmssd, "sdnn": sdnn,
+            "stress": block, "signalQuality": 0.97,
+            "windowStart": now - 60.0, "windowEnd": now}
 
 
 @app.post("/_set")

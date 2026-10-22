@@ -4,8 +4,9 @@ Everything here runs on Component D's side alone - no live B. The HTTP layer is
 exercised with a tiny fake client so 200/503/error paths are deterministic.
 The payloads are Component B's OWN example StressPredictions (copied verbatim from
 component-b/tests/test_api.py) so we validate against B's real wire format, not a
-paraphrase of it. The remaining Senath-dependent step - pointing this at a running
-B - is the live joint test, documented in docs/DEPLOYMENT.md.
+paraphrase of it: the gated decision is NESTED under "stress", with physiology
+(heartRate/rmssd/sdnn) on top. The remaining Senath-dependent step - pointing
+this at a running B - is the live joint test, documented in docs/DEPLOYMENT.md.
 """
 
 import sys
@@ -21,24 +22,57 @@ from componentd.layer4_crossmodal import StoredHRVProvider, validate_crossmodal_
 
 # --- Component B's real example payloads (component-b/tests/test_api.py) --------
 B_POINT = {
-    "timestamp": 1754985600.0,
-    "mode": "point",
-    "level": 2,
-    "label": "moderate",
-    "confidence": 0.81,
-    "deviation": {"rmssd": -1.42, "sdnn": -0.87, "hr": 1.31},
-    "baseline_maturity": "personal",
+    "timestamp": 1787282898.4,
+    "heartRate": 78.4,
+    "rmssd": 34.1,
+    "sdnn": 42.0,
+    "stress": {
+        "mode": "point",
+        "level": 2,
+        "label": "moderate",
+        "confidence": 0.81,
+        "adjacent": False,
+        "probabilities": {"relaxed": 0.04, "mild": 0.11, "moderate": 0.81,
+                          "high": 0.04},
+        "continuous_score": 1.85,
+    },
+    "signalQuality": 0.98,
+    "windowStart": 1787282838.4,
+    "windowEnd": 1787282898.4,
 }
 B_BAND = {
-    "timestamp": 1754985604.0,
-    "mode": "band",
-    "level_low": 1,
-    "level_high": 2,
-    "label": "mild-to-moderate",
-    "confidence": 0.54,
-    "deviation": {"rmssd": -0.31, "sdnn": -0.22, "hr": 0.44},
-    "baseline_maturity": "converging",
+    "timestamp": 1787282902.4,
+    "heartRate": 81.2,
+    "rmssd": 28.7,
+    "sdnn": 38.5,
+    "stress": {
+        "mode": "band",
+        "level_low": 1,
+        "level_high": 2,
+        "label": "mild-to-moderate",
+        # confidence is the top-two MARGIN; a band means it fell below B's
+        # CONFIDENCE_TAU = 0.15, so it is already under D's BAND_CONF_CAP.
+        "confidence": 0.10,
+        "adjacent": True,
+        "probabilities": {"relaxed": 0.08, "mild": 0.40, "moderate": 0.50,
+                          "high": 0.02},
+        "continuous_score": 1.46,
+    },
+    "signalQuality": 0.92,
+    "windowStart": 1787282842.4,
+    "windowEnd": 1787282902.4,
 }
+
+
+def point(**over):
+    """B point payload with stress-block fields overridden. A top-level spread
+    can't reach the nested decision, so variants go through here."""
+    return {**B_POINT, "stress": {**B_POINT["stress"], **over}}
+
+
+def band(**over):
+    """B band payload with stress-block fields overridden."""
+    return {**B_BAND, "stress": {**B_BAND["stress"], **over}}
 
 
 class FakeResponse:
@@ -81,53 +115,70 @@ def test_point_maps_level_and_confidence():
     (3, "high"),
 ])
 def test_every_point_level_maps(level_int, expected):
-    pred = {**B_POINT, "level": level_int}
-    assert map_stress_prediction(pred).level == expected
+    assert map_stress_prediction(point(level=level_int)).level == expected
 
 
 def test_relaxed_alias_becomes_no():
-    assert map_stress_prediction({**B_POINT, "level": 0}).level == "no"
+    assert map_stress_prediction(point(level=0)).level == "no"
 
 
-def test_band_takes_higher_level_and_caps_confidence():
-    r = map_stress_prediction(B_BAND)
+def test_band_takes_higher_level_and_caps_high_confidence():
+    # A band whose confidence lands ABOVE the cap is held down so Layer 4 defers.
+    # (Real B bands sit below the cap already - see the next test.)
+    r = map_stress_prediction(band(confidence=0.54))
     assert r.level == "moderate"          # higher of mild/moderate (don't under-call)
     assert r.confidence == BAND_CONF_CAP  # 0.54 capped down to 0.2 -> Layer 4 defers
     assert r.mode == "band"
 
 
+def test_band_keeps_realistic_low_confidence():
+    # B's real band confidence is the top-two margin (< CONFIDENCE_TAU 0.15), so
+    # it is already below D's cap and passes through unchanged.
+    r = map_stress_prediction(B_BAND)
+    assert r.level == "moderate"
+    assert r.confidence == 0.10
+
+
 def test_band_keeps_confidence_when_already_below_cap():
-    r = map_stress_prediction({**B_BAND, "confidence": 0.05})
+    r = map_stress_prediction(band(confidence=0.05))
     assert r.confidence == 0.05           # never inflate B's own low confidence
 
 
 def test_band_higher_level_regardless_of_field_order():
-    r = map_stress_prediction({**B_BAND, "level_low": 3, "level_high": 1})
+    r = map_stress_prediction(band(level_low=3, level_high=1))
     assert r.level == "high"
+
+
+def test_flat_payload_still_maps():
+    # Backward-compat: a flat decision (no "stress" wrapper) still maps, so a
+    # future envelope tweak on B degrades to a clean read, not a silent drop.
+    flat = {"mode": "point", "level": 2, "label": "moderate", "confidence": 0.81}
+    assert map_stress_prediction(flat).level == "moderate"
 
 
 # ---------------------------------------------------- mapping guardrails
 @pytest.mark.parametrize("bad_level", [-1, 4, 99])
 def test_out_of_range_level_raises(bad_level):
     with pytest.raises(ValueError):
-        map_stress_prediction({**B_POINT, "level": bad_level})
+        map_stress_prediction(point(level=bad_level))
 
 
 def test_bool_level_rejected():
     # bool is an int subclass; must not sneak through as level 0/1.
     with pytest.raises(ValueError):
-        map_stress_prediction({**B_POINT, "level": True})
+        map_stress_prediction(point(level=True))
 
 
 def test_missing_confidence_raises():
-    bad = {k: v for k, v in B_POINT.items() if k != "confidence"}
+    bad = point()
+    del bad["stress"]["confidence"]
     with pytest.raises(ValueError):
         map_stress_prediction(bad)
 
 
 def test_unknown_mode_raises():
     with pytest.raises(ValueError):
-        map_stress_prediction({**B_POINT, "mode": "trend"})
+        map_stress_prediction(point(mode="trend"))
 
 
 def test_non_dict_raises():
@@ -146,7 +197,7 @@ def test_poll_200_point_returns_reading():
 def test_poll_200_band_returns_reading():
     c = FakeClient(FakeResponse(200, B_BAND))
     r = poll_latest("s1", "post", client=c)
-    assert r.level == "moderate" and r.confidence == BAND_CONF_CAP
+    assert r.level == "moderate" and r.confidence == 0.10
 
 
 def test_poll_503_returns_none():
@@ -166,7 +217,7 @@ def test_poll_other_status_returns_none():
 
 def test_poll_malformed_body_returns_none_not_crash():
     # A live session must survive B sending garbage; map_* still raises for tests.
-    c = FakeClient(FakeResponse(200, {"mode": "point", "level": 42, "confidence": 0.9}))
+    c = FakeClient(FakeResponse(200, point(level=42)))
     assert poll_latest("s1", "pre", client=c) is None
 
 
@@ -206,8 +257,8 @@ def test_end_to_end_poll_to_crossmodal_verdict():
     before, low (2) after. Both signals fall together and confidently -> Layer 4
     validates (agreement, no mismatch)."""
     store = StoredHRVProvider()
-    pre_client = FakeClient(FakeResponse(200, {**B_POINT, "level": 2}))    # moderate
-    post_client = FakeClient(FakeResponse(200, {**B_POINT, "level": 0}))   # -> "no"
+    pre_client = FakeClient(FakeResponse(200, point(level=2)))    # moderate
+    post_client = FakeClient(FakeResponse(200, point(level=0)))   # -> "no"
     b_pre = poll_into_store(store, "sess", "pre", client=pre_client)
     b_post = poll_into_store(store, "sess", "post", client=post_client)
 
@@ -225,13 +276,13 @@ def test_end_to_end_poll_to_crossmodal_verdict():
 
 def test_end_to_end_low_confidence_band_defers_to_body():
     """When B returns a band (uncertain) and voice disagrees, Layer 4 must NOT
-    assert a mismatch - the capped band confidence trips the defer gate."""
+    assert a mismatch - the low band confidence trips the defer gate."""
     store = StoredHRVProvider()
     # Body says calm both phases (band -> low conf); voice says stressed throughout.
-    calm_band = {**B_BAND, "level_low": 0, "level_high": 1}   # -> higher "mild"
+    calm_band = band(level_low=0, level_high=1)   # -> higher "mild", conf 0.10
     poll_into_store(store, "s", "pre", client=FakeClient(FakeResponse(200, calm_band)))
     poll_into_store(store, "s", "post", client=FakeClient(FakeResponse(200, calm_band)))
-    b_conf = BAND_CONF_CAP
+    b_conf = 0.10   # B's real band confidence, below the defer gate
 
     result = validate_crossmodal_levels(
         8.0, 8.0, store.get_level("s", "pre"), store.get_level("s", "post"),
