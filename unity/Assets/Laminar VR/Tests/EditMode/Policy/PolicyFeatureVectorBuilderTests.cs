@@ -12,7 +12,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
             new PolicyFeatureVectorBuilder();
 
         [Test]
-        public void Build_UsesVersionedDraftSchemaAndDeterministicFeatureOrder()
+        public void Build_UsesVersionedProductionSchemaAndDeterministicFeatureOrder()
         {
             var preferred = new EnvironmentState(0.1f, 0.2f, 0.3f, 0.4f, 0.5f);
             var current = new EnvironmentState(0.6f, 0.5f, 0.4f, 0.3f, 0.2f);
@@ -27,8 +27,12 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
 
             Assert.That(
                 vector.SchemaVersion,
-                Is.EqualTo(PolicyFeatureVectorBuilder.DraftSchemaVersion));
-            Assert.That(vector.Count, Is.EqualTo(24));
+                Is.EqualTo(
+                    PolicyFeatureVectorBuilder.ProductionSchemaVersion));
+            Assert.That(
+                vector.Count,
+                Is.EqualTo(
+                    PolicyFeatureVectorBuilder.ProductionFeatureCount));
             Assert.That(vector[0], Is.EqualTo(1d));
             Assert.That(vector[1], Is.EqualTo(0.6d).Within(0.00001d));
             Assert.That(
@@ -81,7 +85,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
         }
 
         [Test]
-        public void GetFeatureName_ExposesStableNameForEveryDraftIndex()
+        public void GetFeatureName_ExposesStableNameForEveryProductionIndex()
         {
             var expectedNames = new[]
             {
@@ -115,6 +119,26 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Policy
             for (var index = 0; index < expectedNames.Length; index++)
             {
                 Assert.That(builder.GetFeatureName(index), Is.EqualTo(expectedNames[index]));
+            }
+        }
+
+        [Test]
+        public void Build_ProducesOnlyFiniteBoundedProductionFeatures()
+        {
+            var observation = new PolicyObservation(
+                PolicyObservationTests.CreateSnapshot(),
+                PolicyObservationTests.CreateState(0f),
+                PolicyObservationTests.CreateState(1f),
+                PolicyObservationTests.CreateState(0f));
+
+            var vector = builder.Build(observation);
+
+            for (var index = 0; index < vector.Count; index++)
+            {
+                Assert.That(
+                    vector[index],
+                    Is.InRange(-1d, 1d),
+                    builder.GetFeatureName(index));
             }
         }
 

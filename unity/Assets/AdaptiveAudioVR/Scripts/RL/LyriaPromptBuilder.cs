@@ -95,6 +95,8 @@ namespace AdaptiveAudioVR.RL
 
             var frame = new LyriaControlFrame
             {
+                environmentId = EnvironmentId,
+                environmentDisplayName = EnvironmentDisplayName,
                 strategyName = strategy.displayName,
                 actionName = string.IsNullOrWhiteSpace(actionName) ? mode.ToString() : actionName,
                 latestReward = latestReward,
@@ -202,25 +204,7 @@ namespace AdaptiveAudioVR.RL
 
         private static int ResolveBpm(AudioProfile profile, PersonalizationStrategy strategy, AudioParameters parameters)
         {
-            int baseBpm = 68;
-            if (profile != null)
-            {
-                switch (profile.tempo)
-                {
-                    case "fast":
-                        baseBpm = 108;
-                        break;
-                    case "medium":
-                        baseBpm = 86;
-                        break;
-                    default:
-                        baseBpm = 68;
-                        break;
-                }
-            }
-
-            int dynamicOffset = Mathf.RoundToInt((parameters.intensity - 0.5f) * 16f);
-            return Mathf.Clamp(baseBpm + strategy.bpmOffset + dynamicOffset, 60, 200);
+            return AudioMusicalMapping.Bpm(parameters.tempo, strategy.bpmOffset);
         }
 
         private static float ResolveGuidance(AudioProfile profile, PersonalizationStrategy strategy)

@@ -1,0 +1,1153 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
+using LaminarVR.AdaptiveMeditation.Networking;
+using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
+using LaminarVR.AdaptiveMeditation.Runtime.Networking;
+using LaminarVR.AdaptiveMeditation.Session;
+using LaminarVR.AdaptiveMeditation.Telemetry;
+using UnityEngine;
+
+namespace LaminarVR.AdaptiveMeditation.Runtime.Application
+{
+    [AddComponentMenu(
+        "Adaptive Meditation/Application/Session Relay Bridge")]
+    [DisallowMultipleComponent]
+    public sealed class SessionRelayBridge : MonoBehaviour,
+        ISessionRelayConnectionTarget
+    {
+        private const int DefaultMaximumMessagesPerFrame = 64;
+
+        [Header("Composition Root")]
+        [SerializeField]
+        private ApplicationBootstrap applicationBootstrap = null;
+
+        [SerializeField]
+        private ProductionSessionCoordinator productionCoordinator = null;
+
+        [SerializeField]
+        private VisualSessionBoundary visualSessionBoundary = null;
+
+        [SerializeField]
+        private ReconnectBackoffProfile reconnectBackoffProfile = null;
+
+        [Header("Main-Thread Dispatch")]
+        [SerializeField, Min(1)]
+        private int maximumMessagesPerFrame = DefaultMaximumMessagesPerFrame;
+
+        private readonly object transportSynchronization = new object();
+        private readonly SemaphoreSlim lifecycleGate =
+            new SemaphoreSlim(1, 1);
+        private readonly ConcurrentQueue<InboundRelayEvent> inboundEvents =
+            new ConcurrentQueue<InboundRelayEvent>();
+        private readonly ConcurrentQueue<SessionRelayQuestState>
+            pendingQuestStates =
+                new ConcurrentQueue<SessionRelayQuestState>();
+
+        private ISessionRelayTransportFactory transportFactory;
+        private IRecordedTelemetrySource recordedTelemetrySource;
+        private ISessionRelayTransport activeTransport;
+        private CancellationTokenSource componentLifetime;
+        private CancellationTokenSource reconnectCancellation;
+        private ConnectionReconnectController reconnectController;
+        private Task<ReconnectAttemptResult> activeReconnect;
+        private Task activeQuestStatePublish;
+        private Task activeTelemetryPublish;
+        private TelemetryEvent[] activeTelemetryBatch;
+        private int maximumTelemetryEventsPerBatch;
+        private bool telemetryPublishBlocked;
+        private bool coordinatorSubscribed;
+        private bool terminalQuestStateDeferred;
+        private bool maintainConnection;
+        private bool reconnectRequested;
+        private bool reconnectExhausted;
+        private VrSessionPhase deferredTerminalPhase;
+        private string acceptedSessionId;
+
+        public string LastValidationError { get; private set; } = string.Empty;
+
+        public string LastConnectionError { get; private set; } = string.Empty;
+
+        public string LastOutboundError { get; private set; } = string.Empty;
+
+        public string LastTelemetryError { get; private set; } = string.Empty;
+
+        public int PendingTelemetryEventCount =>
+            (activeTelemetryBatch?.Length ?? 0)
+            + (ResolveTelemetrySource()?.PendingEventCount ?? 0);
+
+        public int RejectedInboundMessageCount { get; private set; }
+
+        public string LastInboundRejection { get; private set; } = string.Empty;
+
+        public SessionRelayConfigurationMessage CurrentConfiguration { get; private set; }
+
+        public Task PublishDiagnosticsAsync(SessionRuntimeDiagnostics values, CancellationToken cancellationToken)
+        {
+            var transport = GetActiveTransport();
+            if (transport?.ConnectionState != SessionTransportConnectionState.Connected
+                || CurrentConfiguration == null
+                || !(transport is ISessionRelayDiagnosticsPublisher publisher))
+                return Task.CompletedTask;
+            return publisher.PublishDiagnosticsAsync(CurrentConfiguration.SessionId, values, cancellationToken);
+        }
+
+        public event Action<SessionRelayConfigurationMessage> SessionConfigurationAccepted;
+
+        public SessionTransportConnectionState ConnectionState =>
+            GetActiveTransport()?.ConnectionState
+            ?? SessionTransportConnectionState.Disconnected;
+
+        private void OnEnable()
+        {
+            componentLifetime = new CancellationTokenSource();
+            SubscribeToCoordinator();
+        }
+
+        private void Update()
+        {
+            ProcessPendingMessages();
+        }
+
+        private void OnDisable()
+        {
+            UnsubscribeFromCoordinator();
+            componentLifetime?.Cancel();
+            BeginShutdown();
+            componentLifetime?.Dispose();
+            componentLifetime = null;
+        }
+
+        private void OnValidate()
+        {
+            maximumMessagesPerFrame = Math.Max(
+                1,
+                maximumMessagesPerFrame);
+        }
+
+        public void Configure(
+            ApplicationBootstrap bootstrap,
+            ProductionSessionCoordinator coordinator,
+            VisualSessionBoundary boundary,
+            ISessionRelayTransportFactory relayTransportFactory = null,
+            IRecordedTelemetrySource telemetrySource = null,
+            ReconnectBackoffProfile backoffProfile = null)
+        {
+            if (GetActiveTransport() != null)
+            {
+                throw new InvalidOperationException(
+                    "The session relay bridge cannot be reconfigured while a transport exists.");
+            }
+
+            UnsubscribeFromCoordinator();
+            applicationBootstrap = bootstrap;
+            productionCoordinator = coordinator;
+            visualSessionBoundary = boundary;
+            reconnectBackoffProfile = backoffProfile;
+            transportFactory = relayTransportFactory;
+            recordedTelemetrySource = telemetrySource ?? coordinator;
+            SubscribeToCoordinator();
+        }
+
+        public async Task ConnectAsync(
+            SessionRelayConnectionInfo connectionInfo,
+            CancellationToken cancellationToken)
+        {
+            if (connectionInfo == null)
+            {
+                throw new ArgumentNullException(nameof(connectionInfo));
+            }
+
+            if (!TryValidateBindings(out var validationError))
+            {
+                LastValidationError = validationError;
+                throw new InvalidOperationException(validationError);
+            }
+
+            var lifetime = componentLifetime
+                ?? throw new InvalidOperationException(
+                    "The session relay bridge must be enabled before connecting.");
+
+            if (!reconnectBackoffProfile.TryCreateRuntimeConfiguration(
+                    out var reconnectConfiguration,
+                    out var reconnectError))
+            {
+                LastValidationError = reconnectError;
+                throw new InvalidOperationException(reconnectError);
+            }
+
+            maximumTelemetryEventsPerBatch =
+                connectionInfo.MaximumTelemetryEventsPerBatch;
+
+            await lifecycleGate.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+            try
+            {
+                if (GetActiveTransport() != null)
+                {
+                    throw new InvalidOperationException(
+                        "A session relay transport is already active.");
+                }
+
+                terminalQuestStateDeferred = false;
+                maintainConnection = true;
+                reconnectRequested = false;
+                reconnectExhausted = false;
+
+                var factory = transportFactory
+                    ?? new SessionRelayTransportFactory();
+                var transport = factory.Create(connectionInfo)
+                    ?? throw new InvalidOperationException(
+                        "The session relay transport factory returned null.");
+                AttachTransport(transport);
+                lock (transportSynchronization)
+                {
+                    activeTransport = transport;
+                }
+                reconnectController = new ConnectionReconnectController(
+                    transport,
+                    reconnectConfiguration,
+                    new TaskReconnectDelay());
+                reconnectCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        lifetime.Token);
+
+                using (var linkedCancellation =
+                    CancellationTokenSource.CreateLinkedTokenSource(
+                        cancellationToken,
+                        lifetime.Token))
+                {
+                    try
+                    {
+                        await transport.ConnectAsync(
+                                linkedCancellation.Token)
+                            .ConfigureAwait(false);
+                        LastConnectionError = string.Empty;
+                    }
+                    catch (Exception exception)
+                    {
+                        ClearTransportIfCurrent(transport);
+                        DetachTransport(transport);
+                        ResetReconnectState();
+                        LastConnectionError =
+                            "relay-connect-failed:"
+                            + exception.GetType().Name;
+                        throw;
+                    }
+                }
+            }
+            finally
+            {
+                lifecycleGate.Release();
+            }
+        }
+
+        public async Task DisconnectAsync(
+            CancellationToken cancellationToken)
+        {
+            maintainConnection = false;
+            reconnectCancellation?.Cancel();
+            await lifecycleGate.WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
+            try
+            {
+                if (activeReconnect != null)
+                {
+                    try
+                    {
+                        await activeReconnect.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                    }
+                    catch
+                    {
+                    }
+
+                    activeReconnect = null;
+                }
+
+                var transport = TakeActiveTransport();
+                if (transport == null)
+                {
+                    ResetReconnectState();
+                    return;
+                }
+
+                try
+                {
+                    if (transport.ConnectionState
+                        == SessionTransportConnectionState.Connected)
+                    {
+                        await transport.DisconnectAsync(cancellationToken)
+                            .ConfigureAwait(false);
+                    }
+                }
+                finally
+                {
+                    DetachTransport(transport);
+                    ResetReconnectState();
+                    acceptedSessionId = null;
+                    CurrentConfiguration = null;
+                    terminalQuestStateDeferred = false;
+                    ClearPendingQuestStates();
+                }
+            }
+            finally
+            {
+                lifecycleGate.Release();
+            }
+        }
+
+        public int ProcessPendingMessages()
+        {
+            ObserveQuestStatePublish();
+            ObserveTelemetryPublish();
+
+            var processedCount = 0;
+            while (processedCount < maximumMessagesPerFrame
+                && inboundEvents.TryDequeue(out var inboundEvent))
+            {
+                ProcessInboundEvent(inboundEvent);
+                processedCount++;
+            }
+
+            ObserveReconnect();
+            TryStartReconnect();
+            TryStartTelemetryPublish();
+            TryQueueDeferredTerminalQuestState();
+            TryStartQuestStatePublish();
+            return processedCount;
+        }
+
+        public bool TryValidateBindings(out string validationError)
+        {
+            if (applicationBootstrap == null)
+            {
+                validationError = "Assign an ApplicationBootstrap.";
+                return false;
+            }
+
+            if (productionCoordinator == null)
+            {
+                validationError =
+                    "Assign a ProductionSessionCoordinator.";
+                return false;
+            }
+
+            if (visualSessionBoundary == null)
+            {
+                validationError = "Assign a VisualSessionBoundary.";
+                return false;
+            }
+
+            if (reconnectBackoffProfile == null)
+            {
+                validationError = "Assign a ReconnectBackoffProfile.";
+                return false;
+            }
+
+            if (!reconnectBackoffProfile.TryCreateRuntimeConfiguration(
+                    out _,
+                    out validationError))
+            {
+                return false;
+            }
+
+            validationError = string.Empty;
+            LastValidationError = string.Empty;
+            return true;
+        }
+
+        private void ProcessInboundEvent(InboundRelayEvent inboundEvent)
+        {
+            switch (inboundEvent.Kind)
+            {
+                case InboundRelayEventKind.Configuration:
+                    ProcessConfiguration(inboundEvent.Configuration);
+                    break;
+                case InboundRelayEventKind.Command:
+                    ProcessCommand(inboundEvent.Command);
+                    break;
+                case InboundRelayEventKind.Status:
+                    visualSessionBoundary.ReceiveConnectionState(
+                        inboundEvent.Status.CurrentState);
+                    if (inboundEvent.Status.CurrentState
+                        == SessionTransportConnectionState.Connected)
+                    {
+                        reconnectRequested = false;
+                        reconnectExhausted = false;
+                        telemetryPublishBlocked = false;
+                        QueueCurrentQuestState();
+                    }
+                    else if (maintainConnection
+                        && activeReconnect == null
+                        && (inboundEvent.Status.Reason
+                            == SessionTransportStatusReason.ConnectionLost
+                            || inboundEvent.Status.Reason
+                            == SessionTransportStatusReason.ConnectionFailed))
+                    {
+                        reconnectRequested = true;
+                        reconnectExhausted = false;
+                    }
+
+                    break;
+                case InboundRelayEventKind.Rejection:
+                    RejectInbound(
+                        inboundEvent.RejectionReason
+                        + ":"
+                        + inboundEvent.DiagnosticCode);
+                    break;
+                case InboundRelayEventKind.TelemetryAcknowledged:
+                    ReportTelemetryTransferSucceeded(
+                        inboundEvent.AcknowledgedMessageId);
+                    activeTelemetryBatch = null;
+                    telemetryPublishBlocked = false;
+                    LastTelemetryError = string.Empty;
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException();
+            }
+        }
+
+        private void ProcessConfiguration(
+            SessionRelayConfigurationMessage configuration)
+        {
+            if (acceptedSessionId != null
+                && !string.Equals(
+                    acceptedSessionId,
+                    configuration.SessionId,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("session-context-conflict");
+                return;
+            }
+
+            if (CurrentConfiguration != null
+                && !string.Equals(
+                    CurrentConfiguration.ParticipantPseudonym,
+                    configuration.ParticipantPseudonym,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("participant-context-conflict");
+                return;
+            }
+
+            if (!string.Equals(
+                    configuration.SceneId,
+                    applicationBootstrap.ConfiguredSceneId,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("scene-id-mismatch");
+                return;
+            }
+
+            if (!applicationBootstrap.TrySelectStudyPolicy(
+                    configuration.StudyPolicyMode,
+                    out var selectionError))
+            {
+                RejectInbound("study-condition-invalid:" + selectionError);
+                return;
+            }
+
+            if (!applicationBootstrap.IsInitialized
+                && !applicationBootstrap.TryInitialize(
+                    out var bootstrapError))
+            {
+                RejectInbound("bootstrap-invalid:" + bootstrapError);
+                return;
+            }
+
+            acceptedSessionId = configuration.SessionId;
+            visualSessionBoundary.ReceiveSessionContext(
+                configuration.SessionId,
+                configuration.ParticipantPseudonym,
+                configuration.PreferredEnvironment,
+                configuration.SessionContext);
+            CurrentConfiguration = configuration;
+            SessionConfigurationAccepted?.Invoke(configuration);
+        }
+
+        private void ProcessCommand(SessionRelayCommandMessage command)
+        {
+            if (acceptedSessionId == null)
+            {
+                RejectInbound("session-configuration-required");
+                return;
+            }
+
+            if (!string.Equals(
+                    acceptedSessionId,
+                    command.SessionId,
+                    StringComparison.Ordinal))
+            {
+                RejectInbound("command-session-mismatch");
+                return;
+            }
+
+            visualSessionBoundary.ReceiveCommand(
+                command.MessageId,
+                command.CommandType);
+        }
+
+        private void QueueCurrentQuestState()
+        {
+            QueueQuestState(productionCoordinator.Phase);
+        }
+
+        private void QueueQuestState(VrSessionPhase phase)
+        {
+            var transport = GetActiveTransport();
+            var sessionId = transport?.ActiveSessionId;
+            if (transport == null
+                || transport.ConnectionState
+                    != SessionTransportConnectionState.Connected
+                || string.IsNullOrWhiteSpace(sessionId))
+            {
+                return;
+            }
+
+            pendingQuestStates.Enqueue(
+                new SessionRelayQuestState(
+                    Guid.NewGuid().ToString("N"),
+                    sessionId,
+                    phase,
+                    UtcNowUnixSeconds()));
+        }
+
+        private void TryStartQuestStatePublish()
+        {
+            if (activeQuestStatePublish != null)
+            {
+                return;
+            }
+
+            var transport = GetActiveTransport();
+            if (transport == null
+                || transport.ConnectionState
+                    != SessionTransportConnectionState.Connected
+                || !pendingQuestStates.TryDequeue(out var state))
+            {
+                return;
+            }
+
+            try
+            {
+                activeQuestStatePublish = transport.PublishQuestStateAsync(
+                    state,
+                    componentLifetime.Token);
+            }
+            catch (Exception exception)
+            {
+                LastOutboundError =
+                    "quest-state-publish-failed:"
+                    + exception.GetType().Name;
+                activeQuestStatePublish = null;
+            }
+        }
+
+        private void ObserveQuestStatePublish()
+        {
+            if (activeQuestStatePublish == null
+                || !activeQuestStatePublish.IsCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                activeQuestStatePublish.GetAwaiter().GetResult();
+                LastOutboundError = string.Empty;
+            }
+            catch (OperationCanceledException)
+            {
+                LastOutboundError = "quest-state-publish-cancelled";
+            }
+            catch (Exception exception)
+            {
+                LastOutboundError =
+                    "quest-state-publish-failed:"
+                    + exception.GetType().Name;
+            }
+
+            activeQuestStatePublish = null;
+        }
+
+        private void TryStartTelemetryPublish()
+        {
+            if (activeTelemetryPublish != null
+                || telemetryPublishBlocked
+                || acceptedSessionId == null)
+            {
+                return;
+            }
+
+            var transport = GetActiveTransport();
+            if (transport == null
+                || transport.ConnectionState
+                    != SessionTransportConnectionState.Connected)
+            {
+                return;
+            }
+
+            if (activeTelemetryBatch == null)
+            {
+                var telemetrySource = ResolveTelemetrySource();
+                if (telemetrySource == null)
+                {
+                    return;
+                }
+
+                var batch = new List<TelemetryEvent>(
+                    maximumTelemetryEventsPerBatch);
+                while (batch.Count < maximumTelemetryEventsPerBatch
+                    && telemetrySource.TryDequeue(
+                        out var telemetryEvent))
+                {
+                    batch.Add(telemetryEvent);
+                }
+
+                if (batch.Count == 0)
+                {
+                    return;
+                }
+
+                activeTelemetryBatch = batch.ToArray();
+            }
+
+            try
+            {
+                activeTelemetryPublish = transport.PublishTelemetryBatchAsync(
+                    activeTelemetryBatch,
+                    componentLifetime.Token);
+            }
+            catch (Exception exception)
+            {
+                LastTelemetryError =
+                    "telemetry-publish-failed:"
+                    + exception.GetType().Name;
+                ReportTelemetryTransferFailed(LastTelemetryError);
+                telemetryPublishBlocked = true;
+                activeTelemetryPublish = null;
+            }
+        }
+
+        private void ObserveTelemetryPublish()
+        {
+            if (activeTelemetryPublish == null
+                || !activeTelemetryPublish.IsCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                activeTelemetryPublish.GetAwaiter().GetResult();
+                telemetryPublishBlocked = true;
+                LastTelemetryError = "telemetry-awaiting-acknowledgement";
+            }
+            catch (OperationCanceledException)
+            {
+                LastTelemetryError = "telemetry-publish-cancelled";
+                ReportTelemetryTransferFailed(LastTelemetryError);
+                telemetryPublishBlocked = true;
+            }
+            catch (Exception exception)
+            {
+                LastTelemetryError =
+                    "telemetry-publish-failed:"
+                    + exception.GetType().Name;
+                ReportTelemetryTransferFailed(LastTelemetryError);
+                telemetryPublishBlocked = true;
+            }
+
+            activeTelemetryPublish = null;
+        }
+
+        private void ReportTelemetryTransferSucceeded(
+            string acknowledgementId)
+        {
+            if (!TryGetActiveTelemetryBatchRange(
+                    out var eventCount,
+                    out var firstSequenceNumber,
+                    out var lastSequenceNumber))
+            {
+                return;
+            }
+
+            productionCoordinator?.ReportTelemetryTransferSucceeded(
+                acknowledgementId,
+                eventCount,
+                firstSequenceNumber,
+                lastSequenceNumber);
+        }
+
+        private void ReportTelemetryTransferFailed(string diagnosticCode)
+        {
+            if (!TryGetActiveTelemetryBatchRange(
+                    out var eventCount,
+                    out var firstSequenceNumber,
+                    out var lastSequenceNumber))
+            {
+                return;
+            }
+
+            productionCoordinator?.ReportTelemetryTransferFailed(
+                diagnosticCode,
+                eventCount,
+                firstSequenceNumber,
+                lastSequenceNumber);
+        }
+
+        private bool TryGetActiveTelemetryBatchRange(
+            out int eventCount,
+            out long firstSequenceNumber,
+            out long lastSequenceNumber)
+        {
+            eventCount = activeTelemetryBatch?.Length ?? 0;
+            if (eventCount == 0)
+            {
+                firstSequenceNumber = 0L;
+                lastSequenceNumber = 0L;
+                return false;
+            }
+
+            firstSequenceNumber = activeTelemetryBatch[0].SequenceNumber;
+            lastSequenceNumber = activeTelemetryBatch[eventCount - 1]
+                .SequenceNumber;
+            return true;
+        }
+
+        private IRecordedTelemetrySource ResolveTelemetrySource()
+        {
+            return recordedTelemetrySource ?? productionCoordinator;
+        }
+
+        private void HandleConfigurationReceived(
+            SessionRelayConfigurationMessage configuration)
+        {
+            inboundEvents.Enqueue(
+                InboundRelayEvent.ForConfiguration(configuration));
+        }
+
+        private void HandleCommandReceived(SessionRelayCommandMessage command)
+        {
+            inboundEvents.Enqueue(InboundRelayEvent.ForCommand(command));
+        }
+
+        private void HandleStatusChanged(SessionTransportStatus status)
+        {
+            inboundEvents.Enqueue(InboundRelayEvent.ForStatus(status));
+        }
+
+        private void HandleInboundMessageRejected(
+            SessionRelayInboundRejectionReason reason,
+            string diagnosticCode)
+        {
+            inboundEvents.Enqueue(
+                InboundRelayEvent.ForRejection(reason, diagnosticCode));
+        }
+
+        private void HandleTelemetryBatchAcknowledged(string messageId)
+        {
+            inboundEvents.Enqueue(
+                InboundRelayEvent.ForTelemetryAcknowledgement(messageId));
+        }
+
+        private void TryStartReconnect()
+        {
+            if (!maintainConnection
+                || !reconnectRequested
+                || reconnectExhausted
+                || activeReconnect != null
+                || reconnectController == null
+                || GetActiveTransport()?.ConnectionState
+                    != SessionTransportConnectionState.Disconnected)
+            {
+                return;
+            }
+
+            reconnectRequested = false;
+            activeReconnect = reconnectController.ReconnectAsync(
+                reconnectCancellation.Token);
+        }
+
+        private void ObserveReconnect()
+        {
+            if (activeReconnect == null || !activeReconnect.IsCompleted)
+            {
+                return;
+            }
+
+            try
+            {
+                var result = activeReconnect.GetAwaiter().GetResult();
+                if (result.Connected)
+                {
+                    LastConnectionError = string.Empty;
+                    reconnectExhausted = false;
+                }
+                else
+                {
+                    reconnectExhausted = true;
+                    LastConnectionError = "relay-reconnect-exhausted";
+                }
+            }
+            catch (OperationCanceledException)
+            {
+            }
+            catch (Exception exception)
+            {
+                reconnectExhausted = true;
+                LastConnectionError =
+                    "relay-reconnect-failed:"
+                    + exception.GetType().Name;
+            }
+            finally
+            {
+                activeReconnect = null;
+            }
+        }
+
+        private void HandlePhaseChanged(SessionPhaseTransition transition)
+        {
+            if (transition.CurrentPhase == VrSessionPhase.Completed
+                || transition.CurrentPhase == VrSessionPhase.Aborted)
+            {
+                terminalQuestStateDeferred = true;
+                deferredTerminalPhase = transition.CurrentPhase;
+                return;
+            }
+
+            QueueCurrentQuestState();
+        }
+
+        private void TryQueueDeferredTerminalQuestState()
+        {
+            if (!terminalQuestStateDeferred
+                || activeTelemetryPublish != null
+                || activeTelemetryBatch != null
+                || telemetryPublishBlocked)
+            {
+                return;
+            }
+
+            var telemetrySource = ResolveTelemetrySource();
+            if (telemetrySource != null && telemetrySource.PendingEventCount > 0)
+            {
+                return;
+            }
+
+            terminalQuestStateDeferred = false;
+            QueueQuestState(deferredTerminalPhase);
+        }
+
+        private void RejectInbound(string reason)
+        {
+            RejectedInboundMessageCount++;
+            LastInboundRejection = string.IsNullOrWhiteSpace(reason)
+                ? "relay-message-rejected"
+                : reason.Trim();
+        }
+
+        private void AttachTransport(ISessionRelayTransport transport)
+        {
+            transport.SessionConfigurationReceived +=
+                HandleConfigurationReceived;
+            transport.SessionCommandReceived += HandleCommandReceived;
+            transport.StatusChanged += HandleStatusChanged;
+            transport.InboundMessageRejected +=
+                HandleInboundMessageRejected;
+            transport.TelemetryBatchAcknowledged +=
+                HandleTelemetryBatchAcknowledged;
+        }
+
+        private void DetachTransport(ISessionRelayTransport transport)
+        {
+            transport.SessionConfigurationReceived -=
+                HandleConfigurationReceived;
+            transport.SessionCommandReceived -= HandleCommandReceived;
+            transport.StatusChanged -= HandleStatusChanged;
+            transport.InboundMessageRejected -=
+                HandleInboundMessageRejected;
+            transport.TelemetryBatchAcknowledged -=
+                HandleTelemetryBatchAcknowledged;
+        }
+
+        private void SubscribeToCoordinator()
+        {
+            if (!isActiveAndEnabled
+                || coordinatorSubscribed
+                || productionCoordinator == null)
+            {
+                return;
+            }
+
+            productionCoordinator.PhaseChanged += HandlePhaseChanged;
+            coordinatorSubscribed = true;
+        }
+
+        private void UnsubscribeFromCoordinator()
+        {
+            if (!coordinatorSubscribed || productionCoordinator == null)
+            {
+                coordinatorSubscribed = false;
+                return;
+            }
+
+            productionCoordinator.PhaseChanged -= HandlePhaseChanged;
+            coordinatorSubscribed = false;
+        }
+
+        private void BeginShutdown()
+        {
+            maintainConnection = false;
+            reconnectCancellation?.Cancel();
+            var transport = TakeActiveTransport();
+            if (transport == null)
+            {
+                ResetReconnectState();
+                return;
+            }
+
+            var reconnectTask = activeReconnect;
+            var cancellationToDispose = reconnectCancellation;
+
+            DetachTransport(transport);
+            acceptedSessionId = null;
+            CurrentConfiguration = null;
+            terminalQuestStateDeferred = false;
+            ClearPendingQuestStates();
+            ResetReconnectState(false);
+            visualSessionBoundary?.ReceiveConnectionState(
+                SessionTransportConnectionState.Disconnected);
+
+            ObserveInBackground(
+                ShutdownTransportAsync(
+                    transport,
+                    reconnectTask,
+                    cancellationToDispose));
+        }
+
+        private void ClearPendingQuestStates()
+        {
+            while (pendingQuestStates.TryDequeue(out _))
+            {
+            }
+        }
+
+        private void ResetReconnectState(bool disposeCancellation = true)
+        {
+            if (disposeCancellation)
+            {
+                reconnectCancellation?.Dispose();
+            }
+
+            reconnectCancellation = null;
+            reconnectController = null;
+            activeReconnect = null;
+            reconnectRequested = false;
+            reconnectExhausted = false;
+            maintainConnection = false;
+        }
+
+        private static async Task ShutdownTransportAsync(
+            ISessionRelayTransport transport,
+            Task reconnectTask,
+            CancellationTokenSource cancellationToDispose)
+        {
+            try
+            {
+                if (reconnectTask != null)
+                {
+                    try
+                    {
+                        await reconnectTask.ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                if (transport.ConnectionState
+                    == SessionTransportConnectionState.Connected)
+                {
+                    await transport.DisconnectAsync(CancellationToken.None)
+                        .ConfigureAwait(false);
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                cancellationToDispose?.Dispose();
+            }
+        }
+
+        private ISessionRelayTransport GetActiveTransport()
+        {
+            lock (transportSynchronization)
+            {
+                return activeTransport;
+            }
+        }
+
+        private ISessionRelayTransport TakeActiveTransport()
+        {
+            lock (transportSynchronization)
+            {
+                var transport = activeTransport;
+                activeTransport = null;
+                return transport;
+            }
+        }
+
+        private void ClearTransportIfCurrent(
+            ISessionRelayTransport transport)
+        {
+            lock (transportSynchronization)
+            {
+                if (ReferenceEquals(activeTransport, transport))
+                {
+                    activeTransport = null;
+                }
+            }
+        }
+
+        private static void ObserveInBackground(Task task)
+        {
+            if (task == null)
+            {
+                return;
+            }
+
+            task.ContinueWith(
+                completed =>
+                {
+                    _ = completed.Exception;
+                },
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted
+                    | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+
+        private static double UtcNowUnixSeconds()
+        {
+            return DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() / 1000d;
+        }
+
+        private enum InboundRelayEventKind
+        {
+            Configuration,
+            Command,
+            Status,
+            Rejection,
+            TelemetryAcknowledged
+        }
+
+        private readonly struct InboundRelayEvent
+        {
+            private InboundRelayEvent(
+                InboundRelayEventKind kind,
+                SessionRelayConfigurationMessage configuration,
+                SessionRelayCommandMessage command,
+                SessionTransportStatus status,
+                SessionRelayInboundRejectionReason rejectionReason,
+                string diagnosticCode,
+                string acknowledgedMessageId = null)
+            {
+                Kind = kind;
+                Configuration = configuration;
+                Command = command;
+                Status = status;
+                RejectionReason = rejectionReason;
+                DiagnosticCode = diagnosticCode;
+                AcknowledgedMessageId = acknowledgedMessageId;
+            }
+
+            public InboundRelayEventKind Kind { get; }
+
+            public SessionRelayConfigurationMessage Configuration { get; }
+
+            public SessionRelayCommandMessage Command { get; }
+
+            public SessionTransportStatus Status { get; }
+
+            public SessionRelayInboundRejectionReason RejectionReason { get; }
+
+            public string DiagnosticCode { get; }
+
+            public string AcknowledgedMessageId { get; }
+
+            public static InboundRelayEvent ForConfiguration(
+                SessionRelayConfigurationMessage configuration)
+            {
+                return new InboundRelayEvent(
+                    InboundRelayEventKind.Configuration,
+                    configuration,
+                    null,
+                    default,
+                    default,
+                    null,
+                    null);
+            }
+
+            public static InboundRelayEvent ForCommand(
+                SessionRelayCommandMessage command)
+            {
+                return new InboundRelayEvent(
+                    InboundRelayEventKind.Command,
+                    null,
+                    command,
+                    default,
+                    default,
+                    null,
+                    null);
+            }
+
+            public static InboundRelayEvent ForStatus(
+                SessionTransportStatus status)
+            {
+                return new InboundRelayEvent(
+                    InboundRelayEventKind.Status,
+                    null,
+                    null,
+                    status,
+                    default,
+                    null,
+                    null);
+            }
+
+            public static InboundRelayEvent ForRejection(
+                SessionRelayInboundRejectionReason reason,
+                string diagnosticCode)
+            {
+                return new InboundRelayEvent(
+                    InboundRelayEventKind.Rejection,
+                    null,
+                    null,
+                    default,
+                    reason,
+                    diagnosticCode,
+                    null);
+            }
+
+            public static InboundRelayEvent ForTelemetryAcknowledgement(
+                string messageId)
+            {
+                return new InboundRelayEvent(
+                    InboundRelayEventKind.TelemetryAcknowledged,
+                    null,
+                    null,
+                    default,
+                    default,
+                    null,
+                    messageId);
+            }
+        }
+    }
+}

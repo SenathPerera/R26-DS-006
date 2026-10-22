@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="520" viewBox="0 0 900 520" role="img">
+<title>Confirmatory paired effects</title>
+<style>
+text{font-family:Arial,sans-serif;fill:#202124}
+.axis{stroke:#202124;stroke-width:1.2}
+.grid{stroke:#d9dce1;stroke-width:1}
+.tick{font-size:12px}
+.label{font-size:14px;font-weight:600}
+.title{font-size:18px;font-weight:700}
+</style>
+<text class="title" x="450.0" y="27" text-anchor="middle">Confirmatory paired effects</text>
+<line class="axis" x1="85" y1="445" x2="865" y2="445"/>
+<line class="axis" x1="85" y1="445" x2="85" y2="45"/>
+<line class="grid" x1="85.00" y1="445" x2="85.00" y2="45"/>
+<text class="tick" x="85.00" y="466" text-anchor="middle">-0.00515</text>
+<line class="grid" x1="241.00" y1="445" x2="241.00" y2="45"/>
+<text class="tick" x="241.00" y="466" text-anchor="middle">0.00978</text>
+<line class="grid" x1="397.00" y1="445" x2="397.00" y2="45"/>
+<text class="tick" x="397.00" y="466" text-anchor="middle">0.0247</text>
+<line class="grid" x1="553.00" y1="445" x2="553.00" y2="45"/>
+<text class="tick" x="553.00" y="466" text-anchor="middle">0.0396</text>
+<line class="grid" x1="709.00" y1="445" x2="709.00" y2="45"/>
+<text class="tick" x="709.00" y="466" text-anchor="middle">0.0546</text>
+<line class="grid" x1="865.00" y1="445" x2="865.00" y2="45"/>
+<text class="tick" x="865.00" y="466" text-anchor="middle">0.0695</text>
+<line class="grid" x1="85" y1="445.00" x2="865" y2="445.00"/>
+<text class="tick" x="73" y="449.00" text-anchor="end">0</text>
+<line class="grid" x1="85" y1="311.67" x2="865" y2="311.67"/>
+<text class="tick" x="73" y="315.67" text-anchor="end">1</text>
+<line class="grid" x1="85" y1="178.33" x2="865" y2="178.33"/>
+<text class="tick" x="73" y="182.33" text-anchor="end">2</text>
+<line class="grid" x1="85" y1="45.00" x2="865" y2="45.00"/>
+<text class="tick" x="73" y="49.00" text-anchor="end">3</text>
+<text class="label" x="475.0" y="500" text-anchor="middle">Paired mean pseudo-regret difference (left − right)</text>
+<text class="label" transform="translate(22 245.0) rotate(-90)" text-anchor="middle">Hypothesis</text>
+<line x1="138.79" y1="445" x2="138.79" y2="45" stroke="#111" stroke-dasharray="6 4"/>
+<line x1="481.65" y1="311.67" x2="811.21" y2="311.67" stroke="#3c4043" stroke-width="3"/>
+<circle cx="646.33" cy="311.67" r="6" fill="#4C78A8"/>
+<text class="label" x="93" y="298.67">H3 (p=1e-05)</text>
+<line x1="373.73" y1="178.33" x2="507.01" y2="178.33" stroke="#3c4043" stroke-width="3"/>
+<circle cx="438.77" cy="178.33" r="6" fill="#4C78A8"/>
+<text class="label" x="93" y="165.33">H4 (p=1e-05)</text>
+</svg>

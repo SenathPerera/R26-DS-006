@@ -10,11 +10,22 @@ import {
 import {ConnectionState, RawPpgBatch, WearableDevice, WearableTelemetry} from '../../types/domain';
 import {parseBase64RawPpgPacket} from './rawPpgParser';
 import {parseBase64Telemetry} from './telemetryParser';
+import {DeviceUptimeFreshnessGuard} from './notificationFreshness';
+import {
+  mergeWearableAdvertisement,
+  rankWearableCandidates,
+  WEARABLE_DEVICE_NAME,
+  WEARABLE_RAW_PPG_UUID,
+  WEARABLE_SERVICE_UUID,
+  WEARABLE_TELEMETRY_UUID,
+} from './wearableAdvertisement';
 
-export const WEARABLE_DEVICE_NAME = 'WearableHealthMonitor';
-export const WEARABLE_SERVICE_UUID = '7c69f001-7f70-4b0a-9c91-93d7f91b1001';
-export const WEARABLE_TELEMETRY_UUID = '7c69f002-7f70-4b0a-9c91-93d7f91b1001';
-export const WEARABLE_RAW_PPG_UUID = '7c69f003-7f70-4b0a-9c91-93d7f91b1001';
+export {
+  WEARABLE_DEVICE_NAME,
+  WEARABLE_RAW_PPG_UUID,
+  WEARABLE_SERVICE_UUID,
+  WEARABLE_TELEMETRY_UUID,
+} from './wearableAdvertisement';
 
 type Callbacks = {
   onState: (state: ConnectionState) => void;
@@ -28,6 +39,8 @@ type Callbacks = {
 
 const SCAN_MS = 9000;
 const MAX_RECONNECT_ATTEMPTS = 4;
+// Transport safeguard only. Study-specific physiological-window freshness remains a research decision.
+const MAX_NOTIFICATION_DELIVERY_LAG_MS = 2000;
 
 function normalizeUuid(value: string) {
   return value.toLowerCase();
@@ -43,15 +56,21 @@ export class WearableBleService {
   private telemetryMonitor: Subscription | null = null;
   private rawPpgMonitor: Subscription | null = null;
   private disconnectMonitor: Subscription | null = null;
+  private adapterStateMonitor: Subscription | null = null;
   private scanTimer: ReturnType<typeof setTimeout> | null = null;
   private connected: Device | null = null;
   private callbacks: Callbacks | null = null;
   private reconnectEnabled = false;
   private reconnectAttempt = 0;
+  private monitorGeneration = 0;
+  private readonly telemetryFreshness = new DeviceUptimeFreshnessGuard(MAX_NOTIFICATION_DELIVERY_LAG_MS);
+  private staleConnectionCheckInFlight = false;
   private destroyed = false;
 
   configure(callbacks: Callbacks) {
     this.callbacks = callbacks;
+    this.adapterStateMonitor?.remove();
+    this.adapterStateMonitor = this.manager.onStateChange(state => this.handleAdapterState(state), true);
   }
 
   private log(message: string) {
@@ -98,10 +117,7 @@ export class WearableBleService {
       return await new Promise(resolve => {
         const finish = () => {
           this.stopScan();
-          const devices = [...found.values()]
-            .filter(device => device.verified || device.rssi >= -78)
-            .sort((a, b) => Number(b.verified) - Number(a.verified) || b.rssi - a.rssi)
-            .slice(0, 8);
+          const devices = rankWearableCandidates(found.values());
           this.callbacks?.onDevices(devices);
           this.callbacks?.onState('idle');
           if (devices.length === 0) {
@@ -113,29 +129,23 @@ export class WearableBleService {
           resolve(devices);
         };
 
-        this.manager.startDeviceScan(null, {allowDuplicates: false}, (error, device) => {
+        // Keep duplicate callbacks so Android can deliver a later scan response
+        // containing the name that did not fit in the primary advertisement.
+        this.manager.startDeviceScan(null, {allowDuplicates: true}, (error, device) => {
           if (error) {
             this.log(`Scan error: ${error.message}`);
             finish();
             return;
           }
           if (!device) return;
-          const advertisedName = device.localName ?? device.name;
-          const serviceUuids = (device.serviceUUIDs ?? []).map(normalizeUuid);
-          const verified = advertisedName === WEARABLE_DEVICE_NAME || serviceUuids.includes(WEARABLE_SERVICE_UUID);
-          const rssi = device.rssi ?? -127;
-          if (!verified && rssi < -78) return;
-          const candidate: WearableDevice = {
-            id: device.id,
-            name: advertisedName ?? `Unknown BLE device ${device.id.slice(-5)}`,
-            rssi,
-            verified,
-            firmware: verified ? 'ESP32-S3 Mini' : 'Unverified; connect to inspect GATT',
-          };
+          const previous = found.get(device.id);
+          const candidate = mergeWearableAdvertisement(previous, device);
           found.set(device.id, candidate);
-          const sorted = [...found.values()].sort((a, b) => Number(b.verified) - Number(a.verified) || b.rssi - a.rssi);
+          const sorted = rankWearableCandidates(found.values());
           this.callbacks?.onDevices(sorted);
-          this.log(`Saw ${candidate.name} id=${device.id} rssi=${rssi} verified=${verified}`);
+          if (!previous || previous.verified !== candidate.verified) {
+            this.log(`Saw ${candidate.name} id=${device.id} rssi=${candidate.rssi} verified=${candidate.verified}`);
+          }
         });
         this.scanTimer = setTimeout(finish, SCAN_MS);
       });
@@ -159,9 +169,9 @@ export class WearableBleService {
       this.callbacks?.onState('connecting');
       this.log(`${isReconnect ? 'Reconnecting' : 'Connecting'} to ${deviceId}`);
 
-      this.telemetryMonitor?.remove();
-      this.rawPpgMonitor?.remove();
+      this.invalidateMonitoring();
       this.disconnectMonitor?.remove();
+      this.disconnectMonitor = null;
       const connected = await this.manager.connectToDevice(deviceId, {autoConnect: false, timeout: 12000});
       this.connected = connected;
       this.reconnectEnabled = true;
@@ -172,14 +182,17 @@ export class WearableBleService {
       }
       const discovered = await connected.discoverAllServicesAndCharacteristics();
       const rawPpgAvailable = await this.verifyWearableGatt(discovered);
-      this.startMonitoring(discovered, rawPpgAvailable);
+      const monitorGeneration = this.startMonitoring(discovered, rawPpgAvailable);
       this.callbacks?.onRawPpgAvailability(rawPpgAvailable);
-      this.watchDisconnect(discovered.id);
+      this.watchDisconnect(discovered.id, monitorGeneration);
       this.reconnectAttempt = 0;
       this.callbacks?.onState('connected');
       this.log(`Wearable connected; telemetry subscribed${rawPpgAvailable ? ' with raw PPG' : ' (raw PPG unavailable)'}`);
     } catch (error) {
       const message = errorMessage(error);
+      this.invalidateMonitoring();
+      this.disconnectMonitor?.remove();
+      this.disconnectMonitor = null;
       this.connected = null;
       this.fail(message);
       throw error;
@@ -208,17 +221,24 @@ export class WearableBleService {
   }
 
   private startMonitoring(device: Device, rawPpgAvailable: boolean) {
+    this.invalidateMonitoring();
+    const generation = this.monitorGeneration;
     this.telemetryMonitor = device.monitorCharacteristicForService(
       WEARABLE_SERVICE_UUID,
       WEARABLE_TELEMETRY_UUID,
       (error: BleError | null, characteristic: Characteristic | null) => {
+        if (!this.isCurrentMonitor(device.id, generation)) return;
         if (error) {
           this.callbacks?.onError(`Telemetry subscription error: ${error.message}`);
           this.log(`Notification error: ${error.message}`);
           return;
         }
         try {
-          this.callbacks?.onTelemetry(parseBase64Telemetry(characteristic?.value ?? null));
+          const telemetry = parseBase64Telemetry(characteristic?.value ?? null);
+          if (!this.telemetryFreshness.isFresh(telemetry.timestampMs, telemetry.receivedAt)) {
+            this.verifyConnectionAfterStaleNotification(device.id, generation);
+          }
+          this.callbacks?.onTelemetry(telemetry);
           this.callbacks?.onError(null);
         } catch (parseError) {
           const message = errorMessage(parseError);
@@ -233,6 +253,7 @@ export class WearableBleService {
         WEARABLE_SERVICE_UUID,
         WEARABLE_RAW_PPG_UUID,
         (error: BleError | null, characteristic: Characteristic | null) => {
+          if (!this.isCurrentMonitor(device.id, generation)) return;
           if (error) {
             this.log(`Raw PPG subscription error: ${error.message}`);
             return;
@@ -245,19 +266,94 @@ export class WearableBleService {
         },
       );
     }
+    return generation;
   }
 
-  private watchDisconnect(deviceId: string) {
+  private watchDisconnect(deviceId: string, monitorGeneration: number) {
     this.disconnectMonitor = this.manager.onDeviceDisconnected(deviceId, error => {
-      this.telemetryMonitor?.remove();
-      this.telemetryMonitor = null;
-      this.rawPpgMonitor?.remove();
-      this.rawPpgMonitor = null;
+      if (!this.isCurrentMonitor(deviceId, monitorGeneration)) return;
+      this.invalidateMonitoring();
+      this.disconnectMonitor = null;
       this.connected = null;
       this.callbacks?.onRawPpgAvailability(false);
       this.callbacks?.onState('disconnected');
       this.log(error ? `Wearable disconnected: ${error.message}` : 'Wearable disconnected');
       if (this.reconnectEnabled && !this.destroyed) void this.reconnect(deviceId);
+    });
+  }
+
+  private isCurrentMonitor(deviceId: string, generation: number) {
+    return !this.destroyed && this.monitorGeneration === generation && this.connected?.id === deviceId;
+  }
+
+  private invalidateMonitoring() {
+    this.monitorGeneration += 1;
+    this.telemetryFreshness.reset();
+    this.telemetryMonitor?.remove();
+    this.telemetryMonitor = null;
+    this.rawPpgMonitor?.remove();
+    this.rawPpgMonitor = null;
+  }
+
+  private handleAdapterState(state: State) {
+    if (state === State.PoweredOn || state === State.Unknown) return;
+    if (!this.connected && !this.telemetryMonitor && !this.rawPpgMonitor) return;
+
+    this.reconnectEnabled = false;
+    this.reconnectAttempt = 0;
+    this.stopScan();
+    this.invalidateMonitoring();
+    this.disconnectMonitor?.remove();
+    this.disconnectMonitor = null;
+    this.connected = null;
+    this.callbacks?.onRawPpgAvailability(false);
+    const message = state === State.PoweredOff
+      ? 'Bluetooth is turned off'
+      : `Bluetooth is unavailable (${state})`;
+    this.callbacks?.onError(message);
+    this.callbacks?.onState('disconnected');
+    this.log(`${message}; stale BLE notifications will be ignored`);
+  }
+
+  private verifyConnectionAfterStaleNotification(deviceId: string, generation: number) {
+    if (this.staleConnectionCheckInFlight || !this.isCurrentMonitor(deviceId, generation)) return;
+    this.staleConnectionCheckInFlight = true;
+
+    void (async () => {
+      let adapterState = State.Unknown;
+      let isConnected = false;
+      try {
+        adapterState = await this.manager.state();
+        isConnected = adapterState === State.PoweredOn && await this.manager.isDeviceConnected(deviceId);
+      } catch (error) {
+        this.log(`Bluetooth connection verification failed: ${errorMessage(error)}`);
+      }
+
+      if (!this.isCurrentMonitor(deviceId, generation)) return;
+      if (isConnected) {
+        this.telemetryFreshness.reset();
+        this.log('BLE delivery is delayed, but Android confirms the wearable is still connected');
+        return;
+      }
+
+      this.reconnectEnabled = false;
+      this.reconnectAttempt = 0;
+      this.invalidateMonitoring();
+      this.disconnectMonitor?.remove();
+      this.disconnectMonitor = null;
+      this.connected = null;
+      this.callbacks?.onRawPpgAvailability(false);
+      const message = adapterState === State.PoweredOff
+        ? 'Bluetooth is turned off'
+        : 'Wearable disconnected; queued Bluetooth notifications were discarded';
+      this.callbacks?.onError(message);
+      this.callbacks?.onState('disconnected');
+      this.log(message);
+      void this.manager.cancelDeviceConnection(deviceId).catch(error => {
+        this.log(`Stale connection cleanup: ${errorMessage(error)}`);
+      });
+    })().finally(() => {
+      this.staleConnectionCheckInFlight = false;
     });
   }
 
@@ -282,9 +378,9 @@ export class WearableBleService {
     this.reconnectEnabled = false;
     this.reconnectAttempt = 0;
     this.stopScan();
-    this.telemetryMonitor?.remove();
-    this.rawPpgMonitor?.remove();
+    this.invalidateMonitoring();
     this.disconnectMonitor?.remove();
+    this.disconnectMonitor = null;
     const current = this.connected;
     this.connected = null;
     this.callbacks?.onRawPpgAvailability(false);
@@ -303,9 +399,11 @@ export class WearableBleService {
     this.destroyed = true;
     this.reconnectEnabled = false;
     this.stopScan();
-    this.telemetryMonitor?.remove();
-    this.rawPpgMonitor?.remove();
+    this.invalidateMonitoring();
     this.disconnectMonitor?.remove();
+    this.disconnectMonitor = null;
+    this.adapterStateMonitor?.remove();
+    this.adapterStateMonitor = null;
     this.manager.destroy();
   }
 }

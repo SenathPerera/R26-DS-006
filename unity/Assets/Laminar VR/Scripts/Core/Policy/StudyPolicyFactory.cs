@@ -1,3 +1,4 @@
+using System;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
 using LaminarVR.AdaptiveMeditation.Policy.RuleBased;
 using LaminarVR.AdaptiveMeditation.Policy.Static;
@@ -17,6 +18,49 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         ConfigurationRequired,
         NotImplemented,
         UnsupportedMode
+    }
+
+    public static class StudyConditionCodec
+    {
+        public const string StaticPersonalized = "StaticPersonalized";
+        public const string RuleBasedAdaptive = "RuleBasedAdaptive";
+        public const string ContextualBandit = "ContextualBandit";
+
+        public static bool TryParse(
+            string value,
+            out StudyPolicyMode mode)
+        {
+            switch (value)
+            {
+                case StaticPersonalized:
+                    mode = StudyPolicyMode.StaticPersonalized;
+                    return true;
+                case RuleBasedAdaptive:
+                    mode = StudyPolicyMode.RuleBasedAdaptive;
+                    return true;
+                case ContextualBandit:
+                    mode = StudyPolicyMode.ContextualBandit;
+                    return true;
+                default:
+                    mode = default;
+                    return false;
+            }
+        }
+
+        public static string ToWireValue(StudyPolicyMode mode)
+        {
+            switch (mode)
+            {
+                case StudyPolicyMode.StaticPersonalized:
+                    return StaticPersonalized;
+                case StudyPolicyMode.RuleBasedAdaptive:
+                    return RuleBasedAdaptive;
+                case StudyPolicyMode.ContextualBandit:
+                    return ContextualBandit;
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(mode));
+            }
+        }
     }
 
     public static class StudyPolicyFactory

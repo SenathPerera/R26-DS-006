@@ -27,9 +27,6 @@ class PersonalBaseline:
     def __init__(self, min_history: int = MIN_HISTORY, store=None):
         self.min_history = min_history
         self.history: dict[str, list[float]] = {}
-        # Optional durable backing (componentd.store.ComponentDStore). When set,
-        # observe() writes through so history survives a server restart — the fix
-        # that finally lets MIN_HISTORY be reached across restarts (PROBLEM 6).
         self.store = store
 
     def load_history(self, store) -> None:
@@ -65,9 +62,6 @@ class PersonalBaseline:
             }
         arr = np.asarray(hist, dtype=float)
         mean = float(arr.mean())
-        # Floor the spread so a user with a very steady history isn't flagged
-        # for a trivial fluctuation - 0.5 (on 0-10) is the smallest stress
-        # change we treat as meaningful.
         std = max(float(arr.std()), 0.5)
         z = (float(stress_score) - mean) / std
         if z < -0.5:

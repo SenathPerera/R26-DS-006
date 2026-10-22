@@ -1,9 +1,3 @@
-"""Layer 2c: inference wrapper - what the API server actually calls.
-
-Loads a trained checkpoint once, keeps the frozen encoder in memory,
-and turns raw audio into the final stress report:
-    {stress_score 0-10, confidence, valence, arousal, gate_mean}
-"""
 
 import sys
 from pathlib import Path
@@ -80,10 +74,6 @@ class StressScorer:
 
         stress01 = stress_from_va(valence, arousal)
         score = round(stress01 * 10, 2)
-        # Confidence tracks the RELIABLE axis: |valence|. A prediction whose
-        # valence sits near neutral is genuinely ambiguous -> low confidence, and
-        # Layer 4 should defer to Component B there. (The old sqrt(v^2+a^2) was
-        # inflated by confidently-wrong arousal on exactly the collapse cases.)
         confidence = float(confidence_from_va(valence, arousal))
 
         return {

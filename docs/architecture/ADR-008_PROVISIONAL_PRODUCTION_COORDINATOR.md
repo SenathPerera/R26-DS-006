@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This approval permits runtime
-use for the time-constrained MVP; the cadence and safety limits remain
-versioned candidates rather than scientifically optimal values.
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. The cadence
+and safety limits remain engineering pilot values rather than scientifically
+optimal values.
 
 ## Context
 

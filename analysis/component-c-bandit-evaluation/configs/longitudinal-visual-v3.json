@@ -1,0 +1,47 @@
+{
+  "protocol_id": "laminar-vr-longitudinal-simulation-v0.2",
+  "status": "proposed_visual_lock",
+  "pilot_bundle_id": "temple-pond-pilot-freeze-v3",
+  "scene_asset": {
+    "path": "unity/Assets/Laminar VR/Configuration/Environment/TemplePondSceneParameterProfile_VisualV3.asset",
+    "guid": "eddef3de87d342e6a0bc5c00aaf51833",
+    "sha256_lf": "545f27b0d60540e28968c2f2cd1bfd1acf8c6541f75b80e52de6269e13db6885",
+    "fields": {
+      "sceneId": "temple-pond",
+      "researchConfigurationApproved": 1,
+      "defaultIllumination": 0.319,
+      "defaultWarmth": 0.5,
+      "defaultAtmosphericSoftness": 0,
+      "defaultColorRichness": 0.5,
+      "defaultAmbientMotion": 0.75,
+      "illuminationRange": [0, 1],
+      "warmthRange": [0, 1],
+      "atmosphericSoftnessRange": [0, 1],
+      "colorRichnessRange": [0, 1],
+      "ambientMotionRange": [0, 1],
+      "illuminationActionStep": 0.15,
+      "warmthActionStep": 0.35,
+      "atmosphericSoftnessActionStep": 0.4,
+      "colorRichnessActionStep": 0.3,
+      "ambientMotionActionStep": 0.3,
+      "transitionDurationSeconds": 6,
+      "minimumSecondsBetweenActions": 0
+    }
+  },
+  "mapping_asset": {
+    "path": "unity/Assets/Laminar VR/Configuration/Environment/TemplePondEnvironmentMappingProfile_v4.asset",
+    "guid": "37a6408fea494672b7b5884e5159ec20",
+    "sha256_lf": "85201f85c8ffc20486bf6dc15384426d043a21c46af472cfd2658b3cfd46f697",
+    "fields": {
+      "configurationId": "temple-pond-mapping-pilot-v4",
+      "configurationVersion": 4,
+      "researchConfigurationApproved": 1,
+      "directionalLightIntensityRange": [0.6, 9],
+      "fogDensityRange": [0, 0.015],
+      "saturationRange": [-30, 30],
+      "waterMotionProperty": "_RippleMotion",
+      "waterMotionRange": [0.1, 0.6]
+    }
+  },
+  "unity_scene_path": "unity/Assets/Laminar VR/Scenes/JapaneseTemplePondGarden.unity"
+}

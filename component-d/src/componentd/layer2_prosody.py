@@ -1,11 +1,3 @@
-"""Layer 2a: prosodic feature extraction (the trainable branch's input).
-
-Why prosody: pitch rise, jitter/shimmer (voice instability), speech rate
-and pausing are PHYSIOLOGICAL stress responses - they appear in any
-language and in spontaneous speech. This branch is what lets the model
-generalise beyond acted English and, later, transfer to Tamil/Sinhala.
-"""
-
 import sys
 from pathlib import Path
 

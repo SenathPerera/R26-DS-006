@@ -8,7 +8,7 @@ import {colors, radii, spacing, typography} from '../../theme/theme';
 const actions = [
   {label: 'Wearable', icon: Bluetooth, route: 'Wearable'},
   {label: 'VR setup', icon: Headset, route: 'VR'},
-  {label: 'Check-in', icon: Mic2, route: 'VoiceCheckIn'},
+  {label: 'Check-in', icon: Mic2, route: 'SessionContext'},
   {label: 'Validate', icon: ClipboardCheck, route: 'QuestionnaireForm'},
   {label: 'Trends', icon: BarChart3, route: 'MainTabs'},
   {label: 'Settings', icon: Settings, route: 'MainTabs'},
@@ -40,11 +40,11 @@ export function HomeScreen({navigation}: any) {
             <StatusPill label="Audio adaptation ready" tone="good" />
           </View>
         </View>
-        <PrimaryButton label="Begin session" icon={Sparkles} onPress={() => navigation.navigate('VoiceCheckIn')} />
+        <PrimaryButton label="Begin session" icon={Sparkles} onPress={() => navigation.navigate('SessionContext')} />
       </Card>
       <Card>
         <View style={uiStyles.row}><Activity color={colors.teal} size={22} /><Text style={styles.cardTitle}>Recommended focus</Text></View>
-        <Text style={uiStyles.body}>15-minute Ocean Dusk with warm pads and restrained motion, plus a short voice check-in before and after.</Text>
+        <Text style={uiStyles.body}>20-minute Temple Pond Garden session, personalized from your usual preferences and today’s context.</Text>
       </Card>
       <SectionHeader title="Control hub" subtitle="Device setup, session control, validation, and research insights." />
       <View style={styles.grid}>

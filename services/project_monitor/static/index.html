@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MindSync / System Observatory</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/agents.css">
+  <script src="/static/agents.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar"><a href="#" class="brand"><span class="mark">M</span> MINDSYNC <span class="slash">/</span> <span class="brand-small">SYSTEM OBSERVATORY</span></a><span class="local">LOCALHOST ONLY <span class="dot"></span></span></header>
+  <main>
+    <section class="hero"><div><p class="eyebrow">R26-DS-006 / LIVE OPERATIONS</p><h1>Follow the signal.</h1><p class="intro">From the wearable to an adaptive meditation session.<br>Every handoff, every wait, one view.</p></div><div class="live-box"><span id="live-state" role="status">Connecting to monitor</span><strong id="last-update">Waiting for evidence</strong><button id="refresh" type="button">Refresh now <span aria-hidden="true">&#8635;</span></button></div></section>
+    <div id="connection-error" class="error-banner" role="alert" hidden>Monitor connection lost. The view below is historical, not live.</div>
+    <section class="summary" aria-label="System summary"><div><span>BACKENDS REACHABLE</span><strong id="backend-count">-- / 4</strong></div><div><span>FLOW STAGES ACTIVE / READY</span><strong id="stage-count">--</strong></div><div><span>NEEDS ATTENTION</span><strong id="alert-count">--</strong></div><div><span>OBSERVATION MODE</span><strong class="small">Read-only</strong><small>No generation or model calls</small></div></section>
+    <section aria-labelledby="services-title"><div class="section-heading"><h2 id="services-title">Service desk</h2><span>HTTP health is not end-to-end readiness</span></div><div id="services" class="services"></div></section>
+    <div class="view-toolbar">
+      <div role="tablist" aria-label="Observatory views"><button id="flow-tab" role="tab" aria-controls="flow-view" aria-selected="true" type="button">System flow</button><button id="agents-tab" role="tab" aria-controls="agents-view" aria-selected="false" tabindex="-1" type="button">Live agents</button></div>
+      <label class="session-label">Session<select id="session"><option value="">Latest connected session</option></select></label>
+    </div>
+    <section id="agents-view" role="tabpanel" aria-labelledby="agents-tab" hidden>
+      <div class="section-heading agent-heading"><div><h2>Scene &amp; audio adaptation</h2><p id="agent-session" class="muted">No session selected</p></div><div class="agent-controls"><label>History<select id="agent-range"><option value="300">5 minutes</option><option value="900" selected>15 minutes</option></select></label><label class="live-toggle"><input id="agent-live" type="checkbox" checked>Live</label></div></div>
+      <p id="agent-status" class="agent-status" role="status">Waiting for Unity observations.</p>
+      <div id="agent-content" hidden>
+        <dl id="agent-coordination" class="agent-context agent-coordination" aria-label="Adaptation coordination"></dl>
+        <div id="agent-panels" class="agent-columns"></div>
+        <section class="agent-events" aria-labelledby="agent-events-title"><div class="section-heading"><h2 id="agent-events-title">Decision &amp; outcome history</h2><span id="agent-sample-count"></span></div><div class="table-scroll"><table><thead><tr><th>Event time (Unity)</th><th>Agent</th><th>Input / decision</th><th>Proposed / executed action</th><th>Outcome</th></tr></thead><tbody id="agent-events-body"></tbody></table></div></section>
+      </div>
+    </section>
+    <div id="flow-view" role="tabpanel" aria-labelledby="flow-tab">
+    <section class="workspace" aria-labelledby="flow-title">
+      <div class="flow-main"><div class="section-heading"><div><p class="eyebrow">THE FULL SYSTEM / A TO Z</p><h2 id="flow-title">Session flow</h2></div></div>
+        <p class="flow-note">Voice check-in is a parallel pre/post-session path. During meditation, C and E consume the physiology stream in parallel.</p>
+        <div class="legend"><span class="badge active">Active</span><span class="badge ready">Ready</span><span class="badge waiting">Waiting</span><span class="badge blocked">Blocked</span><span class="badge stale">Stale</span><span class="badge unknown">Not reported</span><span class="badge complete">Complete</span></div>
+        <div id="flow" class="flow"><p class="empty">Collecting service evidence...</p></div>
+      </div>
+      <aside><section class="inspector" aria-labelledby="detail-title"><p class="eyebrow">STAGE INSPECTOR</p><h2 id="detail-title">Choose a stage</h2><div id="details"><p>Click any stage to see the evidence behind its status.</p></div></section><section class="incident-panel"><div class="section-heading"><h2>Attention queue</h2><span id="incident-total">0</span></div><div id="alerts"></div></section></aside>
+    </section>
+    <section class="bottom-grid"><div class="network-panel"><div class="section-heading"><h2>Network &amp; coverage</h2><span>Source configuration</span></div><div id="network"></div><p class="muted">This monitor cannot inspect BLE directly, prove audible output, or verify every cloud write. Client reports require the updated mobile and Unity builds. Counters reset when a backend restarts.</p></div><div class="timeline-panel"><div class="section-heading"><h2>Observed transitions</h2><button id="clear" class="text-button" type="button">Clear</button></div><ol id="timeline"><li>No transitions observed yet.</li></ol><p class="muted">Local browser history only, up to 40 transitions. No participant data is stored.</p></div></section>
+    </div>
+    <footer><span>MindSync / AI-Based Adaptive VR Meditation System</span><span>3-second probes / 5-second client heartbeats</span></footer>
+  </main>
+</body>
+</html>

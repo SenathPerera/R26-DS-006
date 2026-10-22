@@ -12,7 +12,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         SkippedNetworkUnavailable,
         SkippedTransitionActive,
         SkippedRewardPending,
-        SkippedPhysiologyUnavailable
+        SkippedPhysiologyUnavailable,
+        SkippedCoordination
     }
 
     public readonly struct PolicyDecisionCycleResult
@@ -21,12 +22,14 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             PolicyDecisionCycleResultCode resultCode,
             PolicyDecision decision,
             ActionValidationResult? validation,
-            PhysiologyQueryResultCode? physiologyQueryResult)
+            PhysiologyQueryResultCode? physiologyQueryResult,
+            PolicyObservation observation = null)
         {
             ResultCode = resultCode;
             Decision = decision;
             Validation = validation;
             PhysiologyQueryResult = physiologyQueryResult;
+            Observation = observation;
         }
 
         public PolicyDecisionCycleResultCode ResultCode { get; }
@@ -36,6 +39,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         public ActionValidationResult? Validation { get; }
 
         public PhysiologyQueryResultCode? PhysiologyQueryResult { get; }
+
+        public PolicyObservation Observation { get; }
     }
 
     public enum PolicyRewardCycleResultCode

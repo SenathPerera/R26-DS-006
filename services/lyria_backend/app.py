@@ -4,6 +4,9 @@ import asyncio
 import base64
 import json
 import os
+import re
+import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +16,9 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from services.project_monitor.instrumentation import ServiceMetrics, install_monitoring
 
 try:
     from google import genai
@@ -37,8 +43,20 @@ SUPPORTED_REALTIME_MODELS = {"models/lyria-realtime-exp", "lyria-realtime-exp"}
 REALTIME_SAMPLE_RATE = 48000
 REALTIME_CHANNELS = 2
 REALTIME_FORMAT = "pcm_s16le"
+ACTION_PLAYBACK_PROTOCOL = "mindsync-audio-playback-v1"
+
+
+class LiveMusicStreamState:
+    def __init__(self):
+        self.lock = asyncio.Lock()
+        self.request_id = ""
+        self.bpm = None
+        self.scale = None
+
 
 app = FastAPI(title="Lyria Phase 1 Backend", version="0.1.0")
+monitor_metrics = ServiceMetrics("lyria")
+install_monitoring(app, monitor_metrics)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -135,6 +153,17 @@ async def realtime_capability(model: str = DEFAULT_REALTIME_MODEL) -> RealtimeCa
 
 @app.post("/generate-clip", response_model=GenerateClipResponse)
 def generate_clip(payload: GenerateClipRequest) -> GenerateClipResponse:
+    started = monitor_metrics.begin("generateClip")
+    success = False
+    try:
+        result = _generate_clip(payload)
+        success = result.success
+        return result
+    finally:
+        monitor_metrics.end("generateClip", started, success)
+
+
+def _generate_clip(payload: GenerateClipRequest) -> GenerateClipResponse:
     if genai is None:
         raise HTTPException(
             status_code=500,
@@ -263,23 +292,31 @@ async def live_music(websocket: WebSocket, model: str = DEFAULT_REALTIME_MODEL) 
                     "sampleRate": REALTIME_SAMPLE_RATE,
                     "channels": REALTIME_CHANNELS,
                     "format": REALTIME_FORMAT,
+                    "actionPlaybackProtocol": ACTION_PLAYBACK_PROTOCOL,
                     "message": "Lyria realtime session connected.",
                 },
             )
 
-            forward_task = asyncio.create_task(_forward_live_music_messages(session, websocket))
+            stream_state = LiveMusicStreamState()
+            monitor_metrics.count("realtimeConnections")
+            forward_task = asyncio.create_task(_forward_live_music_messages(session, websocket, stream_state))
+            command_task = asyncio.create_task(_receive_live_music_commands(session, websocket, stream_state))
             try:
-                while True:
-                    raw_message = await websocket.receive_text()
-                    payload = json.loads(raw_message)
-                    await _handle_live_music_client_message(session, websocket, payload)
+                done, _ = await asyncio.wait({forward_task, command_task}, return_when=asyncio.FIRST_COMPLETED)
+                for task in done:
+                    task.result()
             except WebSocketDisconnect:
                 pass
             finally:
                 forward_task.cancel()
-                await asyncio.gather(forward_task, return_exceptions=True)
+                command_task.cancel()
+                await asyncio.gather(forward_task, command_task, return_exceptions=True)
     except Exception as exc:  # pragma: no cover - depends on remote API
-        await _send_ws_message(websocket, {"type": "error", "message": str(exc)})
+        monitor_metrics.count("realtimeFailures")
+        try:
+            await _send_ws_message(websocket, {"type": "error", "message": _redact_api_key(str(exc))})
+        except (RuntimeError, WebSocketDisconnect):
+            pass
     finally:
         await client.aio.aclose()
         try:
@@ -288,8 +325,16 @@ async def live_music(websocket: WebSocket, model: str = DEFAULT_REALTIME_MODEL) 
             pass
 
 
-async def _forward_live_music_messages(session: Any, websocket: WebSocket) -> None:
+async def _receive_live_music_commands(session: Any, websocket: WebSocket, state: LiveMusicStreamState) -> None:
+    while True:
+        raw_message = await websocket.receive_text()
+        payload = json.loads(raw_message)
+        await _handle_live_music_client_message(session, websocket, payload, state)
+
+
+async def _forward_live_music_messages(session: Any, websocket: WebSocket, state: LiveMusicStreamState) -> None:
     async for message in session.receive():
+        revision_at_receive = state.request_id
         server_content = getattr(message, "server_content", None)
         if server_content is not None:
             audio_chunks = getattr(server_content, "audio_chunks", None) or []
@@ -298,16 +343,22 @@ async def _forward_live_music_messages(session: Any, websocket: WebSocket) -> No
                 if not chunk_bytes:
                     continue
 
-                await _send_ws_message(
-                    websocket,
-                    {
+                # Commands and audio use the same lock: an acknowledged revision
+                # always precedes chunks labelled with that revision on the wire.
+                async with state.lock:
+                    if revision_at_receive != state.request_id:
+                        continue
+                    await _send_ws_message(websocket, {
                         "type": "audio",
+                        "requestId": state.request_id,
                         "sampleRate": REALTIME_SAMPLE_RATE,
                         "channels": REALTIME_CHANNELS,
                         "format": REALTIME_FORMAT,
                         "data": base64.b64encode(chunk_bytes).decode("ascii"),
-                    },
-                )
+                    })
+                    monitor_metrics.count("realtimeAudioChunks")
+                    monitor_metrics.count("realtimeAudioBytes", len(chunk_bytes))
+                    monitor_metrics.set(lastRealtimeAudioAt=time.time())
 
         filtered_prompt = getattr(message, "filtered_prompt", None)
         if filtered_prompt is not None:
@@ -328,8 +379,18 @@ async def _forward_live_music_messages(session: Any, websocket: WebSocket) -> No
             await _send_ws_message(websocket, {"type": "state", "state": "setup_complete", "message": "Realtime setup complete."})
 
 
-async def _handle_live_music_client_message(session: Any, websocket: WebSocket, payload: dict[str, Any]) -> None:
+async def _handle_live_music_client_message(session: Any, websocket: WebSocket, payload: dict[str, Any],
+                                          state: LiveMusicStreamState) -> None:
+    async with state.lock:
+        await _apply_live_music_client_message(session, websocket, payload, state)
+
+
+async def _apply_live_music_client_message(session: Any, websocket: WebSocket, payload: dict[str, Any],
+                                         state: LiveMusicStreamState) -> None:
     message_type = _safe_to_string(payload.get("type")).lower()
+    request_id = _safe_to_string(payload.get("requestId"))
+    if request_id and not re.fullmatch(r"[a-f0-9]{32}", request_id):
+        raise ValueError("Invalid realtime action request ID")
 
     if message_type == "ping":
         await _send_ws_message(websocket, {"type": "pong", "message": "ok"})
@@ -344,15 +405,21 @@ async def _handle_live_music_client_message(session: Any, websocket: WebSocket, 
     if message_type in {"sync", "config"}:
         config_payload = payload.get("config") or {}
         await session.set_music_generation_config(config=_parse_live_music_config(config_payload))
+        bpm, scale = config_payload.get("bpm"), config_payload.get("scale")
+        if ((state.bpm is not None and bpm != state.bpm)
+                or (state.scale is not None and scale != state.scale)):
+            await session.reset_context()
+        state.bpm, state.scale = bpm, scale
+        state.request_id = request_id
         if message_type == "config":
-            await _send_ws_message(websocket, {"type": "state", "state": "config_updated", "message": "Music generation config updated."})
+            await _send_ws_message(websocket, {"type": "state", "state": "config_updated", "requestId": request_id, "message": "Music generation config updated."})
 
     if message_type == "sync":
         if payload.get("autoPlay", True):
             await session.play()
-            await _send_ws_message(websocket, {"type": "state", "state": "playing", "message": "Realtime playback started."})
+            await _send_ws_message(websocket, {"type": "state", "state": "playing", "requestId": request_id, "message": "Realtime playback started."})
         else:
-            await _send_ws_message(websocket, {"type": "state", "state": "synced", "message": "Realtime prompts/config synced."})
+            await _send_ws_message(websocket, {"type": "state", "state": "synced", "requestId": request_id, "message": "Realtime prompts/config synced."})
         return
 
     if message_type == "play":
@@ -450,7 +517,7 @@ async def _open_and_close_realtime_session(client: Any, model: str) -> None:
 
 
 def _summarize_realtime_probe_error(exc: Exception) -> str:
-    message = _safe_to_string(exc).strip() or exc.__class__.__name__
+    message = _redact_api_key(_safe_to_string(exc).strip()) or exc.__class__.__name__
     lowered = message.lower()
 
     if "http 404" in lowered or "status code 404" in lowered:
@@ -469,6 +536,11 @@ def _summarize_realtime_probe_error(exc: Exception) -> str:
         return "The realtime capability probe timed out before Google opened the session."
 
     return message
+
+
+def _redact_api_key(message: str) -> str:
+    key = os.getenv("GEMINI_API_KEY", "")
+    return message.replace(key, "[REDACTED]") if key else message
 
 
 def _normalize_realtime_model(model: str) -> str:

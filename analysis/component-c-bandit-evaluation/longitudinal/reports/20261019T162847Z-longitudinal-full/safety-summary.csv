@@ -1,0 +1,11 @@
+scenario,condition,profiles,baseline_unavailable_sessions,decision_RewardWindowOpened,decision_SafetyRejected,decision_SkippedRewardPending,decision_TransitionStarted,dropped_physiology,eligible,executed_changes,invalid_model_updates,model_updates,multidimension_violations,no_change,reward_AttributionInvalidated,reward_RewardApplied,scene_violations,sessions,stress_change_unavailable_sessions,total_variation,valid_outcomes,zero_eligible_sessions
+BetweenSessionDrift,CarryLinUcb,30,0,3978,0,1800,822,0,4800,822,0,4800,0,3978,0,4800,0,600,0,200.46050611138344,4800,0
+BetweenSessionDrift,ResetLinUcb,30,0,2789,0,1800,2011,0,4800,2011,0,4800,0,2789,0,4800,0,600,0,330.6190396398306,4800,0
+MildPhysiologyLoss,CarryLinUcb,30,94,3316,0,1641,609,1115,3925,609,0,3745,0,3316,170,3745,0,600,94,141.64206555485725,3745,94
+MildPhysiologyLoss,ResetLinUcb,30,94,2434,0,1641,1491,1115,3925,1491,0,3745,0,2434,170,3745,0,600,94,251.26635047793388,3745,94
+NonResponder,CarryLinUcb,30,0,2923,0,1800,1877,0,4800,1877,0,4800,0,2923,0,4800,0,600,0,367.0700009018183,4800,0
+NonResponder,ResetLinUcb,30,0,2725,0,1800,2075,0,4800,2075,0,4800,0,2725,0,4800,0,600,0,334.22864131629467,4800,0
+Primary,CarryLinUcb,210,0,26400,0,12600,7200,0,33600,7200,0,33600,0,26400,0,33600,0,4200,0,1727.6332767754793,33600,0
+Primary,ResetLinUcb,210,0,21080,0,12600,12520,0,33600,12520,0,33600,0,21080,0,33600,0,4200,0,2147.4630885869265,33600,0
+Primary,RuleBasedAdaptive,210,0,19948,10911,10005,5336,0,36195,5336,0,0,0,19948,0,25284,0,4200,0,2008.8000329732895,25284,0
+Primary,StaticPersonalized,210,0,33600,0,12600,0,0,33600,0,0,0,0,33600,0,33600,0,4200,0,0.0,33600,0

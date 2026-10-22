@@ -303,6 +303,34 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Session
         }
 
         [Test]
+        public void ReanchorClockWithoutAdvancing_ExcludesSuspendedTime()
+        {
+            var machine = CreateStartedMachine();
+            machine.AdvanceTo(5d);
+
+            machine.ReanchorClockWithoutAdvancing(100d);
+            machine.AdvanceTo(104d);
+
+            Assert.That(
+                machine.Phase,
+                Is.EqualTo(VrSessionPhase.Acclimatization));
+            Assert.That(
+                machine.AcclimatizationElapsedSeconds,
+                Is.EqualTo(9d));
+            Assert.That(machine.DecisionOpportunityCount, Is.Zero);
+        }
+
+        [Test]
+        public void ReanchorClockWithoutAdvancing_RejectsClockMovingBackwards()
+        {
+            var machine = CreateStartedMachine();
+            machine.AdvanceTo(5d);
+
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => machine.ReanchorClockWithoutAdvancing(4d));
+        }
+
+        [Test]
         public void Initialize_IsIdempotent()
         {
             var machine = new SessionStateMachine();

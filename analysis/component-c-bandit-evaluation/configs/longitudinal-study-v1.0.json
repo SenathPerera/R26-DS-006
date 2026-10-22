@@ -1,0 +1,31 @@
+{
+  "protocol_id": "laminar-vr-longitudinal-simulation-v1.0",
+  "research_status": "investigator_frozen",
+  "freeze_date": "2026-10-19",
+  "visual_lock": "longitudinal-visual-v1.0.json",
+  "sessions_per_profile": 20,
+  "replications_per_archetype": 30,
+  "probes_per_checkpoint": 32,
+  "primary_archetypes": ["A1", "A2", "A3", "A4", "A5", "A6", "A7"],
+  "primary_conditions": ["CarryLinUcb", "ResetLinUcb", "StaticPersonalized", "RuleBasedAdaptive"],
+  "challenge_conditions": ["CarryLinUcb", "ResetLinUcb"],
+  "primary_profile_seed_start": 410000,
+  "challenge_profile_seed_start": 420000,
+  "development_primary_seed_start": 510000,
+  "development_challenge_seed_start": 520000,
+  "session_seed_formula": "profile_seed * 100 + session_index",
+  "probe_seed_formula": "profile_seed * 100 + 99; drift post-switch + 98",
+  "probe_stream_id": 6,
+  "primary_endpoint_checkpoint": 20,
+  "optional_practical_margin_endpoint": "omitted",
+  "inference": {
+    "unit": "seed index after equal archetype weighting",
+    "alpha": 0.05,
+    "sign_flip_draws": 100000,
+    "bootstrap_draws": 10000,
+    "sign_flip_pcg32_seed": 930001,
+    "bootstrap_pcg32_seed": 940001,
+    "sign_flip_pcg32_stream": 7,
+    "bootstrap_pcg32_stream": 8
+  }
+}

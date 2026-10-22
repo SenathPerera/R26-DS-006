@@ -1,4 +1,5 @@
 using System;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Policy;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
@@ -27,6 +28,12 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         private MonoBehaviour sceneAdapterComponent = null;
 
         [Header("Study Policy")]
+        [Tooltip(
+            "Require the session configuration to select the study policy "
+            + "before initialization. Enable this in production scenes.")]
+        [SerializeField]
+        private bool requireExplicitStudyPolicySelection = false;
+
         [SerializeField]
         private StudyPolicyMode studyPolicyMode =
             StudyPolicyMode.StaticPersonalized;
@@ -37,11 +44,37 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
         [SerializeField]
         private LinUcbPolicyProfile linUcbPolicyProfile = null;
 
+        private bool hasExplicitStudyPolicySelection;
+
         public bool IsInitialized { get; private set; }
+        public bool ResponsiveTesting { get; private set; }
+
+        public void ConfigureResponsiveTesting(bool value)
+        {
+            if (IsInitialized && ResponsiveTesting != value)
+                throw new InvalidOperationException("Select the testing preset before session initialization.");
+            ResponsiveTesting = value;
+        }
 
         public string LastValidationError { get; private set; } = string.Empty;
 
         public SceneEnvironmentProfile SceneProfile { get; private set; }
+
+        public SceneBindingValidation LastBindingValidation
+        {
+            get;
+            private set;
+        }
+
+        public string ConfiguredSceneId =>
+            sceneParameterProfile == null
+                ? string.Empty
+                : sceneParameterProfile.SceneId;
+
+        public StudyPolicyMode StudyPolicyMode => studyPolicyMode;
+
+        public bool HasExplicitStudyPolicySelection =>
+            hasExplicitStudyPolicySelection;
 
         public IEnvironmentPolicy Policy { get; private set; }
 
@@ -89,6 +122,60 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             studyPolicyMode = policyMode;
             ruleBasedPolicyProfile = ruleProfile;
             linUcbPolicyProfile = linUcbProfile;
+            hasExplicitStudyPolicySelection = true;
+        }
+
+        public void ConfigureForSessionSelection(
+            SceneParameterProfile profile,
+            MonoBehaviour adapterComponent,
+            RuleBasedPolicyProfile ruleProfile = null,
+            LinUcbPolicyProfile linUcbProfile = null)
+        {
+            if (IsInitialized)
+            {
+                throw new InvalidOperationException(
+                    "ApplicationBootstrap cannot be reconfigured after initialization.");
+            }
+
+            sceneParameterProfile = profile;
+            sceneAdapterComponent = adapterComponent;
+            ruleBasedPolicyProfile = ruleProfile;
+            linUcbPolicyProfile = linUcbProfile;
+            initializeOnStart = false;
+            requireExplicitStudyPolicySelection = true;
+            hasExplicitStudyPolicySelection = false;
+        }
+
+        public bool TrySelectStudyPolicy(
+            StudyPolicyMode policyMode,
+            out string validationError)
+        {
+            if (!Enum.IsDefined(typeof(StudyPolicyMode), policyMode))
+            {
+                return Fail(
+                    "The requested study condition is unsupported.",
+                    out validationError);
+            }
+
+            if (hasExplicitStudyPolicySelection || IsInitialized)
+            {
+                if (studyPolicyMode == policyMode)
+                {
+                    LastValidationError = string.Empty;
+                    validationError = string.Empty;
+                    return true;
+                }
+
+                return Fail(
+                    "The study condition is immutable after selection.",
+                    out validationError);
+            }
+
+            studyPolicyMode = policyMode;
+            hasExplicitStudyPolicySelection = true;
+            LastValidationError = string.Empty;
+            validationError = string.Empty;
+            return true;
         }
 
         public bool TryInitialize(out string validationError)
@@ -97,6 +184,14 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             {
                 validationError = string.Empty;
                 return true;
+            }
+
+            if (requireExplicitStudyPolicySelection
+                && !hasExplicitStudyPolicySelection)
+            {
+                return Fail(
+                    "A study condition must be selected from session configuration before initialization.",
+                    out validationError);
             }
 
             if (sceneParameterProfile == null)
@@ -112,6 +207,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
             }
 
             var bindingValidation = adapter.ValidateBindings();
+            LastBindingValidation = bindingValidation;
             if (bindingValidation == null || !bindingValidation.IsValid)
             {
                 var detail = bindingValidation == null
@@ -178,6 +274,8 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Application
                 {
                     return Fail(linUcbError, out validationError);
                 }
+                if (ResponsiveTesting)
+                    linUcbConfiguration = ResponsiveTestingPreset.Apply(linUcbConfiguration);
             }
 
             if (!StudyPolicyFactory.TryCreate(

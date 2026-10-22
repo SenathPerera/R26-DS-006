@@ -2,10 +2,15 @@
 
 ## Status
 
-Accepted as a provisional pilot configuration. This approval permits the
-calibrated Japanese Temple Pond Garden profiles to initialize at runtime for
-the time-constrained visual MVP. It does not claim that the values are
-scientifically optimal or participant-validated.
+Historical visual configuration. The 2026-10-18 amendment to ADR-017 records
+the subsequent Quest engineering calibration of action steps, transition
+duration, saturation, and water motion. The values below remain the
+`temple-pond-pilot-freeze-v2` baseline.
+
+Accepted and frozen for `temple-pond-pilot-freeze-v1` by ADR-016. It permits
+the calibrated Japanese Temple Pond Garden profiles to initialize at runtime
+but does not claim that the values are scientifically optimal or
+participant-validated.
 
 ## Context
 

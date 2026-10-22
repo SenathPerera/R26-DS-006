@@ -1,11 +1,16 @@
 using LaminarVR.AdaptiveMeditation.Runtime.Configuration;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 
 namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
 {
     public sealed class SceneParameterProfileTests
     {
+        private const string TemplePondPilotProfilePath =
+            "Assets/Laminar VR/Configuration/Environment/"
+            + "TemplePondSceneParameterProfile_VisualV3.asset";
+
         private const string ApprovedProfileJson = @"{
             ""sceneId"": ""temple-pond"",
             ""displayName"": ""Temple Pond"",
@@ -82,6 +87,29 @@ namespace LaminarVR.AdaptiveMeditation.Tests.EditMode.Configuration
             {
                 Object.DestroyImmediate(asset);
             }
+        }
+
+        [Test]
+        public void TemplePondPilotProfile_IsApprovedAndRuntimeValid()
+        {
+            var asset = AssetDatabase.LoadAssetAtPath<SceneParameterProfile>(
+                TemplePondPilotProfilePath);
+
+            Assert.That(
+                asset,
+                Is.Not.Null,
+                "The production Temple Pond scene profile is missing.");
+            Assert.That(
+                asset.ResearchConfigurationApproved,
+                Is.True,
+                "The ADR-017 visual amendment approves this engineering profile for runtime use.");
+            Assert.That(
+                asset.TryCreateRuntimeProfile(
+                    out var runtimeProfile,
+                    out var validationError),
+                Is.True,
+                validationError);
+            Assert.That(runtimeProfile.SceneId, Is.EqualTo("temple-pond"));
         }
 
         [Test]

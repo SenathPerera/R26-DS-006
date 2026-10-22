@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="590" viewBox="0 0 980 590" role="img">
+<title>SIMULATED: 10% physiology loss challenge</title>
+<style>text{font-family:Arial,sans-serif;fill:#202124}.title{font-size:19px;font-weight:bold}.axis{font-size:14px}.tick{font-size:12px}.note{font-size:11px;fill:#555}</style>
+<text class="title" x="490.0" y="33" text-anchor="middle">SIMULATED: 10% physiology loss challenge</text>
+<line x1="92" y1="510.00" x2="938" y2="510.00" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="514.00" text-anchor="end">0.00</text>
+<line x1="92" y1="423.60" x2="938" y2="423.60" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="427.60" text-anchor="end">0.10</text>
+<line x1="92" y1="337.20" x2="938" y2="337.20" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="341.20" text-anchor="end">0.21</text>
+<line x1="92" y1="250.80" x2="938" y2="250.80" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="254.80" text-anchor="end">0.31</text>
+<line x1="92" y1="164.40" x2="938" y2="164.40" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="168.40" text-anchor="end">0.41</text>
+<line x1="92" y1="78.00" x2="938" y2="78.00" stroke="#dfe3e8"/>
+<text class="tick" x="82" y="82.00" text-anchor="end">0.51</text>
+<line x1="92.00" y1="510" x2="92.00" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="92.00" y="532" text-anchor="middle">0</text>
+<line x1="303.50" y1="510" x2="303.50" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="303.50" y="532" text-anchor="middle">5</text>
+<line x1="515.00" y1="510" x2="515.00" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="515.00" y="532" text-anchor="middle">10</text>
+<line x1="726.50" y1="510" x2="726.50" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="726.50" y="532" text-anchor="middle">15</text>
+<line x1="938.00" y1="510" x2="938.00" y2="78" stroke="#eef0f2"/>
+<text class="tick" x="938.00" y="532" text-anchor="middle">20</text>
+<line x1="92" y1="510" x2="938" y2="510" stroke="#202124"/>
+<line x1="92" y1="510" x2="92" y2="78" stroke="#202124"/>
+<polygon points="92.00,185.10 134.30,160.95 176.60,124.29 218.90,138.33 261.20,143.26 303.50,150.64 345.80,157.56 388.10,160.07 430.40,165.61 472.70,172.18 515.00,177.32 557.30,157.27 599.60,174.88 641.90,175.84 684.20,181.22 726.50,185.69 768.80,182.10 811.10,157.45 853.40,176.13 895.70,156.04 938.00,148.44 938.00,321.50 895.70,322.05 853.40,308.26 811.10,309.72 768.80,303.72 726.50,303.53 684.20,305.93 641.90,306.44 599.60,306.83 557.30,301.49 515.00,292.04 472.70,290.24 430.40,277.37 388.10,280.00 345.80,288.88 303.50,273.52 261.20,261.10 218.90,245.22 176.60,243.58 134.30,233.45 92.00,210.24" fill="#2274A5" fill-opacity="0.11" stroke="none"/>
+<polyline points="92.00,197.67 134.30,197.20 176.60,183.93 218.90,191.77 261.20,202.18 303.50,212.08 345.80,223.22 388.10,220.03 430.40,221.49 472.70,231.21 515.00,234.68 557.30,229.38 599.60,240.86 641.90,241.14 684.20,243.58 726.50,244.61 768.80,242.91 811.10,233.59 853.40,242.20 895.70,239.04 938.00,234.97" fill="none" stroke="#2274A5" stroke-width="2.6"/>
+<polygon points="92.00,185.10 134.30,160.95 176.60,154.31 218.90,159.57 261.20,152.67 303.50,159.44 345.80,156.05 388.10,167.92 430.40,167.13 472.70,164.87 515.00,168.53 557.30,154.00 599.60,154.54 641.90,153.62 684.20,154.80 726.50,166.44 768.80,161.63 811.10,167.32 853.40,173.29 895.70,138.94 938.00,156.62 938.00,241.32 895.70,215.46 853.40,240.28 811.10,236.12 768.80,224.12 726.50,229.94 684.20,229.23 641.90,234.39 599.60,239.31 557.30,239.24 515.00,237.42 472.70,232.52 430.40,233.63 388.10,233.13 345.80,232.72 303.50,234.68 261.20,232.45 218.90,232.01 176.60,235.33 134.30,233.45 92.00,210.24" fill="#D95D39" fill-opacity="0.11" stroke="none"/>
+<polyline points="92.00,197.67 134.30,197.20 176.60,194.82 218.90,195.79 261.20,192.56 303.50,197.06 345.80,194.38 388.10,200.52 430.40,200.38 472.70,198.70 515.00,202.97 557.30,196.62 599.60,196.93 641.90,194.01 684.20,192.01 726.50,198.19 768.80,192.87 811.10,201.72 853.40,206.78 895.70,177.20 938.00,198.97" fill="none" stroke="#D95D39" stroke-width="2.6"/>
+<line x1="102" y1="58" x2="130" y2="58" stroke="#2274A5" stroke-width="3"/>
+<text class="tick" x="137" y="62">Carry</text>
+<line x1="287" y1="58" x2="315" y2="58" stroke="#D95D39" stroke-width="3"/>
+<text class="tick" x="322" y="62">Reset</text>
+<text class="axis" x="515.0" y="556" text-anchor="middle">Session checkpoint</text>
+<text class="axis" transform="translate(24 294.0) rotate(-90)" text-anchor="middle">Probe pseudo-regret (lower is better)</text>
+<text class="note" x="92" y="578">Bands: ±1 SD across synthetic profiles (descriptive, not confidence intervals).</text>
+</svg>

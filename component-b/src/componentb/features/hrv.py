@@ -1,12 +1,25 @@
 """Feature extraction.
 
-Verbatim from notebooks/01_pipeline/notebook-improvements.ipynb cell 6 —
-the exact functions used to train the shipped model. Feature ORDER
-matters and must not change — the scaler and model depend on it.
+Reproduces notebooks/05_deployment/notebook-train-export-2way.ipynb cell 5
+— the exact functions the shipped scaler and booster were fit against.
+Feature ORDER matters and must not change.
+
+Two details below look like bugs and are not. They are what the model was
+trained on, so changing either one invalidates the artifacts:
+
+  * the Welch resampling grid starts at 0, not at t[0]
+  * the band integrals use unit spacing, not the frequency axis
+
+Both are flagged in notebook-causalretrain.ipynb cell 9 as intentional
+reproductions. An earlier port of this module "corrected" both and also
+swapped the last two residual features, which silently fed the booster
+two wrong columns — see tests/test_feature_parity.py.
 """
 
 import numpy as np
 from scipy.signal import welch
+
+from componentb.config import XGB_FEATURE_ORDER
 
 try:
     from scipy.integrate import trapezoid as TRAPZ
@@ -19,8 +32,19 @@ HRV_FEATURE_NAMES = [
     "VLF", "LF", "HF", "LF/HF", "LF_nu", "SD1", "SD2", "SD1/SD2",
 ]
 RESID_FEATURE_NAMES = [
-    "res_mean", "res_SD", "res_maxabs", "res_meandiff", "res_slope",
+    "res_mean", "res_SD", "res_maxabs", "res_slope", "res_msq",
 ]
+
+# The names above are the contract the scaler was fitted under, so they are
+# not documentation — they have to agree with the positions config.py
+# declares. Checked at import because a mismatch here raises no error
+# downstream: the vector still has 25 finite numbers, just in the wrong
+# slots. This is exactly the drift that went unnoticed before.
+assert HRV_FEATURE_NAMES + RESID_FEATURE_NAMES == XGB_FEATURE_ORDER[:18], (
+    "feature names disagree with config.XGB_FEATURE_ORDER:\n"
+    f"  here:      {HRV_FEATURE_NAMES + RESID_FEATURE_NAMES}\n"
+    f"  config.py: {list(XGB_FEATURE_ORDER[:18])}"
+)
 
 
 def hrv_features(rr):
@@ -38,13 +62,21 @@ def hrv_features(rr):
     try:
         fs = 4.0
         t = np.cumsum(rr) / 1000.0
-        ti = np.arange(t[0], t[-1], 1 / fs)
+        # grid from 0, not t[0]: np.interp clamps the leading points to
+        # rr[0]. Matches the training notebook; shifting the start moves
+        # LF/HF by ~5%.
+        ti = np.arange(0, t[-1], 1 / fs)
         ri = np.interp(ti, t, rr)
-        f, pxx = welch(ri - np.mean(ri), fs=fs, nperseg=min(256, len(ri)))
+        # welch already applies detrend="constant", so the training code's
+        # lack of an explicit mean subtraction costs nothing.
+        f, pxx = welch(ri, fs=fs, nperseg=min(256, len(ri)))
 
         def band(lo, hi):
             m = (f >= lo) & (f < hi)
-            return TRAPZ(pxx[m], f[m]) if np.any(m) else 0.0
+            # unit spacing, as trained. Passing f[m] here scales every band
+            # by 1/df -- measured 26x to 64x, and df tracks window duration,
+            # so the distortion varies with heart rate rather than cancelling.
+            return TRAPZ(pxx[m]) if np.any(m) else 0.0
 
         vlf, lf, hf = band(0.003, 0.04), band(0.04, 0.15), band(0.15, 0.4)
     except Exception:
@@ -62,13 +94,19 @@ def hrv_features(rr):
 
 
 def resid_features(residual):
-    """5 features describing deviation from the expected baseline."""
+    """5 features describing deviation from the expected baseline.
+
+    Order is res_mean, res_SD, res_maxabs, res_slope, res_msq. The last
+    two were previously slope-at-index-4 with mean(abs(diff)) at index 3,
+    which put a ~20 ms quantity into the slope column (+12 sigma under the
+    scaler, against a training range of -7.4 to +2.8) and dropped res_msq
+    entirely.
+    """
     r = np.asarray(residual, dtype=float)
-    dd = np.diff(r)
     return np.array([
         np.mean(r),
         np.std(r),
         np.max(np.abs(r)),
-        np.mean(np.abs(dd)) if len(dd) > 0 else 0.0,
         np.polyfit(np.arange(len(r)), r, 1)[0],
+        np.sum(r ** 2) / len(r),
     ])

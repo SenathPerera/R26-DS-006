@@ -15,9 +15,8 @@ namespace AdaptiveAudioVR.Audio
         [SerializeField] private AudioReverbFilter meditationReverb = null;
 
         [Header("Tuning")]
+        [SerializeField] private bool requireExplicitSessionStart = true;
         [SerializeField] private float smoothingSpeed = 4f;
-        [SerializeField] private float minPitch = 0.92f;
-        [SerializeField] private float maxPitch = 1.08f;
         [SerializeField] private float minLowPassCutoff = 1200f;
         [SerializeField] private float maxLowPassCutoff = 18000f;
         [SerializeField] private float dryReverbLevel = -7000f;
@@ -27,6 +26,7 @@ namespace AdaptiveAudioVR.Audio
         public AudioParameters CurrentAppliedParameters { get; private set; }
         public bool IsMuted { get; private set; }
         public bool IsMeditationPlaybackPaused { get; private set; }
+        public bool IsSessionPlaybackStarted { get; private set; }
         public bool IsCrossfading => crossfadeRoutine != null;
         public AudioClip CurrentMeditationClip => currentMeditationSource != null ? currentMeditationSource.clip : null;
         public AudioClip CurrentAmbientClip => ambientSource != null ? ambientSource.clip : null;
@@ -49,6 +49,18 @@ namespace AdaptiveAudioVR.Audio
         private float transitionMeditationBlend;
         private float[] meditationScratchA;
         private float[] meditationScratchB;
+        private float generatedDensity;
+        private float generatedTempo;
+
+        public void SetGeneratedControls(AudioParameters generated)
+        {
+            generatedDensity = Mathf.Clamp01(generated.density);
+            generatedTempo = Mathf.Clamp01(generated.tempo);
+            var applied = CurrentAppliedParameters;
+            applied.density = generatedDensity;
+            applied.tempo = generatedTempo;
+            CurrentAppliedParameters = applied;
+        }
 
         private void Awake()
         {
@@ -58,28 +70,80 @@ namespace AdaptiveAudioVR.Audio
 
         private void Start()
         {
-            if (currentMeditationSource != null && !currentMeditationSource.isPlaying && currentMeditationSource.clip != null)
+            if (requireExplicitSessionStart)
             {
-                currentMeditationSource.loop = true;
-                currentMeditationSource.Play();
+                HoldSessionPlayback();
+                return;
             }
 
-            if (ambientSource != null && !ambientSource.isPlaying && ambientSource.clip != null)
+            BeginSessionPlayback();
+        }
+
+        public bool BeginSessionPlayback()
+        {
+            InitializeMeditationSources();
+            if (currentMeditationSource == null || currentMeditationSource.clip == null)
+            {
+                return false;
+            }
+
+            currentMeditationSource.loop = true;
+            currentMeditationSource.time = 0f;
+            currentMeditationSource.Play();
+
+            if (ambientSource != null && ambientSource.clip != null)
             {
                 ambientSource.loop = true;
+                ambientSource.time = 0f;
                 ambientSource.Play();
             }
+
+            IsSessionPlaybackStarted = true;
+            IsMeditationPlaybackPaused = false;
+            ApplyNow(CurrentAppliedParameters);
+            return true;
+        }
+
+        public void HoldSessionPlayback()
+        {
+            InitializeMeditationSources();
+            StopAndRewind(currentMeditationSource);
+            StopAndRewind(transitionMeditationSource);
+            StopAndRewind(ambientSource);
+            currentMeditationBlend = 1f;
+            transitionMeditationBlend = 0f;
+            IsSessionPlaybackStarted = false;
+            IsMeditationPlaybackPaused = false;
+        }
+
+        public bool EnsureSessionPlayback()
+        {
+            if (!IsSessionPlaybackStarted || IsMeditationPlaybackPaused || IsMuted || IsCrossfading) return false;
+            bool musicRestarted = RestartStoppedSource(currentMeditationSource);
+            bool ambientRestarted = RestartStoppedSource(ambientSource);
+            return musicRestarted || ambientRestarted;
+        }
+
+        private static bool RestartStoppedSource(AudioSource source)
+        {
+            if (source == null || source.clip == null || source.isPlaying) return false;
+            source.loop = true;
+            source.Play();
+            return true;
         }
 
         private void Update()
         {
-            CurrentAppliedParameters = AudioParameters.Lerp(CurrentAppliedParameters, targetParameters, Time.deltaTime * smoothingSpeed);
+            float fadeAwareSmoothing = Mathf.Lerp(smoothingSpeed * 1.75f, smoothingSpeed * 0.45f, targetParameters.fade);
+            CurrentAppliedParameters = AudioParameters.Lerp(CurrentAppliedParameters, targetParameters, Time.deltaTime * fadeAwareSmoothing);
+            SetGeneratedControls(new AudioParameters { density = generatedDensity, tempo = generatedTempo });
             ApplyNow(CurrentAppliedParameters);
         }
 
         public void SetTargetParameters(AudioParameters parameters)
         {
             targetParameters = parameters.Clamp01();
+            targetParameters.NormalizeMix();
         }
 
         public void SetMuted(bool muted)
@@ -126,7 +190,7 @@ namespace AdaptiveAudioVR.Audio
             currentMeditationSource.clip = clip;
             currentMeditationSource.loop = true;
 
-            if (restartPlayback || wasPlaying)
+            if ((restartPlayback || wasPlaying) && IsSessionPlaybackStarted)
             {
                 currentMeditationSource.Play();
             }
@@ -143,10 +207,17 @@ namespace AdaptiveAudioVR.Audio
 
             if (currentMeditationSource.clip == clip)
             {
-                return false;
+                if (crossfadeRoutine == null) return false;
+                StopCoroutine(crossfadeRoutine);
+                crossfadeRoutine = StartCoroutine(ReturnToCurrentClipCoroutine(
+                    durationSeconds > 0 ? durationSeconds : defaultMeditationCrossfadeSeconds));
+                return true;
             }
 
-            float resolvedDuration = durationSeconds > 0f ? durationSeconds : defaultMeditationCrossfadeSeconds;
+            float adaptiveFadeSeconds = Mathf.Lerp(1.25f, 6f, CurrentAppliedParameters.fade);
+            float resolvedDuration = durationSeconds > 0f
+                ? durationSeconds
+                : Mathf.Max(defaultMeditationCrossfadeSeconds, adaptiveFadeSeconds);
             if (resolvedDuration <= 0.01f || currentMeditationSource.clip == null)
             {
                 ReplaceMeditationClip(clip, restartPlayback);
@@ -182,7 +253,7 @@ namespace AdaptiveAudioVR.Audio
 
         private IEnumerator CrossfadeMeditationCoroutine(AudioClip clip, float durationSeconds, bool restartPlayback)
         {
-            bool shouldPlay = restartPlayback || currentMeditationSource.isPlaying;
+            bool shouldPlay = IsSessionPlaybackStarted && (restartPlayback || currentMeditationSource.isPlaying);
 
             transitionMeditationSource.Stop();
             transitionMeditationSource.clip = clip;
@@ -200,8 +271,8 @@ namespace AdaptiveAudioVR.Audio
             {
                 elapsed += Time.deltaTime;
                 float t = Mathf.Clamp01(elapsed / durationSeconds);
-                currentMeditationBlend = 1f - t;
-                transitionMeditationBlend = t;
+                currentMeditationBlend = Mathf.Cos(t * Mathf.PI * 0.5f);
+                transitionMeditationBlend = Mathf.Sin(t * Mathf.PI * 0.5f);
                 ApplyNow(CurrentAppliedParameters);
                 yield return null;
             }
@@ -232,22 +303,42 @@ namespace AdaptiveAudioVR.Audio
             crossfadeRoutine = null;
         }
 
+        private IEnumerator ReturnToCurrentClipCoroutine(float durationSeconds)
+        {
+            float startAngle = Mathf.Atan2(transitionMeditationBlend, currentMeditationBlend);
+            float elapsed = 0;
+            while (elapsed < durationSeconds)
+            {
+                elapsed += Time.deltaTime;
+                float angle = Mathf.Lerp(startAngle, 0, elapsed / Mathf.Max(0.01f, durationSeconds));
+                currentMeditationBlend = Mathf.Cos(angle);
+                transitionMeditationBlend = Mathf.Sin(angle);
+                ApplyNow(CurrentAppliedParameters);
+                yield return null;
+            }
+            currentMeditationBlend = 1;
+            transitionMeditationBlend = 0;
+            transitionMeditationSource.Stop();
+            transitionMeditationSource.clip = null;
+            ApplyNow(CurrentAppliedParameters);
+            crossfadeRoutine = null;
+        }
+
         private void ApplyNow(AudioParameters parameters)
         {
-            float meditationVolume = IsMuted ? 0f : Mathf.Clamp01(parameters.musicMix);
-            float ambientVolume = IsMuted ? 0f : Mathf.Clamp01(parameters.ambientMix);
-            float meditationPitch = Mathf.Lerp(minPitch, maxPitch, parameters.intensity);
-            float ambientPitch = Mathf.Lerp(0.98f, 1.02f, parameters.density);
+            float overallGain = Mathf.Lerp(0.45f, 1f, parameters.intensity);
+            float meditationVolume = IsMuted ? 0f : Mathf.Clamp01(parameters.musicMix * overallGain);
+            float ambientVolume = IsMuted ? 0f : Mathf.Clamp01(parameters.ambientMix * overallGain);
             float lowPassCutoff = Mathf.Lerp(minLowPassCutoff, maxLowPassCutoff, parameters.brightness);
-            float reverbLevel = Mathf.Lerp(dryReverbLevel, wetReverbLevel, parameters.intensity);
+            float reverbLevel = Mathf.Lerp(dryReverbLevel, wetReverbLevel, Mathf.Clamp01((parameters.intensity + parameters.fade) * 0.5f));
 
-            ApplyMeditationSource(currentMeditationSource, currentMeditationLowPass, currentMeditationReverb, meditationVolume * currentMeditationBlend, meditationPitch, lowPassCutoff, reverbLevel);
-            ApplyMeditationSource(transitionMeditationSource, transitionMeditationLowPass, transitionMeditationReverb, meditationVolume * transitionMeditationBlend, meditationPitch, lowPassCutoff, reverbLevel);
+            ApplyMeditationSource(currentMeditationSource, currentMeditationLowPass, currentMeditationReverb, meditationVolume * currentMeditationBlend, 1f, lowPassCutoff, reverbLevel);
+            ApplyMeditationSource(transitionMeditationSource, transitionMeditationLowPass, transitionMeditationReverb, meditationVolume * transitionMeditationBlend, 1f, lowPassCutoff, reverbLevel);
 
             if (ambientSource != null)
             {
                 ambientSource.volume = ambientVolume;
-                ambientSource.pitch = ambientPitch;
+                ambientSource.pitch = 1f;
             }
         }
 
@@ -295,6 +386,20 @@ namespace AdaptiveAudioVR.Audio
             else
             {
                 source.UnPause();
+            }
+        }
+
+        private static void StopAndRewind(AudioSource source)
+        {
+            if (source == null)
+            {
+                return;
+            }
+
+            source.Stop();
+            if (source.clip != null)
+            {
+                source.time = 0f;
             }
         }
 

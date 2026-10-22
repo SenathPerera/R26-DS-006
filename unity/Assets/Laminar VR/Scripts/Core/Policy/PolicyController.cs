@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
+using LaminarVR.AdaptiveMeditation.Coordination;
 using LaminarVR.AdaptiveMeditation.Environment;
 using LaminarVR.AdaptiveMeditation.Physiology;
 using LaminarVR.AdaptiveMeditation.Policy.ContextualBandit;
@@ -34,6 +35,9 @@ namespace LaminarVR.AdaptiveMeditation.Policy
         private int consecutiveSameDirectionActions;
         private double totalVariation;
         private double? lastActionCompletedMonotonicTimeSeconds;
+        private long coordinationLease;
+
+        public AdaptationCoordinator Coordination { get; set; }
 
         public PolicyController(
             IEnvironmentPolicy policy,
@@ -104,6 +108,34 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             double utcTimestampUnixSeconds,
             double sessionElapsedSeconds,
             CancellationToken cancellationToken)
+        {
+            try
+            {
+                return await ProcessCoordinatedDecisionAsync(decisionId, opportunity, phase, networkConnected,
+                    preferredEnvironment, utcTimestampUnixSeconds, sessionElapsedSeconds, cancellationToken).ConfigureAwait(false);
+            }
+            catch
+            {
+                if (coordinationLease != 0)
+                {
+                    Coordination?.CancelReservation(coordinationLease, utcTimestampUnixSeconds, "Visual operation interrupted");
+                    environmentManager.CancelTransition(out _);
+                    attributionTracker.TryInvalidate(RewardAttributionInvalidationReason.TransitionCancelled,
+                        opportunity.MonotonicTimeSeconds, out _);
+                    pendingDecision = null;
+                }
+                throw;
+            }
+            finally
+            {
+                if (pendingDecision == null) ReleaseCoordination(opportunity.MonotonicTimeSeconds, utcTimestampUnixSeconds);
+            }
+        }
+
+        private async Task<PolicyDecisionCycleResult> ProcessCoordinatedDecisionAsync(
+            string decisionId, SessionDecisionOpportunity opportunity, VrSessionPhase phase,
+            bool networkConnected, EnvironmentState preferredEnvironment, double utcTimestampUnixSeconds,
+            double sessionElapsedSeconds, CancellationToken cancellationToken)
         {
             ValidateIdentity(decisionId, nameof(decisionId));
             ValidateTimes(
@@ -207,6 +239,17 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     cancellationToken).ConfigureAwait(false);
             }
 
+            if (Coordination != null && !Coordination.TryAcquire(AdaptationOwner.Visual, decisionId,
+                    physiology.Window.WindowStartUtcUnixSeconds, physiology.Window.WindowEndUtcUnixSeconds,
+                    opportunity.MonotonicTimeSeconds, utcTimestampUnixSeconds,
+                    sceneProfile.TransitionDurationSeconds + rewardConfiguration.MaximumAttributionWaitSeconds + 5,
+                    out coordinationLease))
+            {
+                return await SkipDecisionAsync(decisionId, PolicyDecisionCycleResultCode.SkippedCoordination,
+                    "Waiting for coordinated visual turn and clean physiology", null, utcTimestampUnixSeconds,
+                    sessionElapsedSeconds, cancellationToken).ConfigureAwait(false);
+            }
+
             var recentWindows = physiologyBuffer.GetRecentAccepted(
                 rewardConfiguration.TrendWindowCount);
             var trend = PhysiologyTrendCalculator.Calculate(
@@ -261,8 +304,15 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     PolicyDecisionCycleResultCode.SafetyRejected,
                     decision,
                     validation,
-                    null);
+                    null,
+                    observation);
             }
+
+            cancellationToken.ThrowIfCancellationRequested();
+            if (Coordination != null && !Coordination.IsCurrent(coordinationLease))
+                return await SkipDecisionAsync(decisionId, PolicyDecisionCycleResultCode.SkippedCoordination,
+                    "Coordinated turn cancelled before execution", null, utcTimestampUnixSeconds,
+                    sessionElapsedSeconds, cancellationToken).ConfigureAwait(false);
 
             pendingDecision = new PendingDecision(
                 decisionId.Trim(),
@@ -293,7 +343,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     PolicyDecisionCycleResultCode.RewardWindowOpened,
                     decision,
                     validation,
-                    null);
+                    null,
+                    observation);
             }
 
             environmentManager.BeginTransition(
@@ -318,7 +369,8 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 PolicyDecisionCycleResultCode.TransitionStarted,
                 decision,
                 validation,
-                null);
+                null,
+                observation);
         }
 
         public async Task<EnvironmentTransitionProgress>
@@ -471,9 +523,30 @@ namespace LaminarVR.AdaptiveMeditation.Policy
             double sessionElapsedSeconds,
             VrSessionPhase phase,
             bool networkConnected,
-            double discomfortSeverity,
-            double safetySeverity,
             CancellationToken cancellationToken)
+        {
+            try
+            {
+                if (pendingDecision != null && Coordination != null && !Coordination.IsCurrent(coordinationLease))
+                {
+                    await InvalidatePendingAsync(RewardAttributionInvalidationReason.TransitionCancelled,
+                        currentMonotonicTimeSeconds, utcTimestampUnixSeconds, sessionElapsedSeconds,
+                        cancellationToken).ConfigureAwait(false);
+                    return new PolicyRewardCycleResult(PolicyRewardCycleResultCode.AttributionInvalidated,
+                        RewardAttributionResolutionCode.InvalidatedForPhase, default);
+                }
+                return await ResolveCoordinatedRewardAsync(currentMonotonicTimeSeconds, utcTimestampUnixSeconds,
+                    sessionElapsedSeconds, phase, networkConnected, cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                if (pendingDecision == null) ReleaseCoordination(currentMonotonicTimeSeconds, utcTimestampUnixSeconds);
+            }
+        }
+
+        private async Task<PolicyRewardCycleResult> ResolveCoordinatedRewardAsync(
+            double currentMonotonicTimeSeconds, double utcTimestampUnixSeconds, double sessionElapsedSeconds,
+            VrSessionPhase phase, bool networkConnected, CancellationToken cancellationToken)
         {
             ValidateTimes(
                 currentMonotonicTimeSeconds,
@@ -528,6 +601,12 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     default);
             }
 
+            var completedDecision = pendingDecision
+                ?? throw new InvalidOperationException(
+                    "A matched reward has no pending policy decision.");
+            var penaltyObservation =
+                RewardPenaltyObservation.FromActionValidation(
+                    completedDecision.Validation);
             var calculation = rewardCalculator.Calculate(
                 match.Request.PreActionPhysiology,
                 match.PostActionPhysiology,
@@ -535,8 +614,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 match.Request.ExecutedAction,
                 match.Request.EnvironmentBefore,
                 match.Request.EnvironmentAfter,
-                discomfortSeverity,
-                safetySeverity);
+                penaltyObservation);
             await RecordAsync(
                 TelemetryEventTypes.RewardWindowClosed,
                 utcTimestampUnixSeconds,
@@ -571,79 +649,94 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     calculation);
             }
 
-            var completedDecision = pendingDecision
-                ?? throw new InvalidOperationException(
-                    "A matched reward has no pending policy decision.");
-            if (stabilizationSelector != null)
+            var rewardFields = new List<TelemetryField>
             {
-                // TODO(RESEARCH_DECISION): Freeze discomfort and safety
-                // eligibility thresholds. Until then, any positive severity
-                // excludes the state from final stabilization selection.
-                stabilizationSelector.RecordOutcome(
-                    new StabilizationOutcome(
-                        match.Request.TransitionId,
-                        match.PostActionPhysiology.SequenceNumber,
-                        match.Request.EnvironmentAfter,
-                        calculation.Breakdown.TotalReward,
-                        discomfortSeverity > 0d,
-                        safetySeverity > 0d));
-            }
-
+                TelemetryField.String(
+                    "transition_id",
+                    match.Request.TransitionId),
+                TelemetryField.Number(
+                    "total_reward",
+                    calculation.Breakdown.TotalReward),
+                TelemetryField.Number(
+                    "stress_component",
+                    calculation.Breakdown.StressComponent),
+                TelemetryField.Number(
+                    "rmssd_component",
+                    calculation.Breakdown.RmssdComponent),
+                TelemetryField.Number(
+                    "heart_rate_component",
+                    calculation.Breakdown.HeartRateComponent),
+                TelemetryField.Number(
+                    "change_penalty_component",
+                    calculation.Breakdown.ChangePenaltyComponent),
+                TelemetryField.Boolean(
+                    "discomfort_observed",
+                    calculation.Breakdown.DiscomfortSeverity.HasValue),
+                calculation.Breakdown.DiscomfortSeverity.HasValue
+                    ? TelemetryField.Number(
+                        "discomfort_severity",
+                        calculation.Breakdown.DiscomfortSeverity.Value)
+                    : TelemetryField.Null("discomfort_severity"),
+                TelemetryField.Number(
+                    "discomfort_penalty_component",
+                    calculation.Breakdown.DiscomfortPenaltyComponent),
+                TelemetryField.Boolean(
+                    "safety_intervention_occurred",
+                    calculation.Breakdown.SafetyInterventionOccurred),
+                TelemetryField.Number(
+                    "safety_severity",
+                    calculation.Breakdown.SafetySeverity),
+                TelemetryField.String(
+                    "safety_validation_reason",
+                    completedDecision.Validation.ReasonCode.ToString()),
+                TelemetryField.Number(
+                    "safety_penalty_component",
+                    calculation.Breakdown.SafetyPenaltyComponent),
+                TelemetryField.Number(
+                    "action_magnitude",
+                    calculation.Breakdown.ActionMagnitude),
+                TelemetryField.Integer(
+                    "pre_window_sequence",
+                    match.Request.PreActionPhysiology.SequenceNumber),
+                TelemetryField.Integer(
+                    "post_window_sequence",
+                    match.PostActionPhysiology.SequenceNumber)
+            };
             await RecordAsync(
                 TelemetryEventTypes.RewardCalculated,
                 utcTimestampUnixSeconds,
                 sessionElapsedSeconds,
                 false,
-                new[]
-                {
-                    TelemetryField.String(
-                        "transition_id",
-                        match.Request.TransitionId),
-                    TelemetryField.Number(
-                        "total_reward",
-                        calculation.Breakdown.TotalReward),
-                    TelemetryField.Number(
-                        "stress_component",
-                        calculation.Breakdown.StressComponent),
-                    TelemetryField.Number(
-                        "rmssd_component",
-                        calculation.Breakdown.RmssdComponent),
-                    TelemetryField.Number(
-                        "heart_rate_component",
-                        calculation.Breakdown.HeartRateComponent),
-                    TelemetryField.Number(
-                        "change_penalty_component",
-                        calculation.Breakdown.ChangePenaltyComponent),
-                    TelemetryField.Number(
-                        "discomfort_penalty_component",
-                        calculation.Breakdown.DiscomfortPenaltyComponent),
-                    TelemetryField.Number(
-                        "safety_penalty_component",
-                        calculation.Breakdown.SafetyPenaltyComponent),
-                    TelemetryField.Number(
-                        "action_magnitude",
-                        calculation.Breakdown.ActionMagnitude),
-                    TelemetryField.Integer(
-                        "pre_window_sequence",
-                        match.Request.PreActionPhysiology.SequenceNumber),
-                    TelemetryField.Integer(
-                        "post_window_sequence",
-                        match.PostActionPhysiology.SequenceNumber)
-                },
+                rewardFields,
                 cancellationToken).ConfigureAwait(false);
             pendingDecision = null;
+            cancellationToken.ThrowIfCancellationRequested();
             var policyStateBeforeUpdate = policy.CaptureState();
             PolicyStateSnapshot policyStateAfterUpdate;
             try
             {
-                policy.ObserveOutcome(
-                    new ActionOutcome(
+                Action commit = () =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    policy.ObserveOutcome(new ActionOutcome(
                         completedDecision.DecisionId,
                         completedDecision.Decision,
                         match.Request.ExecutedAction,
                         calculation.Breakdown.TotalReward,
                         match.Request.PreActionPhysiology.SequenceNumber,
                         match.PostActionPhysiology.SequenceNumber));
+                    if (stabilizationSelector != null)
+                        stabilizationSelector.RecordOutcome(new StabilizationOutcome(match.Request.TransitionId,
+                            match.PostActionPhysiology.SequenceNumber, match.Request.EnvironmentAfter,
+                            calculation.Breakdown.TotalReward, calculation.Breakdown.DiscomfortSeverity.GetValueOrDefault() > 0d,
+                            calculation.Breakdown.SafetyInterventionOccurred));
+                };
+                if (Coordination == null) commit();
+                else if (!Coordination.TryCommitOutcome(coordinationLease,
+                        match.PostActionPhysiology.Window.WindowStartUtcUnixSeconds,
+                        match.PostActionPhysiology.Window.WindowEndUtcUnixSeconds, commit))
+                    return new PolicyRewardCycleResult(PolicyRewardCycleResultCode.AttributionInvalidated,
+                        attributionCode, default);
                 policyStateAfterUpdate = policy.CaptureState();
             }
             catch (Exception exception) when (
@@ -748,6 +841,25 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 double sessionElapsedSeconds,
                 CancellationToken cancellationToken)
         {
+            return await SelectStabilizationStateAsync(
+                    phase,
+                    safePreferenceState,
+                    safePreferenceState,
+                    utcTimestampUnixSeconds,
+                    sessionElapsedSeconds,
+                    cancellationToken)
+                .ConfigureAwait(false);
+        }
+
+        public async Task<StabilizationSelectionResult>
+            SelectStabilizationStateAsync(
+                VrSessionPhase phase,
+                EnvironmentState safePreferenceState,
+                EnvironmentState safeFallbackState,
+                double utcTimestampUnixSeconds,
+                double sessionElapsedSeconds,
+                CancellationToken cancellationToken)
+        {
             ValidateFiniteNonNegative(
                 utcTimestampUnixSeconds,
                 nameof(utcTimestampUnixSeconds));
@@ -776,6 +888,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
 
             var result = stabilizationSelector.Select(
                 safePreferenceState,
+                safeFallbackState,
                 sceneProfile.Limits);
             for (var index = 0; index < result.EvaluationCount; index++)
             {
@@ -892,6 +1005,7 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                     sessionElapsedSeconds,
                     cancellationToken).ConfigureAwait(false);
                 pendingDecision = null;
+                ReleaseCoordination(currentMonotonicTimeSeconds, utcTimestampUnixSeconds);
                 return true;
             }
 
@@ -927,10 +1041,20 @@ namespace LaminarVR.AdaptiveMeditation.Policy
                 out resultCode))
             {
                 pendingDecision = null;
+                ReleaseCoordination(completedMonotonicTimeSeconds, completedUtcUnixSeconds);
                 return false;
             }
 
+            Coordination?.MarkTransitionCompleted(coordinationLease, completedUtcUnixSeconds,
+                rewardConfiguration.SettlingSeconds);
+
             return true;
+        }
+
+        private void ReleaseCoordination(double monotonic, double utc)
+        {
+            Coordination?.Release(coordinationLease, monotonic, utc, "Visual turn finished");
+            coordinationLease = 0;
         }
 
         private SafetyBlockReason DetermineSafetyBlockReason(

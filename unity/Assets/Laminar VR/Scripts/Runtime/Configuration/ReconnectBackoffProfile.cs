@@ -23,8 +23,7 @@ namespace LaminarVR.AdaptiveMeditation.Runtime.Configuration
         private bool researchConfigurationApproved = false;
 
         [Header("Bounded Backoff")]
-        // TODO(RESEARCH_DECISION): Approve attempt count and backoff timing
-        // together with stale-data freeze/abort behavior.
+        // Approved backoff values live only in versioned profiles.
         [SerializeField, Min(0)]
         private int maximumAttempts = 0;
 

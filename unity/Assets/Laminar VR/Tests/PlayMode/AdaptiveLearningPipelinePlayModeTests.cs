@@ -89,8 +89,6 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 harness.Session.ActiveSessionElapsedSeconds,
                 harness.Session.Phase,
                 true,
-                0d,
-                0d,
                 CancellationToken.None);
             yield return null;
             var reward = Completed(rewardTask);
@@ -128,8 +126,6 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 7.5d,
                 VrSessionPhase.Paused,
                 true,
-                0d,
-                0d,
                 CancellationToken.None);
             yield return null;
             var reward = Completed(rewardTask);
@@ -672,7 +668,7 @@ namespace LaminarVR.AdaptiveMeditation.Tests.PlayMode
                 0d,
                 0d,
                 0.1d,
-                1d,
+                0d,
                 1d);
         }
 
